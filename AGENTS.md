@@ -1,8 +1,8 @@
 # AGENTS.md
 
 ## Purpose
-This document is for AI agents (Codex, ChatGPT, Copilot, etc.) that assist developers working on this repository.  
-It describes the context, architecture, and interaction patterns so agents can:
+This document is for Codex that develops & works on this repository.  
+It describes the context, architecture, and interaction patterns so Codex can:
 - Understand the role of each component.
 - Suggest improvements without breaking the upgradeable contract design.
 - Troubleshoot errors from the Farcaster Mini App, RPC calls, or contract execution.
@@ -10,7 +10,7 @@ It describes the context, architecture, and interaction patterns so agents can:
 ---
 
 ## Contract Overview
-- **Contract Name**: `MiniRent`
+- **Contract Name**: `r3nt`
 - **Standard**: OpenZeppelin UUPS Upgradeable
 - **Network**: Arbitrum One
 - **Token**: Canonical USDC (6 decimals)
@@ -57,7 +57,7 @@ It describes the context, architecture, and interaction patterns so agents can:
 
 ---
 
-## Best Practices for AI Iteration
+## Best Practices for Codex Iteration
 1. **Do not remove upgradeability**. Always preserve `_authorizeUpgrade()` and `__gap`.
 2. **Keep on-chain data minimal**. Images, long descriptions → Farcaster cast.
 3. **Respect USDC decimals** (6). Never assume 18 decimals in UI.
