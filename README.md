@@ -114,6 +114,52 @@ await contract.book(listingId, rateType, units, startDate, endDate);
   - `viem@2.x`  
   - Arbitrum RPC: `https://arb1.arbitrum.io/rpc`  
 
+---
+
+# Deployment Notes for Remix on Arbitrum One
+
+## Initializer Parameters
+- **_usdc**: Canonical USDC address on Arbitrum (e.g., `0xaf88...` for USDC.e or the native USDC, depending on which you target — always use the canonical one you intend).  
+- **_platform**: Your fee receiver (also serves as initial `owner` for upgrades).  
+
+**Default fees:**
+- `feeBps = 100` → 1%  
+- `listFee = $1`  
+- `viewFee = $0.10`  
+- `viewPassSeconds = 72 * 3600` (72 hours)  
+
+---
+
+## Mini App “Write” Flow
+The pattern mirrors **TicTacVato**:
+
+1. `approve(USDC, listFee)` → `createListing(...)`  
+2. `approve(USDC, viewFee)` → `buyViewPass()`  
+3. For booking:  
+   - `approve(listing.USDC, rent + platformFee + deposit)`  
+   - `book(...)`  
+
+### Booking Lifecycle
+- **Landlord:** `markCompleted(bookingId)`  
+- **Landlord:** `proposeDepositSplit(bookingId, toTenant, toLandlord)`  
+- **Platform/Owner:** `confirmDepositRelease(bookingId)`  
+
+---
+
+## View Pass UX
+- Store and display `viewPassExpiry[user]`.  
+- Hide results if the pass is expired.  
+- Note: This is a **soft gate** — raw RPC reads can still access listings. The gate is only enforced in the Mini App UI/UX.  
+
+---
+
+## Farcaster Link
+- Store `(fid, castHash)` on-chain.  
+- Client-side, build the **“View full details on Farcaster”** URL.  
+
+
+
+
 
 
 
