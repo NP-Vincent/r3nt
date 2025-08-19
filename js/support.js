@@ -9,9 +9,8 @@ import {
   FEE_BPS,
   VIEW_PASS_SECONDS,
   APP_DOMAIN,
+  EXPLORER,
 } from "./config.js";
-
-const EXPLORER = CHAIN_ID === 42161 ? "https://arbiscan.io" : "https://sepolia.arbiscan.io";
 
 function link(addr) {
   if (!addr || addr.startsWith("0x") === false) return `<code>${addr}</code>`;

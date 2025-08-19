@@ -1,10 +1,8 @@
 // /js/shared.js
 import { createPublicClient, createWalletClient, http, getAddress } from "../vendor/viem-2.x.min.js";
 import { arbitrum } from "../vendor/viem-2.x.min.js";
-import { RPC_URL, CHAIN_ID } from "./config.js";
+import { RPC_URL, CHAIN_ID, EXPLORER } from "./config.js";
 import { ready, getFCProvider } from "./farcaster.js";
-
-const EXPLORER = CHAIN_ID === 42161 ? "https://arbiscan.io" : "https://sepolia.arbiscan.io";
 
 export const publicClient = createPublicClient({ chain: arbitrum, transport: http(RPC_URL) });
 
