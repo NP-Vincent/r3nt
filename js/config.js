@@ -1,6 +1,11 @@
 export const CHAIN_ID = 42161; // Arbitrum One
 export const RPC_URL = "https://arb1.arbitrum.io/rpc";
 
+export const EXPLORER_URLS = {
+  42161: "https://arbiscan.io",
+};
+export const EXPLORER = EXPLORER_URLS[CHAIN_ID];
+
 export const R3NT_ADDRESS = "0xR3NT_PROXY_PLACEHOLDER";
 export const FACTORY_ADDRESS = "0xLISTING_FACTORY_PROXY_PLACEHOLDER";
 export const USDC_ADDRESS = "0xUSDC_CANONICAL_PLACEHOLDER";
