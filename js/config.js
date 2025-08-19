@@ -1,0 +1,5 @@
+// Placeholder for deployed contract addresses
+export const CONTRACT_ADDRESSES = {
+  r3nt: "0x0000000000000000000000000000000000000000",
+  listingFactory: "0x0000000000000000000000000000000000000000"
+};
