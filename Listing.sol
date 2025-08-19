@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 /**
- * Listing (per-property deposit vault; clone target)
+ * Listing (per-property deposit vault; clone target, upgradeable-style deps)
  *
  * Lifecycle (called by your r3nt core):
  *  - r3nt.book(): r3nt calls `arm(tenant, deposit)` then transfers `deposit` USDC to this vault.
@@ -19,7 +19,8 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {AccessControlEnumerableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlEnumerableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import {MultiSignerERC7913Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/signers/MultiSignerERC7913Upgradeable.sol";
 
 contract Listing is
@@ -29,7 +30,7 @@ contract Listing is
     PausableUpgradeable,
     MultiSignerERC7913Upgradeable
 {
-    using SafeERC20 for IERC20;
+    using SafeERC20Upgradeable for IERC20Upgradeable;
 
     // -----------------------
     // Roles
@@ -41,10 +42,10 @@ contract Listing is
     // -----------------------
     // State
     // -----------------------
-    IERC20  public token;         // USDC (or other allowed ERC-20)
-    address public landlord;      // cached landlord
-    address public tenant;        // active tenant for current booking
-    uint96  public deposit;       // deposit expected/held (6d)
+    IERC20Upgradeable public token;   // USDC (or other allowed ERC-20)
+    address public landlord;          // cached landlord
+    address public tenant;            // active tenant for current booking
+    uint96  public deposit;           // deposit expected/held (6d)
 
     // Proposal state
     uint96  public propTenant;
@@ -116,7 +117,7 @@ contract Listing is
         _grantRole(LANDLORD_ROLE, _landlord);
 
         // Core params
-        token    = IERC20(_token);
+        token    = IERC20Upgradeable(_token);
         landlord = _landlord;
 
         emit Initialized(_admin, _core, _landlord, _token);
