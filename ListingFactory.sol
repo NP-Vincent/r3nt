@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 /**
- * ListingFactory (UUPS, clone factory)
+ * ListingFactory (UUPS, clone factory; upgradeable-style deps)
  *
  * - Deploys minimal proxy clones of `Listing` (the per-property deposit vault).
  * - Deterministic clone addresses using salt = keccak256(core, listingId).
@@ -22,7 +22,7 @@ import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/ut
 import {AccessControlEnumerableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlEnumerableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 // Imported for parity with your stack (not used directly here but kept for consistency):
 import {MultiSignerERC7913Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/signers/MultiSignerERC7913Upgradeable.sol";
 
@@ -56,7 +56,6 @@ contract ListingFactory is
     PausableUpgradeable
 {
     using Clones for address;
-    using SafeERC20 for IERC20; // reserved for future sweep-patterns; not used directly now
 
     // -----------------------------
     // Roles
@@ -78,11 +77,11 @@ contract ListingFactory is
         address indexed listing,
         address indexed core,
         address indexed landlord,
-        IERC20 token,
+        IERC20Upgradeable token,
         uint256 listingId
     );
     event ImplementationChanged(address implementation);
-    event AllowedTokenSet(IERC20 token, bool allowed);
+    event AllowedTokenSet(IERC20Upgradeable token, bool allowed);
     event ListingFactoryUpgraded(address newImplementation);
 
     // -----------------------------
@@ -142,7 +141,7 @@ contract ListingFactory is
         address core,
         address landlord,
         address platformAdmin,
-        IERC20 token,
+        IERC20Upgradeable token,
         bytes[] calldata signers,
         uint256 threshold,
         uint256 listingId
@@ -183,7 +182,7 @@ contract ListingFactory is
         emit ImplementationChanged(impl);
     }
 
-    function setAllowedToken(IERC20 token, bool allowed) external onlyRole(ADMIN_ROLE) {
+    function setAllowedToken(IERC20Upgradeable token, bool allowed) external onlyRole(ADMIN_ROLE) {
         allowedTokens[address(token)] = allowed;
         emit AllowedTokenSet(token, allowed);
     }
