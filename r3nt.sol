@@ -5,8 +5,11 @@ pragma solidity ^0.8.26;
  * r3nt (UUPS) wired to ListingFactory/Listing clones
  * - On landlord createListing(): pays list fee, stores listing, asks ListingFactory to clone a per-listing vault,
  *   and stores the vault address on the Listing.
- * - On book(): pulls (rent + fee + deposit), pays rent & fee immediately, arms the vault with (tenant, deposit),
- *   and transfers the deposit to the vault.
+ * - On book(): implements a 1% platform fee split as:
+ *      • Tenant pays: 100% rent + 0.5% (tenant half of fee) + deposit
+ *      • Landlord receives: 100% rent − 0.5% (landlord half of fee)
+ *      • Platform receives: 1.0% of rent (tenant half + landlord half)
+ *   Arms the vault with (tenant, deposit) and transfers the deposit to the vault.
  * - Deposit split/release is forwarded to the per-listing vault (Listing) instead of handled in r3nt.
  *
  * Notes:
@@ -86,8 +89,8 @@ contract r3nt is
         uint256 listingId;
         uint64  startDate;        // unix ts
         uint64  endDate;          // unix ts
-        uint96  rentAmount;       // paid to landlord at book
-        uint96  feeAmount;        // paid to platform at book
+        uint96  rentAmount;       // gross rent for this booking (for reference)
+        uint96  feeAmount;        // total platform fee (tenant+landlord halves)
         uint96  depositAmount;    // recorded for reference (custodied in vault)
         BookingStatus status;
         // kept for backward-compatibility, not used when vault handles proposal
@@ -122,8 +125,8 @@ contract r3nt is
         uint256 indexed bookingId,
         uint256 indexed listingId,
         address indexed tenant,
-        uint96 rentAmount,
-        uint96 feeAmount,
+        uint96 rentAmount,       // gross rent
+        uint96 feeAmount,        // total platform fee (both halves)
         uint96 depositAmount
     );
     event Completed(uint256 indexed bookingId);
@@ -300,7 +303,7 @@ contract r3nt is
         address vault = listingFactory.createListing(
             address(this),
             msg.sender,
-            platform,                           // platform admin/controller
+            platform,                           // platform admin/controller (parity arg)
             IERC20(usdc),                       // token allowlist enforced at factory
             signers,
             threshold,
@@ -335,6 +338,12 @@ contract r3nt is
         emit ViewPassBought(msg.sender, viewFee, newExpiry);
     }
 
+    /**
+     * @dev Booking with fee split:
+     *      tenant pays (rent + fee/2 + deposit),
+     *      landlord receives (rent - fee/2),
+     *      platform receives (fee = rent * feeBps / 10_000).
+     */
     function book(
         uint256 listingId,
         RateType rtype,
@@ -349,20 +358,31 @@ contract r3nt is
         require(L.active, "inactive");
         require(L.vault != address(0), "no vault");
 
-        // compute rent & fee (tenant-pays 100% rent + 1% fee by default; change as needed for split)
+        // compute rent & total platform fee
         uint96 rent = _calcRent(L, rtype, units);
         uint96 fee  = uint96((uint256(rent) * feeBps) / 10_000);
         uint96 dep  = L.deposit;
 
-        // pull total from tenant: rent + fee + deposit (in listing's USDC)
-        uint256 total = uint256(rent) + uint256(fee) + uint256(dep);
-        L.usdc.safeTransferFrom(msg.sender, address(this), total);
+        // split platform fee into tenant and landlord halves (handles odd wei safely)
+        uint96 feeTenant   = fee / 2;
+        uint96 feeLandlord = fee - feeTenant; // ensures sum == fee
 
-        // immediate payouts
-        if (rent > 0) { L.usdc.safeTransfer(L.owner, rent); }
-        if (fee  > 0) { L.usdc.safeTransfer(platform, fee); }
+        // Tenant outflow: rent + tenant half-fee + deposit
+        uint256 totalFromTenant = uint256(rent) + uint256(feeTenant) + uint256(dep);
+        L.usdc.safeTransferFrom(msg.sender, address(this), totalFromTenant);
 
-        // arm vault and transfer deposit to vault
+        // Landlord inflow: rent minus landlord half-fee
+        uint96 toLandlord = rent > feeLandlord ? rent - feeLandlord : 0;
+        if (toLandlord > 0) {
+            L.usdc.safeTransfer(L.owner, toLandlord);
+        }
+
+        // Platform receives the full fee (tenant half that we pulled + landlord half withheld from rent)
+        if (fee > 0) {
+            L.usdc.safeTransfer(platform, fee);
+        }
+
+        // Arm vault and transfer deposit to vault
         if (dep > 0) {
             IListing(L.vault).arm(msg.sender, dep);
             L.usdc.safeTransfer(L.vault, dep);
@@ -374,9 +394,9 @@ contract r3nt is
             listingId: listingId,
             startDate: startDate,
             endDate: endDate,
-            rentAmount: rent,
-            feeAmount: fee,
-            depositAmount: dep,   // informational; funds are in vault
+            rentAmount: rent,   // gross rent reference
+            feeAmount: fee,     // full platform fee
+            depositAmount: dep, // informational; funds are in vault
             status: BookingStatus.Booked,
             propTenant: 0,
             propLandlord: 0,
