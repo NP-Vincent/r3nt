@@ -113,11 +113,36 @@ th, td { padding: 10px 10px; border-bottom: 1px solid var(--border); text-align:
 thead th { color: #bcd4ff; font-weight: 700; font-size: .95rem; }
 tbody tr:hover { background: rgba(255,255,255,.03); }
 
-/* --- Toasts (simple) --- */
-.toast {
-  position: fixed; right: 18px; bottom: 18px;
-  background: #17202a; color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 12px; padding: 10px 14px;
-  box-shadow: var(--shadow);
+/* --- Toast Notifications (class-based) --- */
+#toast-container {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
 }
+
+.toast {
+  min-width: 240px;
+  padding: 0.9rem 1.1rem;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 0.92rem;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity .25s ease, transform .25s ease, filter .2s ease;
+  cursor: pointer;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.success { background: #28a745; }
+.toast.error   { background: #dc3545; }
+.toast.info    { background: #0d6efd; }
+.toast.warning { background: #ffc107; color: #222; }
