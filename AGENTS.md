@@ -7,6 +7,8 @@ It describes the context, architecture, and interaction patterns so Codex can:
 - Suggest improvements without breaking the upgradeable contract design.
 - Troubleshoot errors from the Farcaster Mini App, RPC calls, or contract execution.
 
+For development and troubleshooting tips, consult the [Farcaster Mini App Agents Checklist](https://miniapps.farcaster.xyz/docs/guides/agents-checklist). More detailed background is available in [`minapp-farcaster-llms-full.txt`](./minapp-farcaster-llms-full.txt), which mirrors the upstream `llms-full.txt`.
+
 ---
 
 ## Contract Overview

@@ -4,9 +4,11 @@
 **r3nt** is a minimal rental dApp designed to integrate with **Farcaster Mini Apps**.  
 It enables landlords to list properties, tenants to book with USDC, and deposits to be held in escrow.  
 
-- **Network**: Arbitrum One  
-- **Token**: Canonical USDC (6 decimals)  
-- **Upgradeable**: UUPS with OpenZeppelin v5  
+- **Network**: Arbitrum One
+- **Token**: Canonical USDC (6 decimals)
+- **Upgradeable**: UUPS with OpenZeppelin v5
+
+For developer and debugging guidance, see the [Farcaster Mini App Agents Checklist](https://miniapps.farcaster.xyz/docs/guides/agents-checklist). More detailed information is available in [`minapp-farcaster-llms-full.txt`](./minapp-farcaster-llms-full.txt), a local copy of the upstream `llms-full.txt`.
 
 ---
 
