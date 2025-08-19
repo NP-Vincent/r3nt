@@ -26,6 +26,7 @@ import { SafeERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/
 
 // For ListingFactory interface arg types
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { RentCalculator } from "./RentCalculator.sol";
 
 /* ----------------------------- External Interfaces ----------------------------- */
 
@@ -195,20 +196,67 @@ contract r3nt is
         assembly { out := mload(add(b, 32)) }
     }
 
-    function _calcRent(Listing storage L, RateType rtype, uint256 units) internal view returns (uint96) {
-        uint256 rate;
-        if (rtype == RateType.Daily)       rate = L.rateDaily;
-        else if (rtype == RateType.Weekly) rate = L.rateWeekly;
-        else                               rate = L.rateMonthly;
-        require(units > 0, "units=0");
-        require(rate > 0, "rate not offered");
-        uint256 rent = rate * units;
-        require(rent <= type(uint96).max, "rent overflow");
-        return uint96(rent);
-    }
-
     function _hasActiveViewPass(address user) internal view returns (bool) {
         return viewPassExpiry[user] >= block.timestamp;
+    }
+
+    function _calculateFee(uint96 rent) internal view returns (uint96) {
+        return uint96((uint256(rent) * feeBps) / 10_000);
+    }
+
+    function _transferFunds(
+        Listing storage L,
+        address tenant,
+        uint96 rent,
+        uint96 fee,
+        uint96 dep
+    ) internal {
+        uint96 feeTenant = fee / 2;
+        uint96 feeLandlord = fee - feeTenant;
+
+        uint256 totalFromTenant = uint256(rent) + uint256(feeTenant) + uint256(dep);
+        L.usdc.safeTransferFrom(tenant, address(this), totalFromTenant);
+
+        uint96 toLandlord = rent > feeLandlord ? rent - feeLandlord : 0;
+        if (toLandlord > 0) {
+            L.usdc.safeTransfer(L.owner, toLandlord);
+        }
+
+        if (fee > 0) {
+            L.usdc.safeTransfer(platform, fee);
+        }
+
+        if (dep > 0) {
+            IListing(L.vault).arm(tenant, dep);
+            L.usdc.safeTransfer(L.vault, dep);
+        }
+    }
+
+    function _createBooking(
+        address tenant,
+        address landlord,
+        uint256 listingId,
+        uint64 startDate,
+        uint64 endDate,
+        uint96 rent,
+        uint96 fee,
+        uint96 dep
+    ) internal returns (Booking memory B) {
+        B = Booking({
+            tenant: tenant,
+            landlord: landlord,
+            listingId: listingId,
+            startDate: startDate,
+            endDate: endDate,
+            rentAmount: rent,
+            feeAmount: fee,
+            depositAmount: dep,
+            status: BookingStatus.Booked,
+            propTenant: 0,
+            propLandlord: 0,
+            proposalSet: false
+        });
+        bookings.push(B);
     }
 
     // -----------------------
@@ -358,50 +406,19 @@ contract r3nt is
         require(L.active, "inactive");
         require(L.vault != address(0), "no vault");
 
-        // compute rent & total platform fee
-        uint96 rent = _calcRent(L, rtype, units);
-        uint96 fee  = uint96((uint256(rent) * feeBps) / 10_000);
-        uint96 dep  = L.deposit;
+        uint96 rent = RentCalculator.calcRent(
+            L.rateDaily,
+            L.rateWeekly,
+            L.rateMonthly,
+            uint8(rtype),
+            units
+        );
+        uint96 fee = _calculateFee(rent);
+        uint96 dep = L.deposit;
 
-        // split platform fee into tenant and landlord halves (handles odd wei safely)
-        uint96 feeTenant   = fee / 2;
-        uint96 feeLandlord = fee - feeTenant; // ensures sum == fee
+        _transferFunds(L, msg.sender, rent, fee, dep);
 
-        // Tenant outflow: rent + tenant half-fee + deposit
-        uint256 totalFromTenant = uint256(rent) + uint256(feeTenant) + uint256(dep);
-        L.usdc.safeTransferFrom(msg.sender, address(this), totalFromTenant);
-
-        // Landlord inflow: rent minus landlord half-fee
-        uint96 toLandlord = rent > feeLandlord ? rent - feeLandlord : 0;
-        if (toLandlord > 0) {
-            L.usdc.safeTransfer(L.owner, toLandlord);
-        }
-
-        // Platform receives the full fee (tenant half that we pulled + landlord half withheld from rent)
-        if (fee > 0) {
-            L.usdc.safeTransfer(platform, fee);
-        }
-
-        // Arm vault and transfer deposit to vault
-        if (dep > 0) {
-            IListing(L.vault).arm(msg.sender, dep);
-            L.usdc.safeTransfer(L.vault, dep);
-        }
-
-        bookings.push(Booking({
-            tenant: msg.sender,
-            landlord: L.owner,
-            listingId: listingId,
-            startDate: startDate,
-            endDate: endDate,
-            rentAmount: rent,   // gross rent reference
-            feeAmount: fee,     // full platform fee
-            depositAmount: dep, // informational; funds are in vault
-            status: BookingStatus.Booked,
-            propTenant: 0,
-            propLandlord: 0,
-            proposalSet: false
-        }));
+        _createBooking(msg.sender, L.owner, listingId, startDate, endDate, rent, fee, dep);
         bookingId = bookings.length - 1;
 
         emit Booked(bookingId, listingId, msg.sender, rent, fee, dep);
