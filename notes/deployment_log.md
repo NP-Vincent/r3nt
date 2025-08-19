@@ -1,6 +1,6 @@
 # Deployment Log
 
-This file records every deployment and upgrade of the SQMU smart contracts. Use it as the canonical source for current proxy and implementation addresses.
+This file records every deployment and upgrade of r3nt smart contracts. Use it as the canonical source for current proxy and implementation addresses.
 
 | Date | Contract Name | Network | ABI Version | Proxy Address | Implementation Address | URLs |
 | ---- | --------------- | --------- | ----------- | ---------------------- | ---------------------- | ---- |
