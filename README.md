@@ -23,24 +23,14 @@ It enables landlords to list properties, tenants to book with USDC, and deposits
 ---
 
 ## Architecture
-- **Smart Contract**: `r3nt.sol` (Arbitrum One, upgradeable).  
-- **Frontend**: Farcaster Mini App (HTML+JS).  
-- **Storage**:  
-  - On-chain: listing metadata (title, geohash, fid, castHash).  
-  - Off-chain: images + long descriptions (Farcaster cast).  
-
----
-
-## Contract Deployment
-1. Deploy `r3nt` implementation.  
-2. Deploy UUPS Proxy pointing to implementation.  
-3. Call `initialize()` with:  
-   - `_usdc`: Canonical USDC address on Arbitrum  
-   - `_platform`: platform fee receiver  
-   - `_feeBps`: 100 (1%)  
-   - `_listFee`: `1_000_000` (=$1.00)  
-   - `_viewFee`: `100_000` (=$0.10)  
-   - `_viewPassSeconds`: `259200` (72h)  
+- **Contracts**:
+  - `Listing.sol`: cloneable per-property deposit vault.
+  - `ListingFactory.sol`: UUPS factory that deploys deterministic `Listing` clones and manages a token allowlist.
+  - `r3nt.sol`: upgradeable core that wires bookings and deposit handling to the factory.
+- **Frontend**: Farcaster Mini App (HTML+JS).
+- **Storage**:
+  - On-chain: listing metadata (title, geohash, fid, castHash).
+  - Off-chain: images + long descriptions (Farcaster cast).
 
 ---
 
@@ -116,19 +106,42 @@ await contract.book(listingId, rateType, units, startDate, endDate);
 
 ---
 
-# Deployment Notes for Remix on Arbitrum One
+# Deployment (Remix on Arbitrum One)
+
+All deployments and upgrades are executed manually in **Remix**.
+
+## Steps
+1. **Listing implementation** – deploy `Listing.sol` (non-upgradeable).
+2. **ListingFactory** – deploy implementation and UUPS proxy.
+   - Call `initialize(listingImpl)`.
+   - Call `setAllowedToken(USDC, true)` to whitelist your payment token.
+3. **r3nt** – deploy implementation and UUPS proxy.
+   - Call `initialize(_usdc, _platform, _feeBps, _listFee, _viewFee, _viewPassSeconds, factoryAddress)`.
+
+### Post-Deployment Flow
+- From the landlord wallet, call `r3nt.createListing(...)` passing ERC-7913 signers and threshold.
+- Verify `getListing(id).vault` returns a non-zero address to confirm clone creation.
+- Tenant approves `r3nt` for `(rent + fee + deposit)` in the listing token and calls `book(...)`; the deposit moves into the vault.
+- To close: landlord `markCompleted` → landlord `proposeDepositSplit` → platform `confirmDepositRelease(bookingId, signature)`.
+
+### Tiny Checks
+- `platform` should be your multisig/owner.
+- Factory `ADMIN_ROLE` is granted to the deployer in `initialize`.
+- To update `Listing`, deploy a new implementation and call `setImplementation(newImpl)` on the factory (existing clones stay unchanged).
 
 ## Initializer Parameters
-- **_usdc**: Canonical USDC address on Arbitrum (e.g., `0xaf88...` for USDC.e or the native USDC, depending on which you target — always use the canonical one you intend).  
-- **_platform**: Your fee receiver (also serves as initial `owner` for upgrades).  
-
-**Default fees:**
-- `feeBps = 100` → 1%  
-- `listFee = $1`  
-- `viewFee = $0.10`  
-- `viewPassSeconds = 72 * 3600` (72 hours)  
+- **ListingFactory.initialize**: `listingImpl`
+- **r3nt.initialize**:
+  - `_usdc`: Canonical USDC address on Arbitrum
+  - `_platform`: fee receiver / owner
+  - `_feeBps`: e.g., `100` for 1%
+  - `_listFee`: `1_000_000` (=$1)
+  - `_viewFee`: `100_000` (=$0.10)
+  - `_viewPassSeconds`: `259200` (72h)
+  - `_factory`: ListingFactory proxy address
 
 ---
+
 
 ## Mini App “Write” Flow
 The pattern mirrors **TicTacVato**:
