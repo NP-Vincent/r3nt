@@ -37,15 +37,17 @@ interface IListing {
 }
 
 interface IListingFactory {
-    function createListing(
-        address core,
-        address landlord,
-        address platformAdmin,
-        IERC20 token,
-        bytes[] calldata signers,
-        uint256 threshold,
-        uint256 listingId
-    ) external returns (address listing);
+    struct CreateListingParams {
+        address core;
+        address landlord;
+        address platformAdmin;
+        IERC20 token;
+        bytes[] signers;
+        uint256 threshold;
+        uint256 listingId;
+    }
+
+    function createListing(CreateListingParams calldata params) external returns (address listing);
 
     function predict(address core, uint256 listingId) external view returns (address predicted);
 }
@@ -349,13 +351,15 @@ contract r3nt is
 
         // Ask factory to clone per-listing vault (deterministic by (address(this), id))
         address vault = listingFactory.createListing(
-            address(this),
-            msg.sender,
-            platform,                           // platform admin/controller (parity arg)
-            IERC20(usdc),                       // token allowlist enforced at factory
-            signers,
-            threshold,
-            id
+            IListingFactory.CreateListingParams({
+                core: address(this),
+                landlord: msg.sender,
+                platformAdmin: platform,            // platform admin/controller (parity arg)
+                token: IERC20(usdc),                // token allowlist enforced at factory
+                signers: signers,
+                threshold: threshold,
+                listingId: id
+            })
         );
         listings[id].vault = vault;
 

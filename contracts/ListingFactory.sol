@@ -26,6 +26,16 @@ import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20
 // Imported for parity with your stack (not used directly here but kept for consistency):
 import {MultiSignerERC7913Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/signers/MultiSignerERC7913Upgradeable.sol";
 
+struct CreateListingParams {
+    address core;
+    address landlord;
+    address platformAdmin;
+    IERC20Upgradeable token;
+    bytes[] signers;
+    uint256 threshold;
+    uint256 listingId;
+}
+
 interface IListing {
     /**
      * Initialize the per-listing vault clone.
@@ -128,48 +138,53 @@ contract ListingFactory is
     /**
      * @notice Create a new Listing (vault) clone for a landlord's property.
      * Access: ADMIN_ROLE (typically your r3nt core’s privileged deployer/ops).
-     *
-     * @param core            r3nt core contract
-     * @param landlord        listing owner
-     * @param platformAdmin   platform controller (parity arg; not stored by Listing)
-     * @param token           allowed deposit token (e.g., canonical USDC)
-     * @param signers         ERC-7913 signer identities (for platform multisig)
-     * @param threshold       signature threshold (>=1)
-     * @param listingId       unique listing id (salt component)
      */
-    function createListing(
-        address core,
-        address landlord,
-        address platformAdmin,
-        IERC20Upgradeable token,
-        bytes[] calldata signers,
-        uint256 threshold,
-        uint256 listingId
-    ) external whenNotPaused onlyRole(ADMIN_ROLE) nonReentrant returns (address listing) {
-        require(core != address(0) && landlord != address(0) && platformAdmin != address(0), "zero addr");
-        require(address(token) != address(0), "token=0");
-        require(allowedTokens[address(token)], "token !allowed");
-        require(threshold >= 1, "bad threshold");
-
-        bytes32 salt = _salt(core, listingId);
-        require(listingByKey[salt] == address(0), "exists");
-
-        listing = implementation.cloneDeterministic(salt);
-
-        IListing(listing).initialize(
-            address(this),  // admin = factory
-            core,
-            landlord,
-            platformAdmin,
-            address(token),
-            signers,
-            threshold
-        );
+    function createListing(CreateListingParams calldata params)
+        external
+        whenNotPaused
+        onlyRole(ADMIN_ROLE)
+        nonReentrant
+        returns (address listing)
+    {
+        bytes32 salt = _validateParams(params);
+        listing = _deployClone(salt);
+        _initializeClone(listing, params);
 
         _listings.push(listing);
         listingByKey[salt] = listing;
 
-        emit ListingCreated(listing, core, landlord, token, listingId);
+        emit ListingCreated(listing, params.core, params.landlord, params.token, params.listingId);
+    }
+
+    function _validateParams(CreateListingParams calldata params) internal view returns (bytes32 salt) {
+        require(
+            params.core != address(0) &&
+                params.landlord != address(0) &&
+                params.platformAdmin != address(0),
+            "zero addr"
+        );
+        require(address(params.token) != address(0), "token=0");
+        require(allowedTokens[address(params.token)], "token !allowed");
+        require(params.threshold >= 1, "bad threshold");
+
+        salt = _salt(params.core, params.listingId);
+        require(listingByKey[salt] == address(0), "exists");
+    }
+
+    function _deployClone(bytes32 salt) internal returns (address listing) {
+        listing = implementation.cloneDeterministic(salt);
+    }
+
+    function _initializeClone(address listing, CreateListingParams calldata params) internal {
+        IListing(listing).initialize(
+            address(this), // admin = factory
+            params.core,
+            params.landlord,
+            params.platformAdmin,
+            address(params.token),
+            params.signers,
+            params.threshold
+        );
     }
 
     // -----------------------------
