@@ -3,6 +3,7 @@ import { createPublicClient, createWalletClient, http, getAddress } from "../ven
 import { arbitrum } from "../vendor/viem-2.x.min.js";
 import { RPC_URL, CHAIN_ID, EXPLORER } from "./config.js";
 import { ready, getFCProvider } from "./farcaster.js";
+import { showToast } from "./toast.js";
 
 export const publicClient = createPublicClient({ chain: arbitrum, transport: http(RPC_URL) });
 
@@ -47,6 +48,10 @@ export async function simulateAndWrite({ address, abi, functionName, args }) {
   const w = await getWalletClient();
   if (!w) throw new Error("No wallet");
   const { walletClient, account } = w;
+  const toast =
+    typeof showToast === "function"
+      ? showToast
+      : (msg, type) => console.warn(`Toast unavailable [${type}]: ${msg}`);
   try {
     const { request } = await publicClient.simulateContract({
       account,
@@ -56,20 +61,23 @@ export async function simulateAndWrite({ address, abi, functionName, args }) {
       args,
     });
     const hash = await walletClient.writeContract(request);
-    showToast(`Sent: <a href="${EXPLORER}/tx/${hash}" target="_blank" rel="noopener">${hash}</a>`, "info");
+    toast(
+      `Sent: <a href="${EXPLORER}/tx/${hash}" target="_blank" rel="noopener">${hash}</a>`,
+      "info"
+    );
     publicClient
       .waitForTransactionReceipt({ hash })
       .then((r) => {
         const ok = r.status === "success";
-        showToast(
+        toast(
           `${ok ? "Confirmed" : "Failed"}: <a href="${EXPLORER}/tx/${hash}" target="_blank" rel="noopener">${hash}</a>`,
           ok ? "success" : "error"
         );
       })
-      .catch((e) => showToast(e.shortMessage || e.message, "error"));
+      .catch((e) => toast(e.shortMessage || e.message, "error"));
     return hash;
   } catch (e) {
-    showToast(e.shortMessage || e.message, "error");
+    toast(e.shortMessage || e.message, "error");
     throw e;
   }
 }
