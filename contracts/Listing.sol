@@ -161,6 +161,40 @@ contract Listing is
         emit Proposed(toTenant, toLandlord);
     }
 
+    function _releaseHash(
+        address _tenant,
+        address _landlord,
+        uint96 _propTenant,
+        uint96 _propLandlord,
+        uint256 _nonce
+    ) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                bytes32("DEPOSIT_RELEASE"),
+                address(this),
+                _tenant,
+                _landlord,
+                _propTenant,
+                _propLandlord,
+                _nonce
+            )
+        );
+    }
+
+    function _payout(
+        address _tenant,
+        address _landlord,
+        uint96 _toTenant,
+        uint96 _toLandlord
+    ) internal {
+        require(
+            token.balanceOf(address(this)) >= uint256(_toTenant) + uint256(_toLandlord),
+            "insufficient vault bal"
+        );
+        if (_toTenant > 0) token.safeTransfer(_tenant, _toTenant);
+        if (_toLandlord > 0) token.safeTransfer(_landlord, _toLandlord);
+    }
+
     /**
      * @notice Platform multisig confirms via ERC-7913 signature.
      * Anyone can submit as long as signatures are valid.
@@ -175,43 +209,32 @@ contract Listing is
      *     propLandlord,
      *     nonce
      *   ))
-     */
+    */
     function confirmRelease(bytes calldata signature) external nonReentrant whenNotPaused {
         if (released) revert AlreadyReleased();
         if (!proposalSet) revert NoProposal();
 
-        bytes32 h = keccak256(abi.encodePacked(
-            bytes32("DEPOSIT_RELEASE"),
-            address(this),
-            tenant,
-            landlord,
-            propTenant,
-            propLandlord,
-            nonce
-        ));
-        require(_rawSignatureValidation(h, signature), "invalid signature");
+        require(
+            _rawSignatureValidation(
+                _releaseHash(tenant, landlord, propTenant, propLandlord, nonce),
+                signature
+            ),
+            "invalid signature"
+        );
 
         // Effects
         released = true;
         proposalSet = false;
         uint96 toT = propTenant;
         uint96 toL = propLandlord;
-        uint96 d = deposit;
         propTenant = 0;
         propLandlord = 0;
         deposit = 0;
         nonce += 1;
 
-        // Defensive balance check
-        require(token.balanceOf(address(this)) >= uint256(toT) + uint256(toL), "insufficient vault bal");
-
-        // Interactions
-        if (toT > 0) token.safeTransfer(tenant, toT);
-        if (toL > 0) token.safeTransfer(landlord, toL);
+        _payout(tenant, landlord, toT, toL);
 
         emit Released(tenant, toT, landlord, toL);
-        // Invariant: toT + toL == d
-        (d); // silence warning for some builds
     }
 
     // -----------------------
