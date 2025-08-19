@@ -4,6 +4,8 @@ import { arbitrum } from "../vendor/viem-2.x.min.js";
 import { RPC_URL, CHAIN_ID } from "./config.js";
 import { ready, getFCProvider } from "./farcaster.js";
 
+const EXPLORER = CHAIN_ID === 42161 ? "https://arbiscan.io" : "https://sepolia.arbiscan.io";
+
 export const publicClient = createPublicClient({ chain: arbitrum, transport: http(RPC_URL) });
 
 export async function getWalletClient() {
@@ -47,12 +49,29 @@ export async function simulateAndWrite({ address, abi, functionName, args }) {
   const w = await getWalletClient();
   if (!w) throw new Error("No wallet");
   const { walletClient, account } = w;
-  const { request } = await publicClient.simulateContract({
-    account,
-    address,
-    abi,
-    functionName,
-    args,
-  });
-  return walletClient.writeContract(request);
+  try {
+    const { request } = await publicClient.simulateContract({
+      account,
+      address,
+      abi,
+      functionName,
+      args,
+    });
+    const hash = await walletClient.writeContract(request);
+    showToast(`Sent: <a href="${EXPLORER}/tx/${hash}" target="_blank" rel="noopener">${hash}</a>`, "info");
+    publicClient
+      .waitForTransactionReceipt({ hash })
+      .then((r) => {
+        const ok = r.status === "success";
+        showToast(
+          `${ok ? "Confirmed" : "Failed"}: <a href="${EXPLORER}/tx/${hash}" target="_blank" rel="noopener">${hash}</a>`,
+          ok ? "success" : "error"
+        );
+      })
+      .catch((e) => showToast(e.shortMessage || e.message, "error"));
+    return hash;
+  } catch (e) {
+    showToast(e.shortMessage || e.message, "error");
+    throw e;
+  }
 }
