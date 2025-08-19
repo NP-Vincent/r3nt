@@ -10,8 +10,10 @@ It describes the context, architecture, and interaction patterns so Codex can:
 ---
 
 ## Contract Overview
-- **Contract Name**: `r3nt`
-- **Standard**: OpenZeppelin UUPS Upgradeable
+- **Contracts**:
+  - `Listing.sol` – per-property deposit vault clone.
+  - `ListingFactory.sol` – UUPS factory that deploys deterministic `Listing` clones and manages a token allowlist.
+  - `r3nt.sol` – UUPS core that wires bookings and deposit release to the factory.
 - **Network**: Arbitrum One
 - **Token**: Canonical USDC (6 decimals)
 - **Core Concepts**:
@@ -69,9 +71,21 @@ It describes the context, architecture, and interaction patterns so Codex can:
 
 ## Iteration Guidance
 When Codex sees errors in frontend logs:
-- Check **approve/allowance** first for ERC20 transfers.  
-- If UI shows `"Viewing only"` → provider not injected → must run inside Farcaster Mini App host.  
-- For upgrade proposals: ensure **new implementation preserves storage layout**.  
+- Check **approve/allowance** first for ERC20 transfers.
+- If UI shows `"Viewing only"` → provider not injected → must run inside Farcaster Mini App host.
+- For upgrade proposals: ensure **new implementation preserves storage layout**.
+
+## Deployment (Remix)
+1. Deploy `Listing.sol` implementation.
+2. Deploy `ListingFactory` implementation and UUPS proxy, then call `initialize(listingImpl)` and `setAllowedToken(USDC, true)`.
+3. Deploy `r3nt` implementation and UUPS proxy, then call `initialize(_usdc, _platform, _feeBps, _listFee, _viewFee, _viewPassSeconds, factoryAddr)`.
+4. Landlord calls `r3nt.createListing(...)` (ERC-7913 signers + threshold) and checks `getListing(id).vault` ≠ `0`.
+5. Tenant approves rent + fee + deposit and books; deposit moves into the `Listing` vault.
+6. End of stay: landlord `markCompleted` → `proposeDepositSplit` → platform `confirmDepositRelease`.
+
+To upgrade `Listing`, deploy a new implementation and call `setImplementation(newImpl)` on the factory; existing clones remain.
+
+All deployments are manual via Remix; no script-based tooling is expected.
 
 ---
 
