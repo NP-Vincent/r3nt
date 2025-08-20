@@ -6,6 +6,12 @@
   <title>r3nt · Support</title>
   <link rel="stylesheet" href="/css/styles.css" />
   <script type="module" src="/vendor/miniapp-sdk.min.js"></script>
+  <script type="module">
+    import { ready } from "/js/farcaster.js";
+    document.addEventListener("DOMContentLoaded", () => {
+      ready();
+    });
+  </script>
   <script type="module" src="/js/support.js"></script>
 </head>
 <body>
