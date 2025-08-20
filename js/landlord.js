@@ -13,7 +13,6 @@ import {
 import {
   R3NT_ADDRESS,
   USDC_ADDRESS,
-  VIEW_PASS_SECONDS,
 } from "./config.js";
 
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
