@@ -9,6 +9,7 @@ import {
   readStruct,
   simulateAndWrite,
 } from "./shared.js";
+import { showToast } from "./toast.js";
 
 import {
   R3NT_ADDRESS,
@@ -33,67 +34,97 @@ async function getAddresses() {
 }
 
 async function renderViewPass() {
-  const viewFee = await readVar(R3NT_ADDRESS, r3ntAbi, "viewFee");
-  const feeStr = fromUnits(viewFee, 6);
-  const { walletClient, account } = await getAddresses();
+  try {
+    const viewFee = await readVar(R3NT_ADDRESS, r3ntAbi, "viewFee");
+    const feeStr = fromUnits(viewFee, 6);
+    const { walletClient, account } = await getAddresses();
 
-  let expiry = 0n;
-  if (account) {
-    expiry = await publicClient.readContract({
-      address: R3NT_ADDRESS,
-      abi: r3ntAbi,
-      functionName: "viewPassExpiry",
-      args: [account],
-    });
-  }
+    let expiry = 0n;
+    if (account) {
+      try {
+        expiry = await publicClient.readContract({
+          address: R3NT_ADDRESS,
+          abi: r3ntAbi,
+          functionName: "viewPassExpiry",
+          args: [account],
+        });
+      } catch (e) {
+        console.error("read viewPassExpiry", e);
+        showToast("Failed to read pass expiry", "error");
+      }
+    }
 
-  let html = `<div class="card">
+    let html = `<div class="card">
     <h3>View Pass</h3>
     <p>Price: USDC ${feeStr} · Expires: ${expiry > 0n ? new Date(Number(expiry) * 1000).toLocaleString() : "None"}</p>`;
 
-  if (!walletClient) {
-    html += `<div class="banner banner--readonly">Read-only. Open inside Farcaster Mini App to purchase.</div></div>`;
-    els.viewPass.innerHTML = html;
-    return;
-  }
+    if (!walletClient) {
+      html += `<div class="banner banner--readonly">Read-only. Open inside Farcaster Mini App to purchase.</div></div>`;
+      els.viewPass.innerHTML = html;
+      return;
+    }
 
-  const allowance = await publicClient.readContract({
-    address: USDC_ADDRESS,
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: [account, R3NT_ADDRESS],
-  });
-
-  if (allowance < viewFee) {
-    html += `<button id="approveViewPass" class="btn">Approve USDC</button> `;
-  }
-  html += `<button id="buyViewPass" class="btn">Buy View Pass</button></div>`;
-  els.viewPass.innerHTML = html;
-
-  const approveBtn = document.getElementById("approveViewPass");
-  if (approveBtn) {
-    approveBtn.onclick = async () => {
-      await ensureWritable();
-      await simulateAndWrite({
+    let allowance = 0n;
+    try {
+      allowance = await publicClient.readContract({
         address: USDC_ADDRESS,
         abi: erc20Abi,
-        functionName: "approve",
-        args: [R3NT_ADDRESS, viewFee],
+        functionName: "allowance",
+        args: [account, R3NT_ADDRESS],
       });
-      renderViewPass();
-    };
-  }
+    } catch (e) {
+      console.error("read allowance", e);
+      showToast("Failed to read allowance", "error");
+      html += `<div class="error">Error fetching allowance</div></div>`;
+      els.viewPass.innerHTML = html;
+      return;
+    }
 
-  document.getElementById("buyViewPass").onclick = async () => {
-    await ensureWritable();
-    await simulateAndWrite({
-      address: R3NT_ADDRESS,
-      abi: r3ntAbi,
-      functionName: "buyViewPass",
-      args: [],
-    });
-    renderViewPass();
-  };
+    if (allowance < viewFee) {
+      html += `<button id="approveViewPass" class="btn">Approve USDC</button> `;
+    }
+    html += `<button id="buyViewPass" class="btn">Buy View Pass</button></div>`;
+    els.viewPass.innerHTML = html;
+
+    const approveBtn = document.getElementById("approveViewPass");
+    if (approveBtn) {
+      approveBtn.onclick = async () => {
+        try {
+          await ensureWritable();
+          await simulateAndWrite({
+            address: USDC_ADDRESS,
+            abi: erc20Abi,
+            functionName: "approve",
+            args: [R3NT_ADDRESS, viewFee],
+          });
+          renderViewPass();
+        } catch (e) {
+          console.error("approve view pass", e);
+          showToast("Approval failed", "error");
+        }
+      };
+    }
+
+    document.getElementById("buyViewPass").onclick = async () => {
+      try {
+        await ensureWritable();
+        await simulateAndWrite({
+          address: R3NT_ADDRESS,
+          abi: r3ntAbi,
+          functionName: "buyViewPass",
+          args: [],
+        });
+        renderViewPass();
+      } catch (e) {
+        console.error("buy view pass", e);
+        showToast("Purchase failed", "error");
+      }
+    };
+  } catch (e) {
+    console.error("renderViewPass", e);
+    els.viewPass.innerHTML = `<div class="card"><h3>View Pass</h3><div class="error">Failed to load pass info</div></div>`;
+    showToast("Failed to load view pass", "error");
+  }
 }
 
 function bookFormHTML() {
@@ -178,30 +209,42 @@ async function renderBook() {
       approveBtn.disabled = !(account && allowance < totalTenant);
       bookBtn.disabled = !account;
       approveBtn.onclick = async () => {
-        await ensureWritable();
-        await simulateAndWrite({
-          address: li.usdc,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [R3NT_ADDRESS, totalTenant],
-        });
-        refreshQuote();
+        try {
+          await ensureWritable();
+          await simulateAndWrite({
+            address: li.usdc,
+            abi: erc20Abi,
+            functionName: "approve",
+            args: [R3NT_ADDRESS, totalTenant],
+          });
+          refreshQuote();
+        } catch (e) {
+          console.error("approve book", e);
+          showToast("Approval failed", "error");
+        }
       };
 
       bookBtn.onclick = async () => {
-        await ensureWritable();
-        const start = BigInt(startEl.value || "0");
-        const end = BigInt(endEl.value || "0");
-        if (end <= start) return alert("End must be > start");
-        await simulateAndWrite({
-          address: R3NT_ADDRESS,
-          abi: r3ntAbi,
-          functionName: "book",
-          args: [id, Number(typeEl.value), BigInt(units), start, end],
-        });
-        renderMyBookings();
+        try {
+          await ensureWritable();
+          const start = BigInt(startEl.value || "0");
+          const end = BigInt(endEl.value || "0");
+          if (end <= start) return alert("End must be > start");
+          await simulateAndWrite({
+            address: R3NT_ADDRESS,
+            abi: r3ntAbi,
+            functionName: "book",
+            args: [id, Number(typeEl.value), BigInt(units), start, end],
+          });
+          renderMyBookings();
+        } catch (e) {
+          console.error("book listing", e);
+          showToast("Booking failed", "error");
+        }
       };
     } catch (e) {
+      console.error("refreshQuote", e);
+      showToast("Unable to load listing", "error");
       quoteEl.textContent = "Listing not found or invalid.";
       approveBtn.disabled = true; bookBtn.disabled = true;
     }
@@ -212,32 +255,33 @@ async function renderBook() {
 }
 
 async function renderMyBookings() {
-  const { account } = await getAddresses();
-  const n = await readVar(R3NT_ADDRESS, r3ntAbi, "bookingsCount");
-  const rows = [];
-  for (let i = 0n; i < n; i++) {
-    const b = await readStruct(R3NT_ADDRESS, r3ntAbi, "getBooking", [i]);
-    if (account && b.tenant.toLowerCase() === account.toLowerCase()) {
-      rows.push({
-        id: Number(i),
-        listingId: Number(b.listingId),
-        start: Number(b.startDate),
-        end: Number(b.endDate),
-        rent: fromUnits(b.rentAmount, 6),
-        fee: fromUnits(b.feeAmount, 6),
-        deposit: fromUnits(b.depositAmount, 6),
-        status: ["Booked","Completed","Resolved"][Number(b.status)],
-      });
+  try {
+    const { account } = await getAddresses();
+    const n = await readVar(R3NT_ADDRESS, r3ntAbi, "bookingsCount");
+    const rows = [];
+    for (let i = 0n; i < n; i++) {
+      const b = await readStruct(R3NT_ADDRESS, r3ntAbi, "getBooking", [i]);
+      if (account && b.tenant.toLowerCase() === account.toLowerCase()) {
+        rows.push({
+          id: Number(i),
+          listingId: Number(b.listingId),
+          start: Number(b.startDate),
+          end: Number(b.endDate),
+          rent: fromUnits(b.rentAmount, 6),
+          fee: fromUnits(b.feeAmount, 6),
+          deposit: fromUnits(b.depositAmount, 6),
+          status: ["Booked","Completed","Resolved"][Number(b.status)],
+        });
+      }
     }
-  }
-  let html = `<div class="card"><h3>My Bookings</h3>`;
-  if (!rows.length) html += `<div class="muted">No bookings.</div>`;
-  else {
-    html += `<table><thead><tr>
+    let html = `<div class="card"><h3>My Bookings</h3>`;
+    if (!rows.length) html += `<div class="muted">No bookings.</div>`;
+    else {
+      html += `<table><thead><tr>
       <th>ID</th><th>Listing</th><th>Start</th><th>End</th><th>Rent</th><th>Fee</th><th>Deposit</th><th>Status</th>
     </tr></thead><tbody>`;
-    for (const r of rows) {
-      html += `<tr>
+      for (const r of rows) {
+        html += `<tr>
         <td>${r.id}</td>
         <td>${r.listingId}</td>
         <td>${new Date(r.start*1000).toLocaleDateString()}</td>
@@ -247,15 +291,25 @@ async function renderMyBookings() {
         <td>${r.deposit}</td>
         <td>${r.status}</td>
       </tr>`;
+      }
+      html += `</tbody></table>`;
     }
-    html += `</tbody></table>`;
+    html += `</div>`;
+    els.myBookings.innerHTML = html;
+  } catch (e) {
+    console.error("renderMyBookings", e);
+    els.myBookings.innerHTML = `<div class="card"><h3>My Bookings</h3><div class="error">Failed to load bookings</div></div>`;
+    showToast("Failed to load bookings", "error");
   }
-  html += `</div>`;
-  els.myBookings.innerHTML = html;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  await renderViewPass();
-  await renderBook();
-  await renderMyBookings();
+  try {
+    await renderViewPass();
+    await renderBook();
+    await renderMyBookings();
+  } catch (e) {
+    console.error("tenant init", e);
+    showToast("Failed to load tenant data", "error");
+  }
 });
