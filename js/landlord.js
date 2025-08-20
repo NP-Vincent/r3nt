@@ -15,8 +15,10 @@ import {
   USDC_ADDRESS,
 } from "./config.js";
 
-import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
-import erc20Abi from "./abi/USDC.json" assert { type: "json" };
+import r3nt from "./abi/r3nt.json" assert { type: "json" };
+const r3ntAbi = r3nt.abi;
+import usdc from "./abi/USDC.json" assert { type: "json" };
+const erc20Abi = usdc.abi;
 
 const els = {
   feeApprove: document.getElementById("fee-approve"),
