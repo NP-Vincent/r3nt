@@ -10,7 +10,45 @@ import { RPC_URL, CHAIN_ID, EXPLORER } from "./config.js";
 import { sdk, ready, getFCProvider } from "./farcaster.js";
 import { showToast } from "./toast.js";
 
-export { sdk, ready, getFCProvider };
+function ensureDebugConsole() {
+  let el = document.getElementById("debug-console");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "debug-console";
+    Object.assign(el.style, {
+      position: "fixed",
+      bottom: "0",
+      left: "0",
+      width: "100%",
+      maxHeight: "40%",
+      overflowY: "auto",
+      background: "rgba(0,0,0,0.8)",
+      color: "#f00",
+      font: "12px monospace",
+      zIndex: "9999",
+      padding: "4px",
+      whiteSpace: "pre-wrap",
+    });
+    (document.body || document.documentElement).appendChild(el);
+  }
+  return el;
+}
+
+export function debugLog(msg) {
+  const el = ensureDebugConsole();
+  const t = new Date().toISOString();
+  const text = msg && (msg.stack || msg.message) ? msg.stack || msg.message : String(msg);
+  console.error(msg);
+  const div = document.createElement("div");
+  div.textContent = `[${t}] ${text}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+window.addEventListener("error", (e) => debugLog(e.error || e.message));
+window.addEventListener("unhandledrejection", (e) => debugLog(e.reason));
+
+export { sdk, ready, getFCProvider, debugLog };
 
 export const publicClient = createPublicClient({ chain: arbitrum, transport: http(RPC_URL) });
 
