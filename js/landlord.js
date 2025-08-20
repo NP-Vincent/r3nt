@@ -9,6 +9,7 @@ import {
   readStruct,
   simulateAndWrite,
 } from "./shared.js"; // create this helper (or inline; see tenant.js for patterns too)
+import { showToast } from "./toast.js";
 
 import {
   R3NT_ADDRESS,
@@ -32,47 +33,67 @@ async function getAddresses() {
 }
 
 async function renderApproveListFee() {
-  const listFee = await readVar(R3NT_ADDRESS, r3ntAbi, "listFee");
-  const { account, walletClient } = await getAddresses();
+  try {
+    const listFee = await readVar(R3NT_ADDRESS, r3ntAbi, "listFee");
+    const { account, walletClient } = await getAddresses();
 
-  const feeStr = fromUnits(listFee, 6);
-  let html = `<div class="card">
+    const feeStr = fromUnits(listFee, 6);
+    let html = `<div class="card">
     <h3>List Fee</h3>
     <p>USDC ${feeStr}</p>`;
 
-  if (!walletClient) {
-    html += `<div class="banner banner--readonly">Read-only. Open inside Farcaster Mini App to list.</div></div>`;
-    els.feeApprove.innerHTML = html;
-    return;
-  }
+    if (!walletClient) {
+      html += `<div class="banner banner--readonly">Read-only. Open inside Farcaster Mini App to list.</div></div>`;
+      els.feeApprove.innerHTML = html;
+      return;
+    }
 
-  const allowance = await publicClient.readContract({
-    address: USDC_ADDRESS,
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: [account, R3NT_ADDRESS],
-  });
-
-  if (allowance < listFee) {
-    html += `<button id="btnApproveListFee" class="btn">Approve USDC</button>`;
-  } else {
-    html += `<div class="ok">Allowance OK</div>`;
-  }
-  html += `</div>`;
-  els.feeApprove.innerHTML = html;
-
-  const btn = document.getElementById("btnApproveListFee");
-  if (btn) {
-    btn.onclick = async () => {
-      await ensureWritable();
-      await simulateAndWrite({
+    let allowance = 0n;
+    try {
+      allowance = await publicClient.readContract({
         address: USDC_ADDRESS,
         abi: erc20Abi,
-        functionName: "approve",
-        args: [R3NT_ADDRESS, listFee],
+        functionName: "allowance",
+        args: [account, R3NT_ADDRESS],
       });
-      renderApproveListFee();
-    };
+    } catch (e) {
+      console.error("read allowance", e);
+      showToast("Failed to read allowance", "error");
+      html += `<div class="error">Error fetching allowance</div></div>`;
+      els.feeApprove.innerHTML = html;
+      return;
+    }
+
+    if (allowance < listFee) {
+      html += `<button id="btnApproveListFee" class="btn">Approve USDC</button>`;
+    } else {
+      html += `<div class="ok">Allowance OK</div>`;
+    }
+    html += `</div>`;
+    els.feeApprove.innerHTML = html;
+
+    const btn = document.getElementById("btnApproveListFee");
+    if (btn) {
+      btn.onclick = async () => {
+        try {
+          await ensureWritable();
+          await simulateAndWrite({
+            address: USDC_ADDRESS,
+            abi: erc20Abi,
+            functionName: "approve",
+            args: [R3NT_ADDRESS, listFee],
+          });
+          renderApproveListFee();
+        } catch (e) {
+          console.error("approve list fee", e);
+          showToast("Approval failed", "error");
+        }
+      };
+    }
+  } catch (e) {
+    console.error("renderApproveListFee", e);
+    els.feeApprove.innerHTML = `<div class="card"><h3>List Fee</h3><div class="error">Failed to load fee</div></div>`;
+    showToast("Failed to load list fee", "error");
   }
 }
 
@@ -104,97 +125,105 @@ async function renderCreateListing() {
   els.createListing.innerHTML = createListingFormHTML();
   const btn = document.getElementById("btnCreateListing");
   btn.onclick = async () => {
-    await ensureWritable();
-    const { account } = await getAddresses();
+    try {
+      await ensureWritable();
+      const { account } = await getAddresses();
 
-    // collect inputs
-    const dep = toUnits(document.getElementById("dep").value || "0", 6);
-    const rd = toUnits(document.getElementById("rd").value || "0", 6);
-    const rw = toUnits(document.getElementById("rw").value || "0", 6);
-    const rm = toUnits(document.getElementById("rm").value || "0", 6);
-    const geohash = (document.getElementById("gh").value || "").trim();
-    const geolen = geohash.length;
-    const fid = BigInt(document.getElementById("fid").value || "0");
-    const castHash = document.getElementById("cast").value.trim();
-    const title = document.getElementById("title").value.trim();
-    const shortDesc = document.getElementById("desc").value.trim();
-    const signersLines = (document.getElementById("signers").value || "").split("\n").map(s => s.trim()).filter(Boolean);
-    const threshold = BigInt(document.getElementById("threshold").value || "2");
+      // collect inputs
+      const dep = toUnits(document.getElementById("dep").value || "0", 6);
+      const rd = toUnits(document.getElementById("rd").value || "0", 6);
+      const rw = toUnits(document.getElementById("rw").value || "0", 6);
+      const rm = toUnits(document.getElementById("rm").value || "0", 6);
+      const geohash = (document.getElementById("gh").value || "").trim();
+      const geolen = geohash.length;
+      const fid = BigInt(document.getElementById("fid").value || "0");
+      const castHash = document.getElementById("cast").value.trim();
+      const title = document.getElementById("title").value.trim();
+      const shortDesc = document.getElementById("desc").value.trim();
+      const signersLines = (document.getElementById("signers").value || "").split("\n").map(s => s.trim()).filter(Boolean);
+      const threshold = BigInt(document.getElementById("threshold").value || "2");
 
-    if (geolen < 4 || geolen > 10) return alert("Geohash length must be 4..10");
-    if (!castHash.startsWith("0x") || castHash.length !== 66) return alert("castHash must be 32-byte hex (0x + 64)");
+      if (geolen < 4 || geolen > 10) return alert("Geohash length must be 4..10");
+      if (!castHash.startsWith("0x") || castHash.length !== 66) return alert("castHash must be 32-byte hex (0x + 64)");
 
-    // encode signers as bytes[]
-    const signers = signersLines.map(s => s.startsWith("0x") ? s : `0x${s}`);
+      // encode signers as bytes[]
+      const signers = signersLines.map(s => s.startsWith("0x") ? s : `0x${s}`);
 
-    const before = await readVar(R3NT_ADDRESS, r3ntAbi, "listingsCount");
-    const createStatus = document.getElementById("createStatus");
-    createStatus.textContent = "Submitting tx…";
+      const before = await readVar(R3NT_ADDRESS, r3ntAbi, "listingsCount");
+      const createStatus = document.getElementById("createStatus");
+      createStatus.textContent = "Submitting tx…";
 
-    await simulateAndWrite({
-      address: R3NT_ADDRESS,
-      abi: r3ntAbi,
-      functionName: "createListing",
-      args: [
-        USDC_ADDRESS,
-        dep, rd, rw, rm,
-        geohash,
-        geolen,
-        fid,
-        castHash,
-        title,
-        shortDesc,
-        signers,
-        threshold,
-      ],
-    });
+      await simulateAndWrite({
+        address: R3NT_ADDRESS,
+        abi: r3ntAbi,
+        functionName: "createListing",
+        args: [
+          USDC_ADDRESS,
+          dep, rd, rw, rm,
+          geohash,
+          geolen,
+          fid,
+          castHash,
+          title,
+          shortDesc,
+          signers,
+          threshold,
+        ],
+      });
 
-    // wait until listing is appended
-    let after = before;
-    for (let i = 0; i < 20; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      after = await readVar(R3NT_ADDRESS, r3ntAbi, "listingsCount");
-      if (after > before) break;
+      // wait until listing is appended
+      let after = before;
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        after = await readVar(R3NT_ADDRESS, r3ntAbi, "listingsCount");
+        if (after > before) break;
+      }
+      const id = Number(after) - 1;
+      // poll vault existence
+      let listing = await readStruct(R3NT_ADDRESS, r3ntAbi, "getListing", [BigInt(id)]);
+      for (let i = 0; i < 20 && listing.vault === "0x0000000000000000000000000000000000000000"; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        listing = await readStruct(R3NT_ADDRESS, r3ntAbi, "getListing", [BigInt(id)]);
+      }
+      createStatus.textContent = listing.vault === "0x0000000000000000000000000000000000000000"
+        ? "Created, vault pending…"
+        : `Created Listing #${id}. Vault: ${listing.vault}`;
+      renderMyListings(); // refresh table
+    } catch (e) {
+      console.error("create listing", e);
+      showToast("Failed to create listing", "error");
+      const createStatus = document.getElementById("createStatus");
+      if (createStatus) createStatus.textContent = "Error creating listing.";
     }
-    const id = Number(after) - 1;
-    // poll vault existence
-    let listing = await readStruct(R3NT_ADDRESS, r3ntAbi, "getListing", [BigInt(id)]);
-    for (let i = 0; i < 20 && listing.vault === "0x0000000000000000000000000000000000000000"; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      listing = await readStruct(R3NT_ADDRESS, r3ntAbi, "getListing", [BigInt(id)]);
-    }
-    createStatus.textContent = listing.vault === "0x0000000000000000000000000000000000000000"
-      ? "Created, vault pending…"
-      : `Created Listing #${id}. Vault: ${listing.vault}`;
-    renderMyListings(); // refresh table
   };
 }
 
 async function renderMyListings() {
-  const { account, walletClient } = await getAddresses();
-  const n = await readVar(R3NT_ADDRESS, r3ntAbi, "listingsCount");
-  const rows = [];
-  for (let i = 0n; i < n; i++) {
-    const li = await readStruct(R3NT_ADDRESS, r3ntAbi, "getListing", [i]);
-    if (account && li.owner.toLowerCase() === account.toLowerCase()) {
-      rows.push({
-        id: Number(i),
-        active: li.active,
-        vault: li.vault,
-        title: li.title,
-        rateDaily: fromUnits(li.rateDaily, 6),
-        deposit: fromUnits(li.deposit, 6),
-      });
+  try {
+    const { account, walletClient } = await getAddresses();
+    const n = await readVar(R3NT_ADDRESS, r3ntAbi, "listingsCount");
+    const rows = [];
+    for (let i = 0n; i < n; i++) {
+      const li = await readStruct(R3NT_ADDRESS, r3ntAbi, "getListing", [i]);
+      if (account && li.owner.toLowerCase() === account.toLowerCase()) {
+        rows.push({
+          id: Number(i),
+          active: li.active,
+          vault: li.vault,
+          title: li.title,
+          rateDaily: fromUnits(li.rateDaily, 6),
+          deposit: fromUnits(li.deposit, 6),
+        });
+      }
     }
-  }
-  let html = `<div class="card"><h3>My Listings</h3>`;
-  if (!rows.length) html += `<div class="muted">No listings yet.</div>`;
-  else {
-    html += `<table><thead><tr>
+    let html = `<div class="card"><h3>My Listings</h3>`;
+    if (!rows.length) html += `<div class="muted">No listings yet.</div>`;
+    else {
+      html += `<table><thead><tr>
       <th>ID</th><th>Title</th><th>Deposit</th><th>Daily</th><th>Vault</th><th>Active</th><th></th>
     </tr></thead><tbody>`;
-    for (const r of rows) {
-      html += `<tr>
+      for (const r of rows) {
+        html += `<tr>
         <td>${r.id}</td>
         <td>${r.title || "-"}</td>
         <td>${r.deposit}</td>
@@ -203,32 +232,47 @@ async function renderMyListings() {
         <td>${r.active ? "Yes" : "No"}</td>
         <td>${walletClient ? `<button data-id="${r.id}" data-act="${r.active ? 0 : 1}" class="btn btn-sm">Set ${r.active ? "Inactive" : "Active"}</button>` : ""}</td>
       </tr>`;
+      }
+      html += `</tbody></table>`;
     }
-    html += `</tbody></table>`;
-  }
-  html += `</div>`;
-  els.myListings.innerHTML = html;
+    html += `</div>`;
+    els.myListings.innerHTML = html;
 
-  if (walletClient) {
-    els.myListings.querySelectorAll("button[data-id]").forEach(btn => {
-      btn.onclick = async () => {
-        await ensureWritable();
-        const id = BigInt(btn.getAttribute("data-id"));
-        const makeActive = btn.getAttribute("data-act") === "1";
-        await simulateAndWrite({
-          address: R3NT_ADDRESS,
-          abi: r3ntAbi,
-          functionName: "setActive",
-          args: [id, makeActive],
-        });
-        renderMyListings();
-      };
-    });
+    if (walletClient) {
+      els.myListings.querySelectorAll("button[data-id]").forEach(btn => {
+        btn.onclick = async () => {
+          try {
+            await ensureWritable();
+            const id = BigInt(btn.getAttribute("data-id"));
+            const makeActive = btn.getAttribute("data-act") === "1";
+            await simulateAndWrite({
+              address: R3NT_ADDRESS,
+              abi: r3ntAbi,
+              functionName: "setActive",
+              args: [id, makeActive],
+            });
+            renderMyListings();
+          } catch (e) {
+            console.error("set active", e);
+            showToast("Failed to update listing", "error");
+          }
+        };
+      });
+    }
+  } catch (e) {
+    console.error("renderMyListings", e);
+    els.myListings.innerHTML = `<div class="card"><h3>My Listings</h3><div class="error">Failed to load listings</div></div>`;
+    showToast("Failed to load listings", "error");
   }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  await renderApproveListFee();
-  await renderCreateListing();
-  await renderMyListings();
+  try {
+    await renderApproveListFee();
+    await renderCreateListing();
+    await renderMyListings();
+  } catch (e) {
+    console.error("landlord init", e);
+    showToast("Failed to load landlord data", "error");
+  }
 });

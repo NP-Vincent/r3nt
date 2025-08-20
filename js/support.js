@@ -11,6 +11,7 @@ import {
   APP_DOMAIN,
   EXPLORER,
 } from "./config.js";
+import { showToast } from "./toast.js";
 
 function link(addr) {
   if (!addr || addr.startsWith("0x") === false) return `<code>${addr}</code>`;
@@ -81,4 +82,11 @@ function renderSupport() {
   `;
 }
 
-document.addEventListener("DOMContentLoaded", renderSupport);
+document.addEventListener("DOMContentLoaded", () => {
+  try {
+    renderSupport();
+  } catch (e) {
+    console.error("renderSupport", e);
+    showToast("Failed to render support page", "error");
+  }
+});
