@@ -12,7 +12,7 @@ export const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 export const PLATFORM_ADDRESS = "0x43F3f03d89290358034993aE3B3938D056D76De2";
 
 export const VIEW_PASS_SECONDS = 72 * 3600; // 72h
-export const FEE_BPS = 100;                 // 1% total (split 0.5%/0.5%)
+export const FEE_BPS = 200;                 // 2% total (split 1%/1%)
 
 export const APP_NAME = "r3nt";
 export const APP_DOMAIN = "r3nt.sqmu.net"; // origin used in EIP-712 domain if needed
