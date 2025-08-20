@@ -13,11 +13,11 @@ For developer and debugging guidance, see the [Farcaster Mini App Agents Checkli
 ---
 
 ## Features
-- Landlords pay **$1 USDC** to list a property (title, short description, geohash, Farcaster link).  
-- Tenants pay **$0.10 USDC** for a 72h view pass.  
+- Landlords pay **$2 USDC** to list a property (title, short description, geohash, Farcaster link).  
+- Tenants pay **$0.25 USDC** for a 72h view pass.  
 - Tenants can **book rentals**: rent + deposit in USDC.  
   - Rent → landlord immediately.  
-  - 1% commission → platform.  
+  - 2% commission → platform.  
   - Deposit → escrow until completion.  
 - **Partial deposit release**: landlord proposes split, platform confirms.  
 - **Minimal on-chain footprint**: all images, extended descriptions live off-chain in landlord’s Farcaster cast.  
