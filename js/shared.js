@@ -21,6 +21,11 @@ export async function getWalletClient() {
   return { walletClient, account: getAddress(addr) };
 }
 
+export async function getAddresses() {
+  const w = await getWalletClient();
+  return w ? { walletClient: w.walletClient, account: w.account } : { walletClient: null, account: null };
+}
+
 export async function ensureWritable() {
   const w = await getWalletClient();
   if (!w) throw new Error("No wallet provider (Mini App).");

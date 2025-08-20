@@ -1,13 +1,13 @@
 // /js/tenant.js
 import {
   publicClient,
-  getWalletClient,
   ensureWritable,
   toUnits,
   fromUnits,
   readVar,
   readStruct,
   simulateAndWrite,
+  getAddresses,
 } from "./shared.js";
 import { showToast } from "./toast.js";
 
@@ -27,11 +27,6 @@ const els = {
   book: document.getElementById("book"),
   myBookings: document.getElementById("my-bookings"),
 };
-
-async function getAddresses() {
-  const w = await getWalletClient();
-  return w ? { walletClient: w.walletClient, account: w.account } : { walletClient: null, account: null };
-}
 
 async function renderViewPass() {
   try {
