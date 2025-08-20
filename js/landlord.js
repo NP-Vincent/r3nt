@@ -2,7 +2,7 @@
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import usdcAbi from "./abi/USDC.json" assert { type: "json" };
 import { R3NT_ADDRESS, USDC_ADDRESS } from "./config.js";
-import { ensureWritable, simulateAndWrite, toUnits, readVar, ready } from "./shared.js";
+import { ensureWritable, simulateAndWrite, toUnits, readVar, ready, debugLog } from "./shared.js";
 
 ready();
 
@@ -57,7 +57,7 @@ async function createListing(e) {
       ]
     });
   } catch (err) {
-    console.error(err);
+    debugLog(err);
   }
 }
 
@@ -73,7 +73,7 @@ async function markCompleted(e) {
       args: [bookingId]
     });
   } catch (err) {
-    console.error(err);
+    debugLog(err);
   }
 }
 
@@ -91,6 +91,6 @@ async function proposeSplit(e) {
       args: [bookingId, toTenant, toLandlord]
     });
   } catch (err) {
-    console.error(err);
+    debugLog(err);
   }
 }

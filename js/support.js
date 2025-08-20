@@ -1,7 +1,7 @@
 // /js/support.js
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import { R3NT_ADDRESS } from "./config.js";
-import { ensureWritable, simulateAndWrite, ready } from "./shared.js";
+import { ensureWritable, simulateAndWrite, ready, debugLog } from "./shared.js";
 
 ready();
 
@@ -20,6 +20,6 @@ async function confirmRelease(e) {
       args: [bookingId, signature]
     });
   } catch (err) {
-    console.error(err);
+    debugLog(err);
   }
 }
