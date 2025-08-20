@@ -15,6 +15,7 @@ function ensureDebugConsole() {
   if (!el) {
     el = document.createElement("div");
     el.id = "debug-console";
+    const visible = localStorage.getItem("debug-visible") === "1";
     Object.assign(el.style, {
       position: "fixed",
       bottom: "0",
@@ -28,10 +29,38 @@ function ensureDebugConsole() {
       zIndex: "9999",
       padding: "4px",
       whiteSpace: "pre-wrap",
+      display: visible ? "block" : "none",
     });
     (document.body || document.documentElement).appendChild(el);
+
+    let btn = document.getElementById("debug-toggle");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "debug-toggle";
+      btn.textContent = "🐞";
+      Object.assign(btn.style, {
+        position: "fixed",
+        bottom: "0",
+        right: "0",
+        zIndex: "10000",
+        background: "rgba(0,0,0,0.6)",
+        color: "#fff",
+        border: "none",
+        cursor: "pointer",
+        padding: "2px 6px",
+      });
+      btn.addEventListener("click", toggleDebugConsole);
+      (document.body || document.documentElement).appendChild(btn);
+    }
   }
   return el;
+}
+
+export function toggleDebugConsole() {
+  const el = ensureDebugConsole();
+  const visible = el.style.display !== "none";
+  el.style.display = visible ? "none" : "block";
+  localStorage.setItem("debug-visible", visible ? "0" : "1");
 }
 
 export function debugLog(msg) {
@@ -45,10 +74,27 @@ export function debugLog(msg) {
   el.scrollTop = el.scrollHeight;
 }
 
-window.addEventListener("error", (e) => debugLog(e.error || e.message));
+window.addEventListener(
+  "error",
+  (e) => {
+    let err;
+    if (e.error) err = e.error;
+    else if (e.message) err = `${e.message} (${e.filename}:${e.lineno}:${e.colno})`;
+    else if (e.target && (e.target.src || e.target.href))
+      err = `Error loading ${e.target.src || e.target.href}`;
+    else err = e;
+    debugLog(err);
+  },
+  true
+);
 window.addEventListener("unhandledrejection", (e) => debugLog(e.reason));
+window.addEventListener("keydown", (e) => {
+  if (e.altKey && e.key.toLowerCase() === "d") toggleDebugConsole();
+});
 
-export { sdk, ready, getFCProvider, debugLog };
+ensureDebugConsole();
+
+export { sdk, ready, getFCProvider, debugLog, toggleDebugConsole };
 
 export const publicClient = createPublicClient({ chain: arbitrum, transport: http(RPC_URL) });
 
