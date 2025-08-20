@@ -1,10 +1,16 @@
 // minimal FC helpers
+import { sdk as farcasterSdk } from "https://esm.sh/@farcaster/miniapp-sdk";
+
+const globalSdk = typeof window !== "undefined" ? window.sdk : undefined;
+export const sdk = globalSdk ?? farcasterSdk;
+if (typeof window !== "undefined" && !window.sdk) window.sdk = sdk;
+
 export async function ready() {
-  if (window.sdk?.actions?.ready) await window.sdk.actions.ready();
+  if (sdk?.actions?.ready) await sdk.actions.ready();
 }
 
 export async function getFCProvider() {
-  try { return await window.sdk?.wallet?.getEthereumProvider?.() ?? null; }
+  try { return await sdk.wallet?.getEthereumProvider?.() ?? null; }
   catch { return null; }
 }
 

@@ -1,8 +1,7 @@
 // /js/support.js
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import { R3NT_ADDRESS } from "./config.js";
-import { ensureWritable, simulateAndWrite } from "./shared.js";
-import { ready } from "./farcaster.js";
+import { ensureWritable, simulateAndWrite, ready } from "./shared.js";
 
 ready();
 

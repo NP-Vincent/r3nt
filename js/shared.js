@@ -7,8 +7,10 @@ import {
 } from "https://cdn.jsdelivr.net/npm/viem@2.34.0/+esm";
 import { arbitrum } from "https://cdn.jsdelivr.net/npm/viem@2.34.0/chains/+esm";
 import { RPC_URL, CHAIN_ID, EXPLORER } from "./config.js";
-import { ready, getFCProvider } from "./farcaster.js";
+import { sdk, ready, getFCProvider } from "./farcaster.js";
 import { showToast } from "./toast.js";
+
+export { sdk, ready, getFCProvider };
 
 export const publicClient = createPublicClient({ chain: arbitrum, transport: http(RPC_URL) });
 
