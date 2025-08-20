@@ -1,14 +1,14 @@
 // /js/landlord.js
 import {
   publicClient,
-  getWalletClient,
   ensureWritable,
   toUnits,
   fromUnits,
   readVar,
   readStruct,
   simulateAndWrite,
-} from "./shared.js"; // create this helper (or inline; see tenant.js for patterns too)
+  getAddresses,
+} from "./shared.js";
 import { showToast } from "./toast.js";
 
 import {
@@ -26,11 +26,6 @@ const els = {
   createListing: document.getElementById("create-listing"),
   myListings: document.getElementById("my-listings"),
 };
-
-async function getAddresses() {
-  const w = await getWalletClient();
-  return w ? { walletClient: w.walletClient, account: w.account } : { walletClient: null, account: null };
-}
 
 async function renderApproveListFee() {
   try {
