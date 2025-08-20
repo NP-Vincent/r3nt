@@ -106,7 +106,7 @@ await contract.book(listingId, rateType, units, startDate, endDate);
 
 - **Mini App Front-End**  
   - `@farcaster/miniapp-sdk`  
-  - `viem@2.x`  
+  - `viem@2.34.0`  
   - Arbitrum RPC: `https://arb1.arbitrum.io/rpc`  
 
 ---
