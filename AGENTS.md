@@ -19,9 +19,9 @@ For development and troubleshooting tips, consult the [Farcaster Mini App Agents
 - **Network**: Arbitrum One
 - **Token**: Canonical USDC (6 decimals)
 - **Core Concepts**:
-  - **Listings**: Landlords register properties with minimal on-chain data. ($1 USDC listing fee)
-  - **View Pass**: Tenants pay $0.10 USDC for a 72h pass to browse listings.
-  - **Booking**: Tenant books with rent + deposit. Platform charges 1% commission on rent.
+  - **Listings**: Landlords register properties with minimal on-chain data. ($2 USDC listing fee)
+  - **View Pass**: Tenants pay $0.25 USDC for a 72h pass to browse listings.
+  - **Booking**: Tenant books with rent + deposit. Platform charges 2% commission on rent.
   - **Escrow**: Deposit held in contract, landlord proposes split, platform (owner) confirms release.
   - **Off-chain details**: Farcaster `(fid, castHash)` link points to rich metadata (images, text).
 
@@ -29,19 +29,19 @@ For development and troubleshooting tips, consult the [Farcaster Mini App Agents
 
 ## Roles
 - **Landlord**  
-  - Calls `createListing()` (after approving $1 fee in USDC).  
+  - Calls `createListing()` (after approving $2 fee in USDC).  
   - Can toggle listing active/inactive.  
   - Calls `markCompleted()` after rental.  
   - Calls `proposeDepositSplit()` to suggest deposit distribution.  
 
 - **Tenant**  
-  - Calls `buyViewPass()` (after approving $0.10 USDC).  
+  - Calls `buyViewPass()` (after approving $0.25 USDC).  
   - Can book active listings with `book()`.  
   - Pays: rent + platform fee + deposit.  
   - Rent → landlord, fee → platform, deposit → escrow.  
 
 - **Platform (Owner)**  
-  - Receives listing/view fees + 1% commission.  
+  - Receives listing/view fees + 2% commission.  
   - Confirms deposit release with `confirmDepositRelease()`.  
   - Manages upgrades via UUPS.  
 
