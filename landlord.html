@@ -1,4 +1,81 @@
 <!doctype html>
 <html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Landlord – r3nt</title>
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+  <header>
+    <a href="index.html">&larr; Back</a>
+    <h1>Landlord</h1>
+  </header>
+  <main>
+    <form id="create-form" class="card">
+      <h2>Create Listing</h2>
+      <div class="grid">
+        <label>Deposit (USDC)
+          <input id="deposit" type="text" required>
+        </label>
+        <label>Rate Daily
+          <input id="rateDaily" type="text" required>
+        </label>
+        <label>Rate Weekly
+          <input id="rateWeekly" type="text" required>
+        </label>
+        <label>Rate Monthly
+          <input id="rateMonthly" type="text" required>
+        </label>
+        <label>Geohash
+          <input id="geohash" type="text" required>
+        </label>
+        <label>FID
+          <input id="fid" type="number" required>
+        </label>
+        <label>Cast Hash
+          <input id="castHash" type="text" placeholder="0x..." required>
+        </label>
+        <label>Title
+          <input id="title" type="text" required>
+        </label>
+        <label>Short Description
+          <textarea id="shortDesc" required></textarea>
+        </label>
+        <label>Signers (comma-separated)
+          <input id="signers" type="text" placeholder="0xabc,0xdef">
+        </label>
+        <label>Threshold
+          <input id="threshold" type="number" value="1">
+        </label>
+      </div>
+      <button class="btn" type="submit">Create</button>
+    </form>
 
+    <form id="completed-form" class="card">
+      <h2>Mark Booking Completed</h2>
+      <label>Booking ID
+        <input id="bookingId" type="number" required>
+      </label>
+      <button class="btn" type="submit">Mark Completed</button>
+    </form>
+
+    <form id="split-form" class="card">
+      <h2>Propose Deposit Split</h2>
+      <div class="grid">
+        <label>Booking ID
+          <input id="splitBookingId" type="number" required>
+        </label>
+        <label>To Tenant (USDC)
+          <input id="toTenant" type="text" required>
+        </label>
+        <label>To Landlord (USDC)
+          <input id="toLandlord" type="text" required>
+        </label>
+      </div>
+      <button class="btn" type="submit">Propose</button>
+    </form>
+  </main>
+  <script type="module" src="./js/landlord.js"></script>
+</body>
 </html>
