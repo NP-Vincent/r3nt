@@ -1,15 +1,5 @@
 // minimal FC helpers
 export async function ready() {
-  if (!window.sdk) {
-    await new Promise((resolve) => {
-      const id = setInterval(() => {
-        if (window.sdk) {
-          clearInterval(id);
-          resolve();
-        }
-      }, 50);
-    });
-  }
   if (window.sdk?.actions?.ready) await window.sdk.actions.ready();
 }
 
