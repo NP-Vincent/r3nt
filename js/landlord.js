@@ -21,11 +21,7 @@ const r3ntAbi = r3nt.abi;
 import usdc from "./abi/USDC.json" assert { type: "json" };
 const erc20Abi = usdc.abi;
 
-const els = {
-  feeApprove: document.getElementById("fee-approve"),
-  createListing: document.getElementById("create-listing"),
-  myListings: document.getElementById("my-listings"),
-};
+const els = {};
 
 async function renderApproveListFee() {
   try {
@@ -262,6 +258,9 @@ async function renderMyListings() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  els.feeApprove = document.getElementById("fee-approve");
+  els.createListing = document.getElementById("create-listing");
+  els.myListings = document.getElementById("my-listings");
   try {
     await renderApproveListFee();
     await renderCreateListing();

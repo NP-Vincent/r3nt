@@ -22,11 +22,7 @@ const r3ntAbi = r3nt.abi;
 import usdc from "./abi/USDC.json" assert { type: "json" };
 const erc20Abi = usdc.abi;
 
-const els = {
-  viewPass: document.getElementById("view-pass"),
-  book: document.getElementById("book"),
-  myBookings: document.getElementById("my-bookings"),
-};
+const els = {};
 
 async function renderViewPass() {
   try {
@@ -299,6 +295,9 @@ async function renderMyBookings() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  els.viewPass = document.getElementById("view-pass");
+  els.book = document.getElementById("book");
+  els.myBookings = document.getElementById("my-bookings");
   try {
     await renderViewPass();
     await renderBook();
