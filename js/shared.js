@@ -1,6 +1,11 @@
 // /js/shared.js
-import { createPublicClient, createWalletClient, http, getAddress } from "../vendor/viem-2.x.min.js";
-import { arbitrum } from "../vendor/viem-2.x.min.js";
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  getAddress,
+} from "https://cdn.jsdelivr.net/npm/viem@2/+esm";
+import { arbitrum } from "https://cdn.jsdelivr.net/npm/viem@2/chains/+esm";
 import { RPC_URL, CHAIN_ID, EXPLORER } from "./config.js";
 import { ready, getFCProvider } from "./farcaster.js";
 import { showToast } from "./toast.js";
