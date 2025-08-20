@@ -1,0 +1,28 @@
+{
+  "frame": {
+    "name": "r3nt",
+    "version": "1",
+    "iconUrl": "https://r3nt.sqmu.net/assets/icon.png",
+    "homeUrl": "https://r3nt.sqmu.net",
+    "splashImageUrl": "https://r3nt.sqmu.net/assets/splashscreen.png",
+    "splashBackgroundColor": "#FFFFFF",
+    "subtitle": "Rent Made Easy",
+    "description": "r3nt by SQMU is a simple solution for renting with crypto",
+    "primaryCategory": "utility",
+    "tags": [
+      "rent",
+      "apartments",
+      "crypto"
+    ],
+    "heroImageUrl": "https://r3nt.sqmu.net/assets/OG-Hero.png",
+    "tagline": "rent with crypto anywhere",
+    "ogTitle": "r3nt by SQMU",
+    "ogDescription": "rent with crypto anywhere",
+    "ogImageUrl": "https://r3nt.sqmu.net/assets/OG-Hero.png"
+  },
+  "accountAssociation": {
+    "header": "eyJmaWQiOjExMTUxNTIsInR5cGUiOiJhdXRoIiwia2V5IjoiMHg4RGI0NWY5MGVmNGVCRkM2RDEzM0MxYjJjNmFjNzQyQjJBRTY1M0FhIn0",
+    "payload": "eyJkb21haW4iOiIifQ",
+    "signature": "vb+GSCHa0fLHxbqUlSFxGq8pWYOVpQTtCdjURIcGZYBROWQf3SWwJgBHxc9+m5d0+OPPHY5wXIFZ7ZvOM+Yu2xs="
+  }
+}
