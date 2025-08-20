@@ -2,8 +2,7 @@
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import usdcAbi from "./abi/USDC.json" assert { type: "json" };
 import { R3NT_ADDRESS, USDC_ADDRESS } from "./config.js";
-import { ensureWritable, simulateAndWrite, toUnits, readVar } from "./shared.js";
-import { ready } from "./farcaster.js";
+import { ensureWritable, simulateAndWrite, toUnits, readVar, ready } from "./shared.js";
 
 ready();
 

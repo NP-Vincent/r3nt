@@ -1,4 +1,4 @@
 // /js/index.js
-import { ready } from "./farcaster.js";
+import { ready } from "./shared.js";
 
 ready();
