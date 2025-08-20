@@ -139,9 +139,9 @@ All deployments and upgrades are executed manually in **Remix**.
 - **r3nt.initialize**:
   - `_usdc`: Canonical USDC address on Arbitrum
   - `_platform`: fee receiver / owner
-  - `_feeBps`: e.g., `100` for 1%
-  - `_listFee`: `1_000_000` (=$1)
-  - `_viewFee`: `100_000` (=$0.10)
+  - `_feeBps`: e.g., `200` for 2%
+  - `_listFee`: `2_000_000` (=$2)
+  - `_viewFee`: `250_000` (=$0.25)
   - `_viewPassSeconds`: `259200` (72h)
   - `_factory`: ListingFactory proxy address
 
