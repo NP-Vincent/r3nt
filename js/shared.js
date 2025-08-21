@@ -14,9 +14,22 @@ export { sdk, ready, getFCProvider };
 
 export const publicClient = createPublicClient({ chain: arbitrum, transport: http(RPC_URL) });
 
-export async function getWalletClient() {
+export async function ensureArbitrum() {
   await ready();
   const provider = await getFCProvider();
+  if (!provider) return null;
+  const current = parseInt(await provider.request({ method: "eth_chainId" }), 16);
+  if (current !== CHAIN_ID) {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: `0x${CHAIN_ID.toString(16)}` }],
+    });
+  }
+  return provider;
+}
+
+export async function getWalletClient() {
+  const provider = await ensureArbitrum();
   if (!provider) return null;
   const walletClient = createWalletClient({ chain: arbitrum, transport: provider });
   const [addr] = await walletClient.getAddresses();
