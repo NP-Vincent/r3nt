@@ -1,5 +1,7 @@
 // /js/index.js
 import { ready, maybeShowReadOnlyBanner } from "./shared.js";
 
-ready();
-maybeShowReadOnlyBanner();
+window.addEventListener("DOMContentLoaded", async () => {
+  await maybeShowReadOnlyBanner();
+  await ready();
+});

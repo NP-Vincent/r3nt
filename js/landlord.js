@@ -4,17 +4,16 @@ import usdcAbi from "./abi/USDC.json" assert { type: "json" };
 import { R3NT_ADDRESS, USDC_ADDRESS } from "./config.js";
 import { ensureWritable, simulateAndWrite, toUnits, readVar, ready, sdk, publicClient, getWalletClient, maybeShowReadOnlyBanner } from "./shared.js";
 
-ready();
-
 let provider = null;
 let account = null;
 
-window.addEventListener("DOMContentLoaded", () => {
-  setupWallet();
+window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("connect-btn")?.addEventListener("click", connectWallet);
   document.getElementById("create-form")?.addEventListener("submit", createListing);
   document.getElementById("completed-form")?.addEventListener("submit", markCompleted);
   document.getElementById("split-form")?.addEventListener("submit", proposeSplit);
+  await setupWallet();
+  await ready();
 });
 
 async function setupWallet() {
