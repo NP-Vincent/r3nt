@@ -13,9 +13,9 @@
       "rent",
       "apartments",
       "crypto"
+    ],
     "requiredChains": ["eip155:42161"],
     "requiredCapabilities": ["wallet.getEthereumProvider"]
-    ],
     "heroImageUrl": "https://r3nt.sqmu.net/assets/OG-Hero.png",
     "tagline": "rent with crypto anywhere",
     "ogTitle": "r3nt by SQMU",
