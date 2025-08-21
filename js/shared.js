@@ -10,13 +10,28 @@ import { RPC_URL, CHAIN_ID, EXPLORER } from "./config.js";
 import { sdk, ready, getFCProvider } from "./farcaster.js";
 import { showToast } from "./toast.js";
 
-export { sdk, ready, getFCProvider };
+export { sdk, ready, getFCProvider, maybeShowReadOnlyBanner };
 
 export const publicClient = createPublicClient({ chain: arbitrum, transport: http(RPC_URL) });
 
+export async function maybeShowReadOnlyBanner() {
+  const provider = await getFCProvider();
+  if (!provider && typeof document !== "undefined") {
+    if (!document.getElementById("readonly-banner")) {
+      const banner = document.createElement("div");
+      banner.id = "readonly-banner";
+      banner.className = "banner banner--readonly";
+      banner.textContent = "Viewing only. Open in Farcaster.";
+      const container = document.querySelector("main") ?? document.body;
+      container.prepend(banner);
+    }
+  }
+  return provider;
+}
+
 export async function ensureArbitrum() {
   await ready();
-  const provider = await getFCProvider();
+  const provider = await maybeShowReadOnlyBanner();
   if (!provider) return null;
   const current = parseInt(await provider.request({ method: "eth_chainId" }), 16);
   if (current !== CHAIN_ID) {
