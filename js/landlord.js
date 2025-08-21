@@ -2,15 +2,54 @@
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import usdcAbi from "./abi/USDC.json" assert { type: "json" };
 import { R3NT_ADDRESS, USDC_ADDRESS } from "./config.js";
-import { ensureWritable, simulateAndWrite, toUnits, readVar, ready } from "./shared.js";
+import { ensureWritable, simulateAndWrite, toUnits, readVar, ready, sdk } from "./shared.js";
 
 ready();
 
+let provider = null;
+let account = null;
+
 window.addEventListener("DOMContentLoaded", () => {
+  setupWallet();
+  document.getElementById("connect-btn")?.addEventListener("click", connectWallet);
   document.getElementById("create-form")?.addEventListener("submit", createListing);
   document.getElementById("completed-form")?.addEventListener("submit", markCompleted);
   document.getElementById("split-form")?.addEventListener("submit", proposeSplit);
 });
+
+async function setupWallet() {
+  try {
+    provider = await sdk.wallet.getEthereumProvider();
+    const btn = document.getElementById("connect-btn");
+    if (!btn) return;
+    if (!provider) {
+      btn.style.display = "block";
+      return;
+    }
+    const accounts = await provider.request({ method: "eth_accounts" });
+    if (accounts.length > 0) {
+      account = accounts[0];
+      btn.textContent = shortAddr(account);
+    }
+  } catch {}
+}
+
+async function connectWallet() {
+  if (!provider) {
+    provider = await sdk.wallet.getEthereumProvider();
+    if (!provider) return;
+  }
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
+  if (accounts.length > 0) {
+    account = accounts[0];
+    const btn = document.getElementById("connect-btn");
+    if (btn) btn.textContent = shortAddr(account);
+  }
+}
+
+function shortAddr(a) {
+  return `${a.slice(0, 6)}...${a.slice(-4)}`;
+}
 
 async function createListing(e) {
   e.preventDefault();
