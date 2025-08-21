@@ -149,7 +149,7 @@ All deployments and upgrades are executed manually in **Remix**.
 
 
 ## Mini App “Write” Flow
-The pattern mirrors **TicTacVato**:
+The pattern mirrors a working dApp:
 
 1. `approve(USDC, listFee)` → `createListing(...)`  
 2. `approve(USDC, viewFee)` → `buyViewPass()`  
