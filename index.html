@@ -4,70 +4,159 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>r3nt View Pass</title>
-  <link rel="preconnect" href="https://auth.farcaster.xyz" />
+
+  <!-- Optional Mini App metadata (kept minimal) -->
+  <meta name="fc:miniapp" content='{"version":"1"}' />
+
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 20px; }
+    h1 { margin: 6px 0 10px; }
+    button { width: 100%; padding: 12px 16px; border: 0; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    #connect { background: #1f6feb; color: #fff; }
+    #buy { background: #10b981; color: #fff; margin-top: 10px; }
+    #status { margin-top: 14px; min-height: 24px; font-size: 0.95rem; color: #444; }
+    #address { margin-top: 6px; font-family: ui-monospace, Menlo, monospace; color: #333; }
+  </style>
 </head>
 <body>
   <h1>r3nt View Pass</h1>
+
   <button id="connect">Connect Wallet</button>
-  <div id="address"></div>
-  <button id="buy" disabled>Buy View Pass</button>
+  <div id="address">Not connected</div>
+  <button id="buy" disabled>Buy View Pass (0.25 USDC)</button>
+  <div id="status">Loading…</div>
 
   <script type="module">
-    import { sdk } from "https://cdn.jsdelivr.net/npm/@farcaster/miniapp-sdk/+esm";
-    import { encodeFunctionData, parseUnits } from "https://cdn.jsdelivr.net/npm/viem@2/+esm";
-    import r3ntAbi from "./js/abi/r3nt.json" assert { type: "json" };
-    import erc20Abi from "./js/abi/USDC.json" assert { type: "json" };
-    import { R3NT_ADDRESS, USDC_ADDRESS } from "./js/config.js";
+    import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+    import {
+      encodeFunctionData,
+      parseUnits,
+    } from 'https://esm.sh/viem@2.9.32';
 
-    const connectBtn = document.getElementById('connect');
-    const buyBtn = document.getElementById('buy');
-    const addressDisplay = document.getElementById('address');
+    // If you prefer JSON ABIs as in your original, keep these imports:
+    import r3ntAbi from './js/abi/r3nt.json' assert { type: 'json' };
+    import erc20Abi from './js/abi/USDC.json' assert { type: 'json' };
+    import { R3NT_ADDRESS, USDC_ADDRESS } from './js/config.js';
 
-    let ethereum;
+    const els = {
+      connect: document.getElementById('connect'),
+      buy: document.getElementById('buy'),
+      addr: document.getElementById('address'),
+      status: document.getElementById('status'),
+    };
 
-    connectBtn.addEventListener('click', async () => {
-      try {
-        ethereum = await sdk.wallet.getEthereumProvider();
-        const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
-        const account = accounts[0];
-        addressDisplay.textContent = `Connected: ${account}`;
-        buyBtn.disabled = false;
-      } catch (err) {
-        console.error('Wallet connection failed', err);
+    // Hide splash if inside the Farcaster host
+    try { await sdk.actions.ready(); } catch {}
+
+    let provider;
+    try {
+      provider = await sdk.wallet.getEthereumProvider();
+    } catch {
+      // Not in host: keep viewing-only UX
+    }
+
+    const ARBITRUM_HEX = '0xa4b1'; // Arbitrum One; adjust if your contracts are elsewhere
+    const USDC_DECIMALS = 6n;
+    const PASS_PRICE_USDC = '0.25'; // 0.25 USDC
+
+    function short(addr) {
+      return addr ? `${addr.slice(0,6)}…${addr.slice(-4)}` : '';
+    }
+
+    function needsHost() {
+      return !provider || typeof provider.request !== 'function';
+    }
+
+    async function ensureArbitrum() {
+      const cid = await provider.request({ method: 'eth_chainId' });
+      if (cid !== ARBITRUM_HEX) {
+        await provider.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: ARBITRUM_HEX }],
+        });
       }
-    });
+    }
 
-    buyBtn.addEventListener('click', async () => {
-      if (!ethereum) return;
+    async function getAccount() {
+      const accounts = await provider.request({ method: 'eth_requestAccounts' });
+      return accounts?.[0] || '';
+    }
+
+    els.status.textContent = needsHost()
+      ? 'Viewing only. Open in Farcaster app to connect.'
+      : 'Tap Connect to continue.';
+
+    // ——— Connect ———
+    els.connect.onclick = async () => {
+      if (needsHost()) {
+        els.status.textContent = 'Open in Farcaster app to connect wallet.';
+        return;
+      }
       try {
-        const amount = parseUnits('0.25', 6); // USDC has 6 decimals
+        const account = await getAccount();
+        if (!account) throw new Error('No account returned.');
+        await ensureArbitrum();
+        els.addr.textContent = `Connected: ${short(account)}`;
+        els.connect.textContent = `Connected ${short(account)}`;
+        els.connect.style.background = '#10b981';
+        els.buy.disabled = false;
+        els.status.textContent = 'Ready.';
+      } catch (e) {
+        console.error(e);
+        els.status.textContent = e?.message || 'Wallet connection failed.';
+      }
+    };
+
+    // ——— Buy View Pass (approve → buy) ———
+    els.buy.onclick = async () => {
+      if (needsHost()) {
+        els.status.textContent = 'Open in Farcaster app to purchase.';
+        return;
+      }
+      try {
+        await ensureArbitrum();
+        const from = (await provider.request({ method: 'eth_accounts' }))?.[0];
+        if (!from) throw new Error('No wallet account connected.');
+
+        // 1) Approve exact allowance
+        const amount = parseUnits(PASS_PRICE_USDC, Number(USDC_DECIMALS));
         const approveData = encodeFunctionData({
           abi: erc20Abi,
           functionName: 'approve',
-          args: [R3NT_ADDRESS, amount]
+          args: [R3NT_ADDRESS, amount],
         });
+        const approveTx = { from, to: USDC_ADDRESS, data: approveData };
+
+        els.status.textContent = 'Approving USDC spend…';
+        try {
+          await provider.request({ method: 'eth_estimateGas', params: [approveTx] });
+        } catch (_) {
+          // continue; wallet will surface a clearer reason on send
+        }
+        await provider.request({ method: 'eth_sendTransaction', params: [approveTx] });
+
+        // 2) Call buyViewPass (no ETH value, assumes contract pulls USDC)
         const buyData = encodeFunctionData({
           abi: r3ntAbi,
-          functionName: 'buyViewPass'
+          functionName: 'buyViewPass',
+          args: [], // add args if your function requires any
         });
+        const buyTx = { from, to: R3NT_ADDRESS, data: buyData };
 
-        await ethereum.request({
-          method: 'wallet_sendCalls',
-          params: [{
-            calls: [
-              { to: USDC_ADDRESS, data: approveData },
-              { to: R3NT_ADDRESS, data: buyData }
-            ]
-          }]
-        });
+        els.status.textContent = 'Completing purchase…';
+        try {
+          await provider.request({ method: 'eth_estimateGas', params: [buyTx] });
+        } catch (_) {}
+        await provider.request({ method: 'eth_sendTransaction', params: [buyTx] });
 
+        els.status.textContent = 'Success. View pass purchased.';
         alert('View pass purchased!');
       } catch (err) {
-        console.error('Purchase failed', err);
+        console.error(err);
+        els.status.textContent = `Error: ${err?.message || err}`;
       }
-    });
-
-    await sdk.actions.ready();
+    };
   </script>
 </body>
 </html>
