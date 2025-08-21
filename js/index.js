@@ -1,4 +1,5 @@
 // /js/index.js
-import { ready } from "./shared.js";
+import { ready, maybeShowReadOnlyBanner } from "./shared.js";
 
 ready();
+maybeShowReadOnlyBanner();

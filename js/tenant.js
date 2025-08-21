@@ -2,7 +2,7 @@
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import usdcAbi from "./abi/USDC.json" assert { type: "json" };
 import { R3NT_ADDRESS, USDC_ADDRESS, FEE_BPS } from "./config.js";
-import { ensureWritable, simulateAndWrite, readVar, readStruct, ready, sdk, publicClient } from "./shared.js";
+import { ensureWritable, simulateAndWrite, readVar, readStruct, ready, sdk, publicClient, maybeShowReadOnlyBanner } from "./shared.js";
 
 ready();
 
@@ -19,11 +19,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
 async function setupWallet() {
   try {
-    provider = await sdk.wallet.getEthereumProvider();
+    provider = await maybeShowReadOnlyBanner();
     const btn = document.getElementById("connect-btn");
     if (!btn) return;
     if (!provider) {
-      btn.style.display = "block";
+      btn.style.display = "none";
     } else {
       const accounts = await provider.request({ method: "eth_accounts" });
       if (accounts.length > 0) {
@@ -37,7 +37,7 @@ async function setupWallet() {
 
 async function connectWallet() {
   if (!provider) {
-    provider = await sdk.wallet.getEthereumProvider();
+    provider = await maybeShowReadOnlyBanner();
     if (!provider) return;
   }
   const accounts = await provider.request({ method: "eth_requestAccounts" });
