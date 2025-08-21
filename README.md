@@ -8,7 +8,7 @@ It enables landlords to list properties, tenants to book with USDC, and deposits
 - **Token**: Canonical USDC (6 decimals)
 - **Upgradeable**: UUPS with OpenZeppelin v5
 
-For developer and debugging guidance, see the [Farcaster Mini App Agents Checklist](https://miniapps.farcaster.xyz/docs/guides/agents-checklist). More detailed information is available in [`minapp-farcaster-llms-full.txt`](./minapp-farcaster-llms-full.txt), a local copy of the upstream `llms-full.txt`.
+For developer and debugging guidance, see the [Farcaster Mini App Agents Checklist](https://miniapps.farcaster.xyz/docs/guides/agents-checklist). More detailed information is available in notes/Codex-minapp-farcaster-reference.txt, a local copy of the upstream `llms-full.txt`.
 
 ### Hosting
 The static frontend references assets with relative paths, so it can be served from any directory. Hosting at the domain root is not required.
