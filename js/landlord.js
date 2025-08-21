@@ -6,9 +6,11 @@ import { ensureWritable, simulateAndWrite, toUnits, readVar, ready } from "./sha
 
 ready();
 
-document.getElementById("create-form")?.addEventListener("submit", createListing);
-document.getElementById("completed-form")?.addEventListener("submit", markCompleted);
-document.getElementById("split-form")?.addEventListener("submit", proposeSplit);
+window.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("create-form")?.addEventListener("submit", createListing);
+  document.getElementById("completed-form")?.addEventListener("submit", markCompleted);
+  document.getElementById("split-form")?.addEventListener("submit", proposeSplit);
+});
 
 async function createListing(e) {
   e.preventDefault();
