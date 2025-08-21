@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>r3nt View Pass</title>
 
-  <!-- Embed metadata: update URLs to your domain -->
+  <!-- Embed metadata (ok) -->
   <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://r3nt.sqmu.net/assets/icon.png","button":{"title":"Open r3nt","action":{"type":"launch_miniapp","name":"r3nt","url":"https://r3nt.sqmu.net/index.html","splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png","splashBackgroundColor":"#FFFFFF"}}}' />
 
   <style>
@@ -25,13 +25,26 @@
   <button id="buy" disabled>Buy View Pass (0.25 USDC)</button>
   <div id="status">Loading…</div>
 
+  <!-- 1) READY FIRST: tiny module; no other imports. -->
+  <script type="module">
+    import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+    // Best practice: call ready as soon as the interface is stable.
+    // If we're not in a host, this no-ops.
+    (async () => {
+      try {
+        // Optional: check context (not required for ready)
+        // await sdk.isInMiniApp();
+        await sdk.actions.ready();
+      } catch {}
+      // Safety: hide splash even if host handshake is slow
+      setTimeout(()=>{ try { sdk.actions.ready(); } catch {} }, 800);
+    })();
+  </script>
+
+  <!-- 2) APP LOGIC: separate module. If this fails, splash is already hidden. -->
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
-
-    import r3ntAbi from './js/abi/r3nt.json' assert { type: 'json' };
-    import erc20Abi from './js/abi/USDC.json' assert { type: 'json' };
-    import { R3NT_ADDRESS, USDC_ADDRESS } from './js/config.js';
 
     const els = {
       connect: document.getElementById('connect'),
@@ -44,26 +57,22 @@
     const PASS_PRICE_USDC = '0.25';          // 0.25 USDC
     const USDC_DECIMALS = 6;
 
-    // Ensure we only do wallet work in a Mini App host
+    // Keep small to avoid failures before ready()
     let inHost = false;
     try { inHost = await sdk.isInMiniApp(); } catch {}
-    try { await sdk.actions.ready(); } catch {}
+    els.status.textContent = inHost
+      ? 'Tap Connect to continue.'
+      : 'Viewing only. Open from a Farcaster Mini App embed.';
 
-    if (!inHost) {
-      els.status.textContent = 'Viewing only. Open from a Farcaster Mini App embed.';
-    } else {
-      els.status.textContent = 'Tap Connect to continue.';
-    }
-
-    // Check host capabilities (wallet must be present)
     async function hostSupportsWallet() {
       try {
         const caps = await sdk.getCapabilities?.();
-        return Array.isArray(caps) && caps.includes('wallet.getEthereumProvider');
-      } catch { return true; } // older hosts: assume true
+        // If host exposes capabilities, verify; otherwise assume yes.
+        return !caps || caps.includes('wallet.getEthereumProvider');
+      } catch { return true; }
     }
 
-    let provider; // EIP-1193 provider from host
+    let provider; // EIP-1193
     async function getProvider() {
       if (!provider) provider = await sdk.wallet.getEthereumProvider();
       return provider;
@@ -74,8 +83,7 @@
       if (id !== ARBITRUM_HEX) {
         try {
           await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: ARBITRUM_HEX }] });
-        } catch (e) {
-          // Optional add-chain fallback (some hosts may not support it)
+        } catch {
           try {
             await p.request({
               method: 'wallet_addEthereumChain',
@@ -87,25 +95,21 @@
                 blockExplorerUrls: ['https://arbiscan.io']
               }]
             });
-          } catch { /* ignore */ }
+          } catch {}
         }
       }
     }
 
-    function short(addr) { return addr ? `${addr.slice(0,6)}…${addr.slice(-4)}` : ''; }
+    function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
+    // ——— Connect ———
     els.connect.onclick = async () => {
       try {
-        if (!inHost) {
-          els.status.textContent = 'Open in Farcaster app to connect wallet.';
-          return;
-        }
-        if (!(await hostSupportsWallet())) {
-          els.status.textContent = 'This client does not support wallets for Mini Apps.';
-          return;
-        }
-        const p = await getProvider();                    // get EIP-1193 provider
-        await p.request({ method: 'eth_requestAccounts' });// connect
+        if (!inHost) { els.status.textContent = 'Open in Farcaster app to connect wallet.'; return; }
+        if (!(await hostSupportsWallet())) { els.status.textContent = 'This client does not support wallets for Mini Apps.'; return; }
+
+        const p = await getProvider();
+        await p.request({ method: 'eth_requestAccounts' });
         const [addr] = await p.request({ method: 'eth_accounts' });
         if (!addr) throw new Error('No account found.');
         await ensureArbitrum(p);
@@ -121,7 +125,7 @@
       }
     };
 
-    // Purchase: try wallet_sendCalls; fallback to two txs
+    // ——— Buy (lazy-load ABIs/config right before use) ———
     els.buy.onclick = async () => {
       try {
         const p = await getProvider();
@@ -129,18 +133,25 @@
         if (!from) throw new Error('No wallet account connected.');
         await ensureArbitrum(p);
 
+        // Lazy imports: these won’t block ready/splash
+        const [{ default: r3ntAbi }, { default: erc20Abi }, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
+          import('./js/abi/r3nt.json', { assert: { type: 'json' } }),
+          import('./js/abi/USDC.json', { assert: { type: 'json' } }),
+          import('./js/config.js'),
+        ]);
+
         const amount = parseUnits(PASS_PRICE_USDC, USDC_DECIMALS);
 
         const approveData = encodeFunctionData({
-          abi: erc20Abi, functionName: 'approve',
-          args: [R3NT_ADDRESS, amount]
+          abi: erc20Abi, functionName: 'approve', args: [R3NT_ADDRESS, amount]
         });
         const buyData = encodeFunctionData({
           abi: r3ntAbi, functionName: 'buyViewPass', args: []
         });
 
-        // Prefer EIP-5792 batch calls if supported
         els.status.textContent = 'Approving & purchasing…';
+
+        // Prefer EIP-5792 if supported
         try {
           await p.request({
             method: 'wallet_sendCalls',
@@ -149,8 +160,8 @@
               { to: R3NT_ADDRESS, data: buyData }
             ] }]
           });
-        } catch (e) {
-          // Fallback: two standard transactions
+        } catch {
+          // Fallback: two txs
           await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
           await p.request({ method: 'eth_sendTransaction', params: [{ from, to: R3NT_ADDRESS, data: buyData }] });
         }
