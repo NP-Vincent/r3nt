@@ -161,9 +161,20 @@
             ] }]
           });
         } catch {
-          // Fallback: two txs
-          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
-          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: R3NT_ADDRESS, data: buyData }] });
+          try {
+            // Legacy syntax: params is an array of call objects
+            await p.request({
+              method: 'wallet_sendCalls',
+              params: [
+                { to: USDC_ADDRESS, data: approveData },
+                { to: R3NT_ADDRESS, data: buyData }
+              ]
+            });
+          } catch {
+            // Fallback: two txs
+            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: R3NT_ADDRESS, data: buyData }] });
+          }
         }
 
         els.status.textContent = 'Success. View pass purchased.';
