@@ -3,11 +3,10 @@ import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import { R3NT_ADDRESS } from "./config.js";
 import { ensureWritable, simulateAndWrite, ready, maybeShowReadOnlyBanner } from "./shared.js";
 
-ready();
-maybeShowReadOnlyBanner();
-
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("release-form")?.addEventListener("submit", confirmRelease);
+  await maybeShowReadOnlyBanner();
+  await ready();
 });
 
 async function confirmRelease(e) {
