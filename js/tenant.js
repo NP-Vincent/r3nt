@@ -2,7 +2,7 @@
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import usdcAbi from "./abi/USDC.json" assert { type: "json" };
 import { R3NT_ADDRESS, USDC_ADDRESS, FEE_BPS } from "./config.js";
-import { ensureWritable, simulateAndWrite, readVar, readStruct, ready, debugLog } from "./shared.js";
+import { ensureWritable, simulateAndWrite, readVar, readStruct, ready } from "./shared.js";
 
 ready();
 
@@ -27,7 +27,7 @@ async function buyPass(e) {
       args: []
     });
   } catch (err) {
-    debugLog(err);
+    console.error(err);
   }
 }
 
@@ -70,6 +70,6 @@ async function book(e) {
       args: [listingId, rtype, units, start, end]
     });
   } catch (err) {
-    debugLog(err);
+    console.error(err);
   }
 }
