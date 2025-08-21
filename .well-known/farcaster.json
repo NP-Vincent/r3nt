@@ -8,7 +8,10 @@
     "splashBackgroundColor": "#FFFFFF",
     "description": "r3nt by SQMU is a simple solution for renting with crypto",
     "requiredChains": ["eip155:42161"],
-    "requiredCapabilities": ["wallet.getEthereumProvider"],
+    "requiredCapabilities": [
+      "wallet.getEthereumProvider",
+      "actions.ready"
+    ],
 
     "subtitle": "Rent Made Easy",
     "primaryCategory": "utility",
