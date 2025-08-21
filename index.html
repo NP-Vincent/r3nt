@@ -133,10 +133,10 @@
         if (!from) throw new Error('No wallet account connected.');
         await ensureArbitrum(p);
 
-        // Lazy imports: these won’t block ready/splash
-        const [{ default: r3ntAbi }, { default: erc20Abi }, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
-          import('./js/abi/r3nt.json', { assert: { type: 'json' } }),
-          import('./js/abi/USDC.json', { assert: { type: 'json' } }),
+        // Lazy-load ABIs via fetch to avoid JSON module support issues
+        const [r3ntAbi, erc20Abi, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
+          fetch('./js/abi/r3nt.json').then(r => r.json()),
+          fetch('./js/abi/USDC.json').then(r => r.json()),
           import('./js/config.js'),
         ]);
 
