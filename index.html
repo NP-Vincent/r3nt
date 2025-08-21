@@ -2,15 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>r3nt View Pass</title>
 
-  <!-- Optional Mini App metadata (kept minimal) -->
-  <meta name="fc:miniapp" content='{"version":"1"}' />
+  <!-- Embed metadata: update URLs to your domain -->
+  <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://r3nt.sqmu.net/assets/icon.png","button":{"title":"Open r3nt","action":{"type":"launch_miniapp","name":"r3nt","url":"https://r3nt.sqmu.net/index.html","splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png","splashBackgroundColor":"#FFFFFF"}}}' />
+  <meta name="fc:frame" content='{"version":"1","imageUrl":"https://r3nt.sqmu.net/assets/icon.png","button":{"title":"Open r3nt","action":{"type":"launch_frame","name":"r3nt","url":"https://r3nt.sqmu.net/index.html","splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png","splashBackgroundColor":"#FFFFFF"}}}' />
 
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 20px; }
-    h1 { margin: 6px 0 10px; }
     button { width: 100%; padding: 12px 16px; border: 0; border-radius: 8px; font-weight: 600; cursor: pointer; }
     button:disabled { opacity: .6; cursor: not-allowed; }
     #connect { background: #1f6feb; color: #fff; }
@@ -21,7 +21,6 @@
 </head>
 <body>
   <h1>r3nt View Pass</h1>
-
   <button id="connect">Connect Wallet</button>
   <div id="address">Not connected</div>
   <button id="buy" disabled>Buy View Pass (0.25 USDC)</button>
@@ -29,12 +28,8 @@
 
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-    import {
-      encodeFunctionData,
-      parseUnits,
-    } from 'https://esm.sh/viem@2.9.32';
+    import { encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
 
-    // If you prefer JSON ABIs as in your original, keep these imports:
     import r3ntAbi from './js/abi/r3nt.json' assert { type: 'json' };
     import erc20Abi from './js/abi/USDC.json' assert { type: 'json' };
     import { R3NT_ADDRESS, USDC_ADDRESS } from './js/config.js';
@@ -46,59 +41,78 @@
       status: document.getElementById('status'),
     };
 
-    // Hide splash if inside the Farcaster host
+    const ARBITRUM_HEX = '0xa4b1';           // 42161
+    const PASS_PRICE_USDC = '0.25';          // 0.25 USDC
+    const USDC_DECIMALS = 6;
+
+    // Ensure we only do wallet work in a Mini App host
+    let inHost = false;
+    try { inHost = await sdk.isInMiniApp(); } catch {}
     try { await sdk.actions.ready(); } catch {}
 
-    let provider;
-    try {
-      provider = await sdk.wallet.getEthereumProvider();
-    } catch {
-      // Not in host: keep viewing-only UX
+    if (!inHost) {
+      els.status.textContent = 'Viewing only. Open from a Farcaster Mini App embed.';
+    } else {
+      els.status.textContent = 'Tap Connect to continue.';
     }
 
-    const ARBITRUM_HEX = '0xa4b1'; // Arbitrum One; adjust if your contracts are elsewhere
-    const USDC_DECIMALS = 6n;
-    const PASS_PRICE_USDC = '0.25'; // 0.25 USDC
-
-    function short(addr) {
-      return addr ? `${addr.slice(0,6)}…${addr.slice(-4)}` : '';
-    }
-
-    function needsHost() {
-      return !provider || typeof provider.request !== 'function';
-    }
-
-    async function ensureArbitrum() {
-      const cid = await provider.request({ method: 'eth_chainId' });
-      if (cid !== ARBITRUM_HEX) {
-        await provider.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: ARBITRUM_HEX }],
-        });
-      }
-    }
-
-    async function getAccount() {
-      const accounts = await provider.request({ method: 'eth_requestAccounts' });
-      return accounts?.[0] || '';
-    }
-
-    els.status.textContent = needsHost()
-      ? 'Viewing only. Open in Farcaster app to connect.'
-      : 'Tap Connect to continue.';
-
-    // ——— Connect ———
-    els.connect.onclick = async () => {
-      if (needsHost()) {
-        els.status.textContent = 'Open in Farcaster app to connect wallet.';
-        return;
-      }
+    // Check host capabilities (wallet must be present)
+    async function hostSupportsWallet() {
       try {
-        const account = await getAccount();
-        if (!account) throw new Error('No account returned.');
-        await ensureArbitrum();
-        els.addr.textContent = `Connected: ${short(account)}`;
-        els.connect.textContent = `Connected ${short(account)}`;
+        const caps = await sdk.getCapabilities?.();
+        return Array.isArray(caps) && caps.includes('wallet.getEthereumProvider');
+      } catch { return true; } // older hosts: assume true
+    }
+
+    let provider; // EIP-1193 provider from host
+    async function getProvider() {
+      if (!provider) provider = await sdk.wallet.getEthereumProvider();
+      return provider;
+    }
+
+    async function ensureArbitrum(p) {
+      const id = await p.request({ method: 'eth_chainId' });
+      if (id !== ARBITRUM_HEX) {
+        try {
+          await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: ARBITRUM_HEX }] });
+        } catch (e) {
+          // Optional add-chain fallback (some hosts may not support it)
+          try {
+            await p.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: ARBITRUM_HEX,
+                chainName: 'Arbitrum One',
+                nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+                rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+                blockExplorerUrls: ['https://arbiscan.io']
+              }]
+            });
+          } catch { /* ignore */ }
+        }
+      }
+    }
+
+    function short(addr) { return addr ? `${addr.slice(0,6)}…${addr.slice(-4)}` : ''; }
+
+    els.connect.onclick = async () => {
+      try {
+        if (!inHost) {
+          els.status.textContent = 'Open in Farcaster app to connect wallet.';
+          return;
+        }
+        if (!(await hostSupportsWallet())) {
+          els.status.textContent = 'This client does not support wallets for Mini Apps.';
+          return;
+        }
+        const p = await getProvider();                    // get EIP-1193 provider
+        await p.request({ method: 'eth_requestAccounts' });// connect
+        const [addr] = await p.request({ method: 'eth_accounts' });
+        if (!addr) throw new Error('No account found.');
+        await ensureArbitrum(p);
+
+        els.addr.textContent = `Connected: ${short(addr)}`;
+        els.connect.textContent = `Connected ${short(addr)}`;
         els.connect.style.background = '#10b981';
         els.buy.disabled = false;
         els.status.textContent = 'Ready.';
@@ -108,47 +122,39 @@
       }
     };
 
-    // ——— Buy View Pass (approve → buy) ———
+    // Purchase: try wallet_sendCalls; fallback to two txs
     els.buy.onclick = async () => {
-      if (needsHost()) {
-        els.status.textContent = 'Open in Farcaster app to purchase.';
-        return;
-      }
       try {
-        await ensureArbitrum();
-        const from = (await provider.request({ method: 'eth_accounts' }))?.[0];
+        const p = await getProvider();
+        const [from] = await p.request({ method: 'eth_accounts' }) || [];
         if (!from) throw new Error('No wallet account connected.');
+        await ensureArbitrum(p);
 
-        // 1) Approve exact allowance
-        const amount = parseUnits(PASS_PRICE_USDC, Number(USDC_DECIMALS));
+        const amount = parseUnits(PASS_PRICE_USDC, USDC_DECIMALS);
+
         const approveData = encodeFunctionData({
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [R3NT_ADDRESS, amount],
+          abi: erc20Abi, functionName: 'approve',
+          args: [R3NT_ADDRESS, amount]
         });
-        const approveTx = { from, to: USDC_ADDRESS, data: approveData };
-
-        els.status.textContent = 'Approving USDC spend…';
-        try {
-          await provider.request({ method: 'eth_estimateGas', params: [approveTx] });
-        } catch (_) {
-          // continue; wallet will surface a clearer reason on send
-        }
-        await provider.request({ method: 'eth_sendTransaction', params: [approveTx] });
-
-        // 2) Call buyViewPass (no ETH value, assumes contract pulls USDC)
         const buyData = encodeFunctionData({
-          abi: r3ntAbi,
-          functionName: 'buyViewPass',
-          args: [], // add args if your function requires any
+          abi: r3ntAbi, functionName: 'buyViewPass', args: []
         });
-        const buyTx = { from, to: R3NT_ADDRESS, data: buyData };
 
-        els.status.textContent = 'Completing purchase…';
+        // Prefer EIP-5792 batch calls if supported
+        els.status.textContent = 'Approving & purchasing…';
         try {
-          await provider.request({ method: 'eth_estimateGas', params: [buyTx] });
-        } catch (_) {}
-        await provider.request({ method: 'eth_sendTransaction', params: [buyTx] });
+          await p.request({
+            method: 'wallet_sendCalls',
+            params: [{ calls: [
+              { to: USDC_ADDRESS, data: approveData },
+              { to: R3NT_ADDRESS, data: buyData }
+            ] }]
+          });
+        } catch (e) {
+          // Fallback: two standard transactions
+          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: R3NT_ADDRESS, data: buyData }] });
+        }
 
         els.status.textContent = 'Success. View pass purchased.';
         alert('View pass purchased!');
