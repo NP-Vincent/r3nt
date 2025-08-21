@@ -6,8 +6,10 @@ import { ensureWritable, simulateAndWrite, readVar, readStruct, ready } from "./
 
 ready();
 
-document.getElementById("pass-form")?.addEventListener("submit", buyPass);
-document.getElementById("book-form")?.addEventListener("submit", book);
+window.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("pass-form")?.addEventListener("submit", buyPass);
+  document.getElementById("book-form")?.addEventListener("submit", book);
+});
 
 async function buyPass(e) {
   e.preventDefault();

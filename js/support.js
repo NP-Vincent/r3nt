@@ -5,7 +5,9 @@ import { ensureWritable, simulateAndWrite, ready } from "./shared.js";
 
 ready();
 
-document.getElementById("release-form")?.addEventListener("submit", confirmRelease);
+window.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("release-form")?.addEventListener("submit", confirmRelease);
+});
 
 async function confirmRelease(e) {
   e.preventDefault();
