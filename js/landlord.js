@@ -2,7 +2,7 @@
 import r3ntAbi from "./abi/r3nt.json" assert { type: "json" };
 import usdcAbi from "./abi/USDC.json" assert { type: "json" };
 import { R3NT_ADDRESS, USDC_ADDRESS } from "./config.js";
-import { ensureWritable, simulateAndWrite, toUnits, readVar, ready, sdk } from "./shared.js";
+import { ensureWritable, simulateAndWrite, toUnits, readVar, ready, sdk, publicClient, getWalletClient } from "./shared.js";
 
 ready();
 
@@ -53,8 +53,10 @@ function shortAddr(a) {
 
 async function createListing(e) {
   e.preventDefault();
+  const statusEl = document.getElementById("create-status");
   try {
     await ensureWritable();
+    const { account } = await getWalletClient();
     const deposit = toUnits(document.getElementById("deposit").value);
     const rateDaily = toUnits(document.getElementById("rateDaily").value);
     const rateWeekly = toUnits(document.getElementById("rateWeekly").value);
@@ -70,13 +72,62 @@ async function createListing(e) {
     const threshold = BigInt(document.getElementById("threshold").value || 1);
 
     const listFee = await readVar(R3NT_ADDRESS, r3ntAbi, "listFee");
-    await simulateAndWrite({
+    const allowance = await publicClient.readContract({
       address: USDC_ADDRESS,
       abi: usdcAbi,
-      functionName: "approve",
-      args: [R3NT_ADDRESS, listFee]
+      functionName: "allowance",
+      args: [account, R3NT_ADDRESS],
     });
+    if (allowance < listFee) {
+      const gasA = await publicClient.estimateContractGas({
+        account,
+        address: USDC_ADDRESS,
+        abi: usdcAbi,
+        functionName: "approve",
+        args: [R3NT_ADDRESS, listFee],
+      });
+      const gasPriceA = await publicClient.getGasPrice();
+      const balance = await publicClient.getBalance({ address: account });
+      if (gasA * gasPriceA > balance) {
+        if (statusEl) statusEl.textContent = "Insufficient funds for gas";
+        return;
+      }
+      await simulateAndWrite({
+        address: USDC_ADDRESS,
+        abi: usdcAbi,
+        functionName: "approve",
+        args: [R3NT_ADDRESS, listFee],
+      });
+    }
 
+    const gas = await publicClient.estimateContractGas({
+      account,
+      address: R3NT_ADDRESS,
+      abi: r3ntAbi,
+      functionName: "createListing",
+      args: [
+        USDC_ADDRESS,
+        deposit,
+        rateDaily,
+        rateWeekly,
+        rateMonthly,
+        geohash,
+        geolen,
+        fid,
+        castHash,
+        title,
+        shortDesc,
+        signers,
+        threshold,
+      ],
+    });
+    const gasPrice = await publicClient.getGasPrice();
+    const balance = await publicClient.getBalance({ address: account });
+    if (gas * gasPrice > balance) {
+      if (statusEl) statusEl.textContent = "Insufficient funds for gas";
+      return;
+    }
+    if (statusEl) statusEl.textContent = "Submitting...";
     await simulateAndWrite({
       address: R3NT_ADDRESS,
       abi: r3ntAbi,
@@ -94,10 +145,12 @@ async function createListing(e) {
         title,
         shortDesc,
         signers,
-        threshold
-      ]
+        threshold,
+      ],
     });
+    if (statusEl) statusEl.textContent = "Transaction sent";
   } catch (err) {
+    if (statusEl) statusEl.textContent = err.shortMessage || err.message;
     console.error(err);
   }
 }
