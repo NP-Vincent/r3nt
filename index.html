@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>r3nt View Pass</title>
+  <link rel="preconnect" href="https://auth.farcaster.xyz" />
+</head>
+<body>
+  <h1>r3nt View Pass</h1>
+  <button id="connect">Connect Wallet</button>
+  <div id="address"></div>
+  <button id="buy" disabled>Buy View Pass</button>
+
+  <script type="module">
+    import { sdk } from "https://cdn.jsdelivr.net/npm/@farcaster/miniapp-sdk/+esm";
+    import { encodeFunctionData, parseUnits } from "https://cdn.jsdelivr.net/npm/viem@2/+esm";
+    import r3ntAbi from "./js/abi/r3nt.json" assert { type: "json" };
+    import erc20Abi from "./js/abi/USDC.json" assert { type: "json" };
+    import { R3NT_ADDRESS, USDC_ADDRESS } from "./js/config.js";
+
+    const connectBtn = document.getElementById('connect');
+    const buyBtn = document.getElementById('buy');
+    const addressDisplay = document.getElementById('address');
+
+    let ethereum;
+
+    connectBtn.addEventListener('click', async () => {
+      try {
+        ethereum = await sdk.wallet.getEthereumProvider();
+        const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+        const account = accounts[0];
+        addressDisplay.textContent = `Connected: ${account}`;
+        buyBtn.disabled = false;
+      } catch (err) {
+        console.error('Wallet connection failed', err);
+      }
+    });
+
+    buyBtn.addEventListener('click', async () => {
+      if (!ethereum) return;
+      try {
+        const amount = parseUnits('0.25', 6); // USDC has 6 decimals
+        const approveData = encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [R3NT_ADDRESS, amount]
+        });
+        const buyData = encodeFunctionData({
+          abi: r3ntAbi,
+          functionName: 'buyViewPass'
+        });
+
+        await ethereum.request({
+          method: 'wallet_sendCalls',
+          params: [{
+            calls: [
+              { to: USDC_ADDRESS, data: approveData },
+              { to: R3NT_ADDRESS, data: buyData }
+            ]
+          }]
+        });
+
+        alert('View pass purchased!');
+      } catch (err) {
+        console.error('Purchase failed', err);
+      }
+    });
+
+    await sdk.actions.ready();
+  </script>
+</body>
+</html>
