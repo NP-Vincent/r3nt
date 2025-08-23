@@ -44,7 +44,7 @@
   <!-- 2) APP LOGIC: separate module. If this fails, splash is already hidden. -->
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-    import { encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
+    import { encodeFunctionData, parseUnits, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 
     const els = {
       connect: document.getElementById('connect'),
@@ -133,10 +133,9 @@
         if (!from) throw new Error('No wallet account connected.');
         await ensureArbitrum(p);
 
-        // Lazy-load ABIs via fetch to avoid JSON module support issues
-        const [r3ntAbi, erc20Abi, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
+        // Lazy-load r3nt ABI & config via fetch/import
+        const [r3ntAbi, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
           fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
-          fetch('./js/abi/USDC.json').then(r => r.json()).then(j => j.abi),
           import('./js/config.js'),
         ]);
 
