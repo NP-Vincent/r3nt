@@ -135,8 +135,8 @@
 
         // Lazy-load ABIs via fetch to avoid JSON module support issues
         const [r3ntAbi, erc20Abi, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
-          fetch('./js/abi/r3nt.json').then(r => r.json()),
-          fetch('./js/abi/USDC.json').then(r => r.json()),
+          fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
+          fetch('./js/abi/USDC.json').then(r => r.json()).then(j => j.abi),
           import('./js/config.js'),
         ]);
 
