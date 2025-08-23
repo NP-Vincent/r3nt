@@ -116,7 +116,7 @@
     const APP_SIGNERS_BYTES = [];
     const APP_THRESHOLD = (APP_SIGNERS_BYTES.length >= 2) ? 2n : 1n;
 
-    /* ------------------------------ Inline ABIs ------------------------------- */
+    /* ------------------------------ ABIs ------------------------------- */
     const erc20Abi = [
       { type:'function', name:'approve',   stateMutability:'nonpayable',
         inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}],
@@ -125,28 +125,7 @@
         inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}],
         outputs:[{type:'uint256'}] },
     ];
-
-    const r3ntAbi = [
-      { type:'function', name:'listFee', stateMutability:'view', inputs:[], outputs:[{type:'uint96'}] },
-      { type:'function', name:'createListing', stateMutability:'nonpayable',
-        inputs:[
-          {name:'usdc',type:'address'},
-          {name:'deposit',type:'uint96'},
-          {name:'rateDaily',type:'uint96'},
-          {name:'rateWeekly',type:'uint96'},
-          {name:'rateMonthly',type:'uint96'},
-          {name:'geohashStr',type:'string'},
-          {name:'geolen',type:'uint8'},
-          {name:'fid',type:'uint256'},
-          {name:'castHash',type:'bytes32'},
-          {name:'title',type:'string'},
-          {name:'shortDesc',type:'string'},
-          {name:'signers',type:'bytes[]'},
-          {name:'threshold',type:'uint256'}
-        ],
-        outputs:[{type:'uint256'}]
-      }
-    ];
+    let r3ntAbi;
 
     /* ------------------------------- UI handles ------------------------------- */
     const els = {
@@ -192,7 +171,10 @@
         if (!viewerFid) throw new Error('Farcaster ID not available from host.');
         els.contextBar.textContent = `FID: ${viewerFid} · Ready`;
 
-        // Show list fee
+        // Load r3nt ABI and show list fee
+        if (!r3ntAbi) {
+          r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
+        }
         const fee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
         els.feeInfo.textContent = `List fee: ${(Number(fee)/1e6).toFixed(6)} USDC`;
 
@@ -299,6 +281,9 @@
 
         // 1) Ensure allowance for list fee
         info('Checking list fee & allowance…');
+        if (!r3ntAbi) {
+          r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
+        }
         const listFee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
         const allowance = await pub.readContract({
           address: USDC_ADDRESS, abi: erc20Abi, functionName: 'allowance', args: [from, R3NT_ADDRESS]
