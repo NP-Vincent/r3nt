@@ -155,7 +155,7 @@
     })();
 
     /* ------------------------------- SDK context ------------------------------ */
-    let viewerFid = null;
+    let viewerFidBig;
     let provider;
 
     const pub = createPublicClient({ chain: arbitrum, transport: http('https://arb1.arbitrum.io/rpc') });
@@ -166,13 +166,15 @@
         const inHost = await sdk.isInMiniApp().catch(()=>false);
         if (!inHost) throw new Error('Open this in a Farcaster client.');
 
-        // Get FID from context and convert to a primitive number
+        // Get FID from context and keep it as bigint/string – never Number(...)
         const fidRaw = sdk.context?.user?.fid;
-        viewerFid = Number(fidRaw);
-        if (!Number.isFinite(viewerFid)) {
+        try {
+          // Works whether fidRaw is bigint, number-like, or a branded object with toString()
+          viewerFidBig = typeof fidRaw === 'bigint' ? fidRaw : BigInt(String(fidRaw));
+        } catch {
           throw new Error('Invalid Farcaster ID from host.');
         }
-        els.contextBar.textContent = `FID: ${viewerFid} · Ready`;
+        els.contextBar.textContent = `FID: ${viewerFidBig.toString()} · Ready`;
 
         // Load r3nt ABI and show list fee
         if (!r3ntAbi) {
@@ -257,7 +259,7 @@
     /* ----------------------------- Create listing ----------------------------- */
     els.create.onclick = async () => {
       try {
-        if (!viewerFid) throw new Error('Missing FID from host.');
+        if (viewerFidBig === undefined) throw new Error('Missing FID from host.');
         if (!provider) throw new Error('Connect your wallet first.');
 
         const [from] = await provider.request({ method:'eth_accounts' }) || [];
@@ -306,7 +308,7 @@
             deposit,
             rateDaily, rateWeekly, rateMonthly,
             geohashStr, geolen,
-            BigInt(viewerFid),
+            viewerFidBig,
             castHash,
             title, shortDesc,
             APP_SIGNERS_BYTES,
