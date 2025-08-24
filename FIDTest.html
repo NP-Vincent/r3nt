@@ -1,0 +1,57 @@
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>r3nt — Create Listing</title>
+
+  <!-- Must be present on EVERY route that runs in the client -->
+  <meta name="fc:miniapp" content='{
+    "version":"1",
+    "imageUrl":"https://r3nt.sqmu.net/assets/icon.png",
+    "button":{
+      "title":"Open r3nt",
+      "action":{
+        "type":"launch_miniapp",
+        "name":"r3nt",
+        "url":"https://r3nt.sqmu.net/index.html",
+        "splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png",
+        "splashBackgroundColor":"#FFFFFF"
+      }
+    }
+  }' />
+
+  <!-- Recommended for QuickAuth -->
+  <link rel="preconnect" href="https://auth.farcaster.xyz" />
+</head>
+<body>
+  <div id="status">Loading…</div>
+
+  <script type="module">
+    import { sdk } from "https://esm.sh/@farcaster/miniapp-sdk";
+
+    const status = document.getElementById('status');
+
+    // 1) Tell the host we’re ready (splash can be hidden after this)
+    try { await sdk.actions.ready(); } catch {}
+
+    // 2) Ensure we are actually inside a Farcaster client
+    if (!(await sdk.isInMiniApp().catch(()=>false))) {
+      status.textContent = "Open this inside a Farcaster client.";
+      throw new Error("Not in Mini App host");
+    }
+
+    // 3) Get a QuickAuth token — this is the *only* auth path here
+    try {
+      const { token } = await sdk.quickAuth.getToken(); // obtains or refreshes a session token
+      // 4) Decode JWT locally to read the user’s FID (payload.sub)
+      const [, payloadB64] = token.split('.');
+      const payloadJson = JSON.parse(atob(payloadB64.replace(/-/g,'+').replace(/_/g,'/')));
+      const fid = payloadJson.sub; // number
+
+      status.textContent = `Signed in · FID ${fid}`;
+      // Use `fid` for your contract args. No context reads needed.
+    } catch (e) {
+      status.textContent = "QuickAuth failed. Verify manifest domain + embed meta.";
+      console.error(e);
+    }
+  </script>
+</body>
