@@ -93,7 +93,7 @@
   <div class="muted">
     <small class="mono">
       Signers are fixed: landlord + platform (hidden).
-      <span id="signerMode" class="pill">Single-signer (dev stage)</span>
+      <span id="signerMode" class="pill">2-of-2 (landlord + platform)</span>
     </small>
   </div>
 
@@ -102,7 +102,7 @@
 
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-    import { createPublicClient, http, encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
+    import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
     import { normalizeCastInputToBytes32, latLonToGeohash } from './js/tools.js';
 
@@ -112,9 +112,9 @@
     const USDC_ADDRESS   = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
     const USDC_DECIMALS  = 6;
 
-    // Multisig (kept simple here)
-    const APP_SIGNERS_BYTES = []; // add ERC-7913 identities later
-    const APP_THRESHOLD = 1n;
+    // 2-of-2 cosigners (landlord + platform)
+    const PLATFORM_SIGNER = '0xYourPlatformOpsKey...'; // <-- set this to your ops EOA on Arbitrum
+    const encodeErc7913Ecdsa = (addr) => '0x00' + getAddress(addr).slice(2);
 
     // Minimal ERC-20 ABI surface
     const erc20Abi = [
@@ -239,6 +239,12 @@
         const [from] = await provider.request({ method:'eth_accounts' }) || [];
         if (!from) throw new Error('No wallet account connected.');
         await ensureArbitrum(provider);
+        const landlordAddr = getAddress(from);
+        const signersBytes = [
+          encodeErc7913Ecdsa(landlordAddr),
+          encodeErc7913Ecdsa(PLATFORM_SIGNER),
+        ];
+        const threshold = 2n;
 
         let castHashBytes32;
         try {
@@ -283,8 +289,8 @@
             fidBig,          // bigint from QuickAuth
             castHashBytes32,
             title, shortDesc,
-            APP_SIGNERS_BYTES,
-            APP_THRESHOLD
+            signersBytes,
+            threshold
           ]
         });
 
