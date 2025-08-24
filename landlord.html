@@ -105,15 +105,14 @@
     import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
     import { normalizeCastInputToBytes32, latLonToGeohash } from './js/tools.js';
+    import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS } from './js/config.js';
 
     // -------------------- Config --------------------
     const ARBITRUM_HEX   = '0xa4b1';
-    const R3NT_ADDRESS   = '0x18Af5B8fFA27B8300494Aa1a8c4F6AE4ee087029';
-    const USDC_ADDRESS   = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
     const USDC_DECIMALS  = 6;
 
     // 2-of-2 cosigners (landlord + platform)
-    const PLATFORM_SIGNER = '0xYourPlatformOpsKey...'; // <-- set this to your ops EOA on Arbitrum
+    const PLATFORM_SIGNER = PLATFORM_ADDRESS;
     const encodeErc7913Ecdsa = (addr) => '0x00' + getAddress(addr).slice(2);
 
     // Minimal ERC-20 ABI surface
