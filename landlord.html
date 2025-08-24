@@ -104,7 +104,7 @@
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { createPublicClient, http, encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
-    import { normalizeCastInputToBytes32 } from './js/tools.js';
+    import { normalizeCastInputToBytes32, latLonToGeohash } from './js/tools.js';
 
     // -------------------- Config --------------------
     const ARBITRUM_HEX   = '0xa4b1';
@@ -217,16 +217,6 @@
     };
 
     // -------------------- Helpers --------------------
-    const ALPH = '0123456789bcdefghjkmnpqrstuvwxyz';
-    function encodeGeohash(lat, lon, precision = 7) {
-      let idx=0, bit=0, even=true, gh='', latMin=-90,latMax=90, lonMin=-180,lonMax=180;
-      while (gh.length < precision) {
-        if (even) { const mid=(lonMin+lonMax)/2; if (lon>=mid){ idx=idx*2+1; lonMin=mid; } else { idx=idx*2; lonMax=mid; } }
-        else {      const mid=(latMin+latMax)/2; if (lat>=mid){ idx=idx*2+1; latMin=mid; } else { idx=idx*2; latMax=mid; } }
-        even=!even; if (++bit===5){ gh+=ALPH[idx]; bit=0; idx=0; }
-      }
-      return gh;
-    }
     function parseLatLon(latStr, lonStr) {
       const lat = Number(latStr), lon = Number(lonStr);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('Latitude/Longitude must be numbers.');
@@ -268,7 +258,7 @@
         const rateMonthly= parseUnits(String(els.rateMonthly.value||'0'),USDC_DECIMALS);
 
         const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
-        const geohashStr = encodeGeohash(lat, lon, 7);
+        const geohashStr = latLonToGeohash(lat, lon, 7);
         const geolen = geohashStr.length;
 
         if (!r3ntAbi) {
