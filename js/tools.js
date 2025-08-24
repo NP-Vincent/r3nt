@@ -48,7 +48,8 @@ export function toBytes32FromCastHash(hex20or32) {
   if (/^0x[0-9a-fA-F]{64}$/.test(h)) return h;
 
   // 20-byte -> pad 12 bytes (24 hex chars) of zeros on the left
-  return '0x' + '0'.repeat(24 * 2) + h.slice(2);
+  // Each "00" represents one byte, so repeat 24 hex chars to add 12 bytes
+  return '0x' + '0'.repeat(24) + h.slice(2);
 }
 
 /**
