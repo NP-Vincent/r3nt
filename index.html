@@ -16,6 +16,7 @@
     #buy { background: #10b981; color: #fff; margin-top: 10px; }
     #status { margin-top: 14px; min-height: 24px; font-size: 0.95rem; color: #444; }
     #address { margin-top: 6px; font-family: ui-monospace, Menlo, monospace; color: #333; }
+    #listings { margin-top: 20px; }
   </style>
 </head>
 <body>
@@ -24,6 +25,8 @@
   <div id="address">Not connected</div>
   <button id="buy" disabled>Buy View Pass (0.25 USDC)</button>
   <div id="status">Loading…</div>
+  <h2>Listings</h2>
+  <div id="listings"></div>
   <p><a href="landlord.html">Landlord: Create Listing</a></p>
   <p><a href="FIDTest.html">QuickAuth FID Test</a></p>
 
@@ -46,13 +49,16 @@
   <!-- 2) APP LOGIC: separate module. If this fails, splash is already hidden. -->
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-    import { encodeFunctionData, parseUnits, erc20Abi } from 'https://esm.sh/viem@2.9.32';
+    import { encodeFunctionData, parseUnits, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
+    import { arbitrum } from 'https://esm.sh/viem/chains';
+    import { bytes32ToCastUrl } from './js/tools.js';
 
     const els = {
       connect: document.getElementById('connect'),
       buy: document.getElementById('buy'),
       addr: document.getElementById('address'),
       status: document.getElementById('status'),
+      listings: document.getElementById('listings'),
     };
 
     const ARBITRUM_HEX = '0xa4b1';           // 42161
@@ -104,6 +110,55 @@
 
     function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
+    let r3ntAbi, cfg, pub;
+    async function loadConfig() {
+      if (!r3ntAbi) {
+        [r3ntAbi, cfg] = await Promise.all([
+          fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
+          import('./js/config.js'),
+        ]);
+        pub = createPublicClient({ chain: arbitrum, transport: http(cfg.RPC_URL) });
+      }
+    }
+
+    async function loadListings() {
+      await loadConfig();
+      els.listings.textContent = 'Loading listings…';
+      const count = Number(await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listingsCount' }));
+      const ul = document.createElement('ul');
+      for (let i = 0; i < count; i++) {
+        const L = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'getListing', args: [BigInt(i)] });
+        if (!L.active) continue;
+        const url = bytes32ToCastUrl(L.castHash);
+        const li = document.createElement('li');
+        li.innerHTML = `<a href="${url}" target="_blank">${L.title || `Listing ${i}`}</a>`;
+        ul.appendChild(li);
+      }
+      els.listings.innerHTML = '';
+      if (!ul.childElementCount) {
+        els.listings.textContent = 'No active listings.';
+      } else {
+        els.listings.appendChild(ul);
+      }
+    }
+
+    async function checkViewPass(addr) {
+      try {
+        await loadConfig();
+        const expiry = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'viewPassExpiry', args: [addr] });
+        const active = expiry > BigInt(Math.floor(Date.now()/1000));
+        if (active) {
+          els.status.textContent = 'View pass active.';
+          await loadListings();
+        } else {
+          els.status.textContent = 'No active view pass. Buy to see listings.';
+        }
+      } catch (e) {
+        console.error(e);
+        els.status.textContent = 'Unable to verify view pass.';
+      }
+    }
+
     // ——— Connect ———
     els.connect.onclick = async () => {
       try {
@@ -121,6 +176,7 @@
         els.connect.style.background = '#10b981';
         els.buy.disabled = false;
         els.status.textContent = 'Ready.';
+        await checkViewPass(addr);
       } catch (e) {
         console.error(e);
         els.status.textContent = e?.message || 'Wallet connection failed.';
@@ -180,6 +236,7 @@
 
         els.status.textContent = 'Success. View pass purchased.';
         alert('View pass purchased!');
+        await checkViewPass(from);
       } catch (err) {
         console.error(err);
         els.status.textContent = `Error: ${err?.message || err}`;
