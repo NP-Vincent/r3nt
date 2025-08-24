@@ -110,7 +110,7 @@
 
     function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
-    let r3ntAbi, cfg, pub;
+    let r3ntAbi, cfg, pub, feeBps;
     async function loadConfig() {
       if (!r3ntAbi) {
         [r3ntAbi, cfg] = await Promise.all([
@@ -118,6 +118,8 @@
           import('./js/config.js'),
         ]);
         pub = createPublicClient({ chain: arbitrum, transport: http(cfg.RPC_URL) });
+        // Cache the platform fee bps for rent calculations during booking
+        feeBps = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'feeBps' });
       }
     }
 
@@ -129,9 +131,18 @@
       for (let i = 0; i < count; i++) {
         const L = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'getListing', args: [BigInt(i)] });
         if (!L.active) continue;
+        // Listing.castHash is stored on-chain as bytes32; convert it into a Warpcast URL
         const url = bytes32ToCastUrl(L.castHash);
         const li = document.createElement('li');
-        li.innerHTML = `<a href="${url}" target="_blank">${L.title || `Listing ${i}`}</a>`;
+        const rent = Number(L.rateDaily) / 1e6;
+        const dep = Number(L.deposit) / 1e6;
+        li.innerHTML = `<a href="${url}" target="_blank">${L.title || `Listing ${i}`}</a>` +
+                       `<div>Rent/day: ${rent} USDC</div>` +
+                       `<div>Deposit: ${dep} USDC</div>`;
+        const btn = document.createElement('button');
+        btn.textContent = 'Book 1 day';
+        btn.onclick = () => bookListing(i, L.rateDaily, L.deposit);
+        li.appendChild(btn);
         ul.appendChild(li);
       }
       els.listings.innerHTML = '';
@@ -139,6 +150,60 @@
         els.listings.textContent = 'No active listings.';
       } else {
         els.listings.appendChild(ul);
+      }
+    }
+
+    async function bookListing(listingId, rateDaily, deposit) {
+      try {
+        const p = await getProvider();
+        const [from] = await p.request({ method: 'eth_accounts' }) || [];
+        if (!from) throw new Error('No wallet account connected.');
+        await ensureArbitrum(p);
+        await loadConfig();
+
+        const rent = BigInt(rateDaily);
+        const dep = BigInt(deposit);
+        const fee = rent * BigInt(feeBps) / 10000n;
+        const total = rent + fee + dep;
+
+        const approveData = encodeFunctionData({
+          abi: erc20Abi, functionName: 'approve', args: [cfg.R3NT_ADDRESS, total]
+        });
+        const now = BigInt(Math.floor(Date.now()/1000));
+        const bookData = encodeFunctionData({
+          abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), 0n, 1n, now, now + 86400n]
+        });
+
+        els.status.textContent = 'Submitting booking…';
+
+        try {
+          await p.request({
+            method: 'wallet_sendCalls',
+            params: [{ calls: [
+              { to: cfg.USDC_ADDRESS, data: approveData },
+              { to: cfg.R3NT_ADDRESS, data: bookData }
+            ] }]
+          });
+        } catch {
+          try {
+            await p.request({
+              method: 'wallet_sendCalls',
+              params: [
+                { to: cfg.USDC_ADDRESS, data: approveData },
+                { to: cfg.R3NT_ADDRESS, data: bookData }
+              ]
+            });
+          } catch {
+            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: cfg.USDC_ADDRESS, data: approveData }] });
+            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: cfg.R3NT_ADDRESS, data: bookData }] });
+          }
+        }
+
+        els.status.textContent = 'Booking submitted.';
+        alert('Booking transaction sent!');
+      } catch (e) {
+        console.error(e);
+        els.status.textContent = `Error: ${e?.message || e}`;
       }
     }
 
