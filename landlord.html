@@ -166,9 +166,12 @@
         const inHost = await sdk.isInMiniApp().catch(()=>false);
         if (!inHost) throw new Error('Open this in a Farcaster client.');
 
-        // Get FID from context
-        viewerFid = sdk.context?.user?.fid ?? null;
-        if (!viewerFid) throw new Error('Farcaster ID not available from host.');
+        // Get FID from context and convert to a primitive number
+        const fidRaw = sdk.context?.user?.fid;
+        viewerFid = Number(fidRaw);
+        if (!Number.isFinite(viewerFid)) {
+          throw new Error('Invalid Farcaster ID from host.');
+        }
         els.contextBar.textContent = `FID: ${viewerFid} · Ready`;
 
         // Load r3nt ABI and show list fee
@@ -186,7 +189,7 @@
         // Enable create once wallet is connected
         els.create.disabled = true;
       } catch (e) {
-        els.contextBar.textContent = `Cannot proceed: ${e?.message || e}`;
+        els.contextBar.textContent = `Cannot proceed: ${e?.message || 'Farcaster ID conversion failed.'}`;
         els.create.disabled = true;
       }
     }
