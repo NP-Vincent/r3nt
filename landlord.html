@@ -105,18 +105,17 @@
     import { createPublicClient, http, encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
 
-    /* ------------------------- Config (edit as needed) ------------------------- */
-    const ARBITRUM_HEX   = '0xa4b1';
+    /* ------------------------- Config ------------------------- */
+    const ARBITRUM_HEX   = '0xa4b1'; // Arbitrum One chainId
     const R3NT_ADDRESS   = '0x18Af5B8fFA27B8300494Aa1a8c4F6AE4ee087029'; // r3nt proxy
-    const USDC_ADDRESS   = '0xaf88d065e77c8cc2239327c5edb3a432268e5831'; // USDC.e (42161)
+    const USDC_ADDRESS   = '0xaf88d065e77c8cc2239327c5edb3a432268e5831'; // USDC (42161)
     const USDC_DECIMALS  = 6;
 
-    // If you have ERC-7913 identity bytes, put them here:
-    // Example: const APP_SIGNERS_BYTES = ['0x…landlord_identity_bytes', '0x…platform_identity_bytes'];
+    // ERC-7913 identities (optional; keep empty for now)
     const APP_SIGNERS_BYTES = [];
-    const APP_THRESHOLD = (APP_SIGNERS_BYTES.length >= 2) ? 2n : 1n;
+    const APP_THRESHOLD     = (APP_SIGNERS_BYTES.length >= 2) ? 2n : 1n;
 
-    /* ------------------------------ ABIs ------------------------------- */
+    /* ------------------------------ ABIs ------------------------------ */
     const erc20Abi = [
       { type:'function', name:'approve',   stateMutability:'nonpayable',
         inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}],
@@ -127,7 +126,7 @@
     ];
     let r3ntAbi;
 
-    /* ------------------------------- UI handles ------------------------------- */
+    /* ------------------------------- UI ------------------------------- */
     const els = {
       contextBar:  document.getElementById('contextBar'),
       feeInfo:     document.getElementById('feeInfo'),
@@ -147,56 +146,62 @@
     };
     const info = (t) => els.status.textContent = t;
 
-    /* ------------------------------ Ready early ------------------------------- */
+    /* --------------------------- Ready early --------------------------- */
     (async () => {
       try { await sdk.actions.ready(); } catch {}
-      // Safety retry in case host handshake is late
-      setTimeout(()=>{ try { sdk.actions.ready(); } catch {} }, 500);
+      setTimeout(() => { try { sdk.actions.ready(); } catch {} }, 500);
     })();
 
-    /* ------------------------------- SDK context ------------------------------ */
-    let viewerFidBig;
-    let provider;
-
+    /* ----------------------- State / RPC client ----------------------- */
+    let viewerFidBig;  // bigint
+    let provider;      // EIP-1193
     const pub = createPublicClient({ chain: arbitrum, transport: http('https://arb1.arbitrum.io/rpc') });
 
+    /* ---------------------- FID reader (robust) ----------------------- */
+    function readFidFromContextOrThrow() {
+      const raw = sdk.context?.user?.fid; // host-provided
+      if (raw === undefined || raw === null) throw new Error('Missing FID from host');
+      try {
+        return (typeof raw === 'bigint') ? raw : BigInt(String(raw));
+      } catch {
+        throw new Error('Invalid Farcaster ID from host');
+      }
+    }
+
+    /* ------------------------------ Boot ------------------------------ */
     async function boot() {
       try {
-        // Require Mini App host
-        const inHost = await sdk.isInMiniApp().catch(()=>false);
+        const inHost = await sdk.isInMiniApp().catch(() => false);
         if (!inHost) throw new Error('Open this in a Farcaster client.');
 
-        // Get FID from context and keep it as bigint/string – never Number(...)
-        const fidRaw = sdk.context?.user?.fid;
+        // Try FID at boot (soft-fail; retry on connect)
         try {
-          // Works whether fidRaw is bigint, number-like, or a branded object with toString()
-          viewerFidBig = typeof fidRaw === 'bigint' ? fidRaw : BigInt(String(fidRaw));
+          viewerFidBig = readFidFromContextOrThrow();
+          els.contextBar.textContent = `FID: ${viewerFidBig.toString()} · Ready`;
         } catch {
-          throw new Error('Invalid Farcaster ID from host.');
+          els.contextBar.textContent = 'Loading Farcaster context…';
         }
-        els.contextBar.textContent = `FID: ${viewerFidBig.toString()} · Ready`;
 
-        // Load r3nt ABI and show list fee
+        // Load ABI & show list fee
         if (!r3ntAbi) {
           r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
         }
         const fee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
         els.feeInfo.textContent = `List fee: ${(Number(fee)/1e6).toFixed(6)} USDC`;
 
-        // Signer mode badge
+        // Signer badge
         els.signerMode.textContent = (APP_THRESHOLD === 2n && APP_SIGNERS_BYTES.length >= 2)
           ? '2-of-2 multisig'
           : 'Single-signer fallback';
 
-        // Enable create once wallet is connected
         els.create.disabled = true;
       } catch (e) {
-        els.contextBar.textContent = `Cannot proceed: ${e?.message || 'Farcaster ID conversion failed.'}`;
+        els.contextBar.textContent = `Cannot proceed: ${e?.message || e}`;
         els.create.disabled = true;
       }
     }
 
-    /* ------------------------------ Wallet connect ---------------------------- */
+    /* ------------------------- Wallet connect ------------------------- */
     async function ensureArbitrum(p) {
       const id = await p.request({ method: 'eth_chainId' });
       if (id !== ARBITRUM_HEX) {
@@ -209,7 +214,8 @@
               params:[{
                 chainId: ARBITRUM_HEX, chainName:'Arbitrum One',
                 nativeCurrency:{ name:'Ether', symbol:'ETH', decimals:18 },
-                rpcUrls:['https://arb1.arbitrum.io/rpc'], blockExplorerUrls:['https://arbiscan.io']
+                rpcUrls:['https://arb1.arbitrum.io/rpc'],
+                blockExplorerUrls:['https://arbiscan.io']
               }]
             });
           } catch {}
@@ -217,11 +223,23 @@
       }
     }
 
+    // ——— in your Connect button handler ———
     els.connect.onclick = async () => {
       try {
-        provider = await sdk.wallet.getEthereumProvider();
-        await provider.request({ method:'eth_requestAccounts' });
+        provider = await sdk.wallet.getEthereumProvider(); // independent of FID
+        await provider.request({ method: 'eth_requestAccounts' });
         await ensureArbitrum(provider);
+
+        // Retry reading FID in case the host finalized it post-interaction
+        if (viewerFidBig === undefined) {
+          try {
+            viewerFidBig = readFidFromContextOrThrow();
+            els.contextBar.textContent = `FID: ${viewerFidBig.toString()} · Ready`;
+          } catch {
+            els.contextBar.textContent = 'Farcaster ID unavailable. Are you in a Farcaster client?';
+          }
+        }
+
         els.connect.textContent = 'Wallet Connected';
         els.connect.style.background = '#10b981';
         els.create.disabled = false;
@@ -231,7 +249,7 @@
       }
     };
 
-    /* ---------------------------- Helpers & checks ---------------------------- */
+    /* ------------------------- Helpers & checks ------------------------ */
     const ALPH = '0123456789bcdefghjkmnpqrstuvwxyz';
     function encodeGeohash(lat, lon, precision = 7) {
       let idx=0, bit=0, even=true, gh='', latMin=-90,latMax=90, lonMin=-180,lonMax=180;
@@ -256,7 +274,7 @@
     }
     function isHex32(s){ return /^0x[0-9a-fA-F]{64}$/.test(s || ''); }
 
-    /* ----------------------------- Create listing ----------------------------- */
+    /* --------------------------- Create listing ------------------------ */
     els.create.onclick = async () => {
       try {
         if (viewerFidBig === undefined) throw new Error('Missing FID from host.');
@@ -274,17 +292,17 @@
         if (!title) throw new Error('Title is required.');
         if (!shortDesc) throw new Error('Short description is required.');
 
-        const deposit    = parseDec6(els.deposit.value);
-        const rateDaily  = parseUnits(String(els.rateDaily.value||'0'),  USDC_DECIMALS);
-        const rateWeekly = parseUnits(String(els.rateWeekly.value||'0'), USDC_DECIMALS);
-        const rateMonthly= parseUnits(String(els.rateMonthly.value||'0'),USDC_DECIMALS);
+        const deposit     = parseDec6(els.deposit.value);
+        const rateDaily   = parseUnits(String(els.rateDaily.value  || '0'), USDC_DECIMALS);
+        const rateWeekly  = parseUnits(String(els.rateWeekly.value || '0'), USDC_DECIMALS);
+        const rateMonthly = parseUnits(String(els.rateMonthly.value|| '0'), USDC_DECIMALS);
 
         const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
         const geohashStr = encodeGeohash(lat, lon, 7);
-        const geolen = geohashStr.length;
+        const geolen = geohashStr.length; // 7
         if (geolen < 4 || geolen > 10) throw new Error('Internal: geohash length must be 4–10.');
 
-        // 1) Ensure allowance for list fee
+        // Ensure allowance for list fee
         info('Checking list fee & allowance…');
         if (!r3ntAbi) {
           r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
@@ -299,7 +317,7 @@
           await provider.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
         }
 
-        // 2) Send createListing
+        // Submit createListing
         info('Submitting on-chain createListing…');
         const data = encodeFunctionData({
           abi: r3ntAbi, functionName:'createListing',
@@ -308,7 +326,7 @@
             deposit,
             rateDaily, rateWeekly, rateMonthly,
             geohashStr, geolen,
-            viewerFidBig,
+            viewerFidBig,   // FID as bigint
             castHash,
             title, shortDesc,
             APP_SIGNERS_BYTES,
@@ -316,7 +334,7 @@
           ]
         });
 
-        // Optional preflight gas estimate to surface issues early
+        // Optional preflight estimate
         try { await provider.request({ method:'eth_estimateGas', params:[{ from, to:R3NT_ADDRESS, data }] }); } catch {}
 
         const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to:R3NT_ADDRESS, data }] });
