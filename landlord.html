@@ -157,10 +157,12 @@
       try {
         // Must run inside Farcaster client; this initiates/returns a session
         const { token } = await sdk.quickAuth.getToken();
-        // Decode JWT payload to read fid (client-side decode is OK for display; validate server-side if you use it for auth)
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        const rawFid = payload?.fid ?? payload?.user?.fid;
-        fidBig = typeof rawFid === 'bigint' ? rawFid : BigInt(String(rawFid));
+        // Decode JWT locally to read the user's FID (payload.sub)
+        const [, payloadB64] = token.split('.');
+        const payloadJson = JSON.parse(
+          atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'))
+        );
+        fidBig = BigInt(payloadJson.sub);
         els.contextBar.textContent = `FID: ${fidBig.toString()} · Signed in`;
       } catch (e) {
         els.contextBar.textContent = 'QuickAuth failed. Open this inside a Farcaster client.';
