@@ -46,8 +46,8 @@
 
   <button id="connect" disabled>Connect Wallet</button>
 
-  <label>Cast Hash (0x + 64 hex)
-    <input id="castHash" placeholder="0x…" autocomplete="off" spellcheck="false">
+  <label>Cast URL or Hash
+    <input id="castHash" placeholder="https://warpcast.com/~/casts/0x…" autocomplete="off" spellcheck="false">
   </label>
 
   <div class="row">
@@ -104,6 +104,7 @@
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { createPublicClient, http, encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
+    import { normalizeCastInputToBytes32 } from './js/tools.js';
 
     // -------------------- Config --------------------
     const ARBITRUM_HEX   = '0xa4b1';
@@ -238,7 +239,6 @@
       if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
       return parseUnits(v, USDC_DECIMALS);
     }
-    function isHex32(s){ return /^0x[0-9a-fA-F]{64}$/.test(s || ''); }
 
     // -------------------- Create listing --------------------
     els.create.onclick = async () => {
@@ -250,8 +250,12 @@
         if (!from) throw new Error('No wallet account connected.');
         await ensureArbitrum(provider);
 
-        const castHash = els.castHash.value.trim();
-        if (!isHex32(castHash)) throw new Error('Cast hash must be 0x + 64 hex characters.');
+        let castHashBytes32;
+        try {
+          castHashBytes32 = normalizeCastInputToBytes32(els.castHash.value);
+        } catch (e) {
+          throw new Error(`Cast hash: ${e.message}`);
+        }
 
         const title = els.title.value.trim();
         const shortDesc = els.shortDesc.value.trim();
@@ -287,7 +291,7 @@
             rateDaily, rateWeekly, rateMonthly,
             geohashStr, geolen,
             fidBig,          // bigint from QuickAuth
-            castHash,
+            castHashBytes32,
             title, shortDesc,
             APP_SIGNERS_BYTES,
             APP_THRESHOLD
