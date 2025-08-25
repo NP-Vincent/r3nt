@@ -18,9 +18,17 @@
     #listings { margin-top: 20px; }
     .card { border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px; }
     .row { display:flex; gap:8px; }
+    nav { margin-bottom:16px; }
+    nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
+    select { width:100%; padding:6px; margin:4px 0 8px; }
   </style>
 </head>
 <body>
+  <nav>
+    <a href="./index.html">Home</a>
+    <a href="./tenant.html">Tenant</a>
+    <a href="./landlord.html">Landlord</a>
+  </nav>
   <h1>r3nt View Pass</h1>
   <button id="connect">Connect Wallet</button>
   <div id="address">Not connected</div>
@@ -28,7 +36,6 @@
   <div id="status">Loading…</div>
   <h2>Listings</h2>
   <div id="listings"></div>
-  <p><a href="landlord.html">Landlord: Create Listing</a></p>
 
   <!-- 1) READY FIRST -->
   <script type="module">
@@ -99,8 +106,31 @@
         card.className = 'card';
         const title = document.createElement('div');
         title.textContent = L.title || `Listing ${i}`;
-        const rent = document.createElement('div');
-        rent.textContent = `Rent/day: ${Number(L.rateDaily)/1e6} USDC`;
+        const rateLabel = document.createElement('label');
+        rateLabel.textContent = 'Rent: ';
+        const sel = document.createElement('select');
+        if (Number(L.rateDaily) > 0) {
+          const o = document.createElement('option');
+          o.value = L.rateDaily;
+          o.dataset.rtype = '0';
+          o.textContent = `Daily - ${Number(L.rateDaily)/1e6} USDC`;
+          sel.appendChild(o);
+        }
+        if (Number(L.rateWeekly) > 0) {
+          const o = document.createElement('option');
+          o.value = L.rateWeekly;
+          o.dataset.rtype = '1';
+          o.textContent = `Weekly - ${Number(L.rateWeekly)/1e6} USDC`;
+          sel.appendChild(o);
+        }
+        if (Number(L.rateMonthly) > 0) {
+          const o = document.createElement('option');
+          o.value = L.rateMonthly;
+          o.dataset.rtype = '2';
+          o.textContent = `Monthly - ${Number(L.rateMonthly)/1e6} USDC`;
+          sel.appendChild(o);
+        }
+        rateLabel.appendChild(sel);
         const dep = document.createElement('div');
         dep.textContent = `Deposit: ${Number(L.deposit)/1e6} USDC`;
 
@@ -110,13 +140,16 @@
         btnCast.textContent = 'Open Cast';
         btnCast.onclick = () => openCast(L.castHash);
         const btnBook = document.createElement('button');
-        btnBook.textContent = 'Book 1 day';
-        btnBook.onclick = () => bookListing(i, L.rateDaily, L.deposit);
+        btnBook.textContent = 'Book';
+        btnBook.onclick = () => {
+          const opt = sel.options[sel.selectedIndex];
+          bookListing(i, BigInt(opt.dataset.rtype), opt.value, L.deposit);
+        };
         row.appendChild(btnCast);
         row.appendChild(btnBook);
 
         card.appendChild(title);
-        card.appendChild(rent);
+        card.appendChild(rateLabel);
         card.appendChild(dep);
         card.appendChild(row);
         els.listings.appendChild(card);
@@ -124,7 +157,7 @@
       if (!shown) els.listings.textContent = 'No active listings.';
     }
 
-    async function bookListing(listingId, rateDaily, deposit){
+    async function bookListing(listingId, rtype, rate, deposit){
       try {
         const p = await getProvider();
         const [from] = await p.request({ method: 'eth_accounts' }) || [];
@@ -132,14 +165,15 @@
         await ensureArbitrum(p);
         await loadConfig();
 
-        const rent = BigInt(rateDaily);
+        const rent = BigInt(rate);
         const dep = BigInt(deposit);
         const fee = rent * BigInt(feeBps) / 10000n;
         const total = rent + fee + dep;
 
         const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [cfg.R3NT_ADDRESS, total] });
         const now = BigInt(Math.floor(Date.now()/1000));
-        const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), 0n, 1n, now, now + 86400n] });
+        const dur = rtype === 1n ? 7n * 86400n : rtype === 2n ? 30n * 86400n : 86400n;
+        const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), rtype, 1n, now, now + dur] });
 
         els.status.textContent = 'Submitting booking…';
 
