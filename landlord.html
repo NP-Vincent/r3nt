@@ -257,9 +257,17 @@
 
         // 1) Compose the landlord's canonical cast and capture the hash
         info('Open composer… Post your listing cast.');
+        const qs = [
+          'draft=1',
+          `title=${encodeURIComponent(title)}`,
+          `shortDesc=${encodeURIComponent(shortDesc)}`,
+          `lat=${encodeURIComponent(String(lat))}`,
+          `lon=${encodeURIComponent(String(lon))}`
+        ].join('&');
+        const embedUrl = `https://r3nt.sqmu.net/index.html?${qs}`;
         const compose = await sdk.actions.composeCast({
           text: `🏠 ${title}\n${shortDesc}\n\nView & book in r3nt ↓`,
-          embeds: [ 'https://r3nt.sqmu.net/index.html' ],
+          embeds: [ embedUrl ],
           close: false
         });
         if (!compose || !compose.cast) throw new Error('Cast was not posted.');
