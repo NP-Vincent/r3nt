@@ -171,16 +171,24 @@ export function normalizeCastInputToBytes32(inputUrlOrHex) {
 }
 
 /**
+ * Convert a stored bytes32 cast hash back into a 20-byte Farcaster cast hash.
+ * @param {string} castHash32 0x + 64 hex
+ * @returns {string} 0x + 40 hex cast hash
+ */
+export function bytes32ToCastHash(castHash32) {
+  const h = String(castHash32 || '');
+  if (!/^0x[0-9a-fA-F]{64}$/.test(h)) {
+    throw new Error('Expected 32-byte hex for cast.');
+  }
+  return '0x' + h.slice(-40);
+}
+
+/**
  * Convert a stored bytes32 cast hash back into a canonical Warpcast URL.
  * Assumes the original Farcaster hash was 20 bytes left-padded to 32 bytes.
  * @param {string} castHash32 0x + 64 hex
  * @returns {string} Warpcast URL: https://warpcast.com/~/casts/0x...
  */
 export function bytes32ToCastUrl(castHash32) {
-  const h = String(castHash32 || '');
-  if (!/^0x[0-9a-fA-F]{64}$/.test(h)) {
-    throw new Error('Expected 32-byte hex for cast.');
-  }
-  const cast20 = '0x' + h.slice(-40);
-  return `https://warpcast.com/~/casts/${cast20}`;
+  return `https://warpcast.com/~/casts/${bytes32ToCastHash(castHash32)}`;
 }
