@@ -86,9 +86,13 @@
       }
     }
 
-    async function openCast(hash){
-      try { await sdk.actions.viewCast({ hash, close:false }); }
-      catch { /* fallback: open in Warpcast */ window.open(bytes32ToCastUrl(hash), '_blank', 'noopener'); }
+    async function openCast(hash /* canonical 0x + 64 hex */){
+      try {
+        await sdk.actions.viewCast({ hash });
+      } catch {
+        // fallback: open in Warpcast
+        window.open(bytes32ToCastUrl(hash), '_blank');
+      }
     }
 
     async function loadListings(){
