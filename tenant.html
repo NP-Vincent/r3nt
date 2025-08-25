@@ -49,7 +49,7 @@
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { encodeFunctionData, parseUnits, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
-    import { bytes32ToCastUrl } from './js/tools.js';
+    import { bytes32ToCastUrl, bytes32ToCastHash } from './js/tools.js';
 
     const els = {
       connect: document.getElementById('connect'),
@@ -86,9 +86,14 @@
       }
     }
 
-    async function openCast(hash){
-      try { await sdk.actions.viewCast({ hash, close:false }); }
-      catch { /* fallback: open in Warpcast */ window.open(bytes32ToCastUrl(hash), '_blank', 'noopener'); }
+    async function openCast(hash32 /* bytes32 from contract */){
+      const cast20 = bytes32ToCastHash(hash32);
+      try {
+        await sdk.actions.viewCast({ hash: cast20 });
+      } catch {
+        // fallback: open in Warpcast
+        window.open(bytes32ToCastUrl(hash32), '_blank');
+      }
     }
 
     async function loadListings(){
