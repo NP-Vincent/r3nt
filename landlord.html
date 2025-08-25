@@ -110,7 +110,7 @@
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
-    import { latLonToGeohash } from './js/tools.js';
+    import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './js/tools.js';
     import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS, RPC_URL } from './js/config.js';
 
     // -------------------- Config --------------------
@@ -167,8 +167,9 @@
     }
     function normalizeCastHash(h) {
       if (typeof h !== 'string') return null;
-      const m = h.match(/^(0x)?([0-9a-fA-F]{64})$/);
-      return m ? ('0x' + m[2].toLowerCase()) : null;
+      const hex = h.startsWith('0x') ? h : ('0x' + h);
+      if (!isHex20or32(hex)) return null;
+      return toBytes32FromCastHash(hex);
     }
     function disableWhile(el, fn){ return (async()=>{ el.disabled = true; try { return await fn(); } finally { el.disabled = false; } })(); }
 
