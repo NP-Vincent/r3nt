@@ -165,6 +165,11 @@
       if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
       return parseUnits(v, USDC_DECIMALS);
     }
+    function normalizeCastHash(h) {
+      if (typeof h !== 'string') return null;
+      const m = h.match(/^(0x)?([0-9a-fA-F]{64})$/);
+      return m ? ('0x' + m[2].toLowerCase()) : null;
+    }
     function disableWhile(el, fn){ return (async()=>{ el.disabled = true; try { return await fn(); } finally { el.disabled = false; } })(); }
 
     // -------------------- Boot --------------------
@@ -273,14 +278,22 @@
           `lon=${encodeURIComponent(String(lon))}`
         ].join('&');
         const embedUrl = `https://r3nt.sqmu.net/index.html?${qs}`;
-        const compose = await sdk.actions.composeCast({
+        const res = await sdk.actions.composeCast({
           text: `🏠 ${title}\n${shortDesc}\n\nView & book in r3nt ↓`,
           embeds: [ embedUrl ],
           close: false
         });
-        if (!compose || !compose.cast) throw new Error('Cast was not posted.');
-        const castHash = (compose.cast.hash || '').toLowerCase();
-        if (!/^0x[0-9a-f]{64}$/.test(castHash)) throw new Error('Invalid cast hash returned.');
+        if (res === undefined) {
+          throw new Error('Composer invoked with close:true; no result returned.');
+        }
+        if (!res.cast) {
+          throw new Error('Cast was not posted (user cancelled).');
+        }
+        const castHash = normalizeCastHash(res.cast.hash);
+        if (!castHash) {
+          // console.debug('composeCast raw:', res);
+          throw new Error('Host returned an unexpected cast.hash format.');
+        }
         info('Cast posted. Continuing on-chain…');
 
         // 2) Prepare signers/threshold
