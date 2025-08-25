@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>r3nt — Create Listing</title>
+
+  <!-- Farcaster Mini App embed -->
+  <meta name="fc:miniapp" content='{
+    "version":"1",
+    "imageUrl":"https://r3nt.sqmu.net/assets/icon.png",
+    "button":{
+      "title":"Open r3nt",
+      "action":{
+        "type":"launch_miniapp",
+        "name":"r3nt",
+        "url":"https://r3nt.sqmu.net/index.html",
+        "splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png",
+        "splashBackgroundColor":"#FFFFFF"
+      }
+    }
+  }' />
+
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 16px 16px 40px; }
+    h1 { font-size: 1.25rem; margin: 8px 0 12px; }
+    .row { display: flex; gap: 10px; }
+    label { display: block; font-size: .9rem; margin: 10px 0 6px; }
+    input { width: 100%; padding: 10px 12px; border: 1px solid #d0d7de; border-radius: 8px; font-size: .95rem; }
+    small.mono { font-family: ui-monospace, Menlo, monospace; color:#666; }
+    button { width: 100%; padding: 12px 16px; border: 0; border-radius: 10px; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    #connect { background: #1f6feb; color: #fff; margin: 8px 0; }
+    #create  { background: #10b981; color: #fff; margin: 8px 0; }
+    .pill { display:inline-block; padding:2px 8px; background:#eef2ff; color:#3730a3; border-radius:999px; font-size:.8rem; }
+    #status { min-height: 22px; margin-top: 10px; font-size: .95rem; color:#444; }
+    .muted { color:#666; }
+    .divider { height:1px; background:#eee; margin:14px 0; }
+  </style>
+</head>
+<body>
+  <h1>r3nt — Create Listing</h1>
+
+  <div id="contextBar" class="muted">Starting…</div>
+  <div id="feeInfo" class="muted">List fee: — USDC</div>
+
+  <button id="connect" disabled>Connect Wallet</button>
+
+  <!-- Removed manual Cast URL/Hash field. We will compose and capture the hash automatically. -->
+
+  <div class="row">
+    <label>Latitude
+      <input id="lat" placeholder="25.2048" inputmode="decimal">
+    </label>
+    <label>Longitude
+      <input id="lon" placeholder="55.2708" inputmode="decimal">
+    </label>
+  </div>
+  <div class="muted"><small>We derive a GeoHash locally from these coordinates.</small></div>
+
+  <label>Title (max 64 chars)
+    <input id="title" maxlength="64" placeholder="Cozy studio near metro">
+  </label>
+
+  <label>Short description (max 140 chars)
+    <input id="shortDesc" maxlength="140" placeholder="Furnished, walk to metro, fast Wi‑Fi">
+  </label>
+
+  <div class="divider"></div>
+
+  <div class="row">
+    <label>Deposit (USDC)
+      <input id="deposit" placeholder="100.00" inputmode="decimal">
+    </label>
+  </div>
+
+  <div class="row">
+    <label>Daily (USDC)
+      <input id="rateDaily"  value="0" inputmode="decimal">
+    </label>
+    <label>Weekly (USDC)
+      <input id="rateWeekly" value="0" inputmode="decimal">
+    </label>
+    <label>Monthly (USDC)
+      <input id="rateMonthly" value="0" inputmode="decimal">
+    </label>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="muted">
+    <small class="mono">
+      Signers are fixed: landlord + platform (hidden).
+      <span id="signerMode" class="pill">2-of-2 (landlord + platform)</span>
+    </small>
+  </div>
+
+  <button id="create" disabled>Create Listing</button>
+  <div id="status"></div>
+
+  <script type="module">
+    import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+    import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
+    import { arbitrum } from 'https://esm.sh/viem/chains';
+    import { latLonToGeohash } from './js/tools.js';
+    import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS, RPC_URL } from './js/config.js';
+
+    // -------------------- Config --------------------
+    const ARBITRUM_HEX   = '0xa4b1';
+    const USDC_DECIMALS  = 6;
+
+    // 2-of-2 cosigners (landlord + platform)
+    const PLATFORM_SIGNER = PLATFORM_ADDRESS;
+    const encodeErc7913Ecdsa = (addr) => '0x00' + getAddress(addr).slice(2);
+
+    // Minimal ERC-20 ABI surface
+    const erc20Abi = [
+      { type:'function', name:'approve',   stateMutability:'nonpayable',
+        inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}],
+        outputs:[{type:'bool'}] },
+      { type:'function', name:'allowance', stateMutability:'view',
+        inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}],
+        outputs:[{type:'uint256'}] },
+    ];
+    let r3ntAbi;
+
+    // -------------------- UI handles --------------------
+    const els = {
+      contextBar:  document.getElementById('contextBar'),
+      feeInfo:     document.getElementById('feeInfo'),
+      signerMode:  document.getElementById('signerMode'),
+      connect:     document.getElementById('connect'),
+      create:      document.getElementById('create'),
+      status:      document.getElementById('status'),
+      lat:         document.getElementById('lat'),
+      lon:         document.getElementById('lon'),
+      title:       document.getElementById('title'),
+      shortDesc:   document.getElementById('shortDesc'),
+      deposit:     document.getElementById('deposit'),
+      rateDaily:   document.getElementById('rateDaily'),
+      rateWeekly:  document.getElementById('rateWeekly'),
+      rateMonthly: document.getElementById('rateMonthly'),
+    };
+    const info = (t) => els.status.textContent = t;
+
+    // helpers
+    function utf8BytesLen(str){ return new TextEncoder().encode(str).length; }
+    function parseLatLon(latStr, lonStr) {
+      const lat = Number(latStr), lon = Number(lonStr);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('Latitude/Longitude must be numbers.');
+      if (lat<-90||lat>90||lon<-180||lon>180) throw new Error('Latitude/Longitude out of range.');
+      return { lat, lon };
+    }
+    function parseDec6(s) {
+      const v = String(s ?? '').trim();
+      if (v === '') throw new Error('Missing numeric value.');
+      if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
+      return parseUnits(v, USDC_DECIMALS);
+    }
+    function disableWhile(el, fn){ return (async()=>{ el.disabled = true; try { return await fn(); } finally { el.disabled = false; } })(); }
+
+    // -------------------- Boot --------------------
+    let fidBig;      // bigint from QuickAuth
+    let provider;    // EIP-1193
+    const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
+
+    (async () => {
+      try { await sdk.actions.ready(); } catch {}
+      try {
+        const { token } = await sdk.quickAuth.getToken();
+        const [, payloadB64] = token.split('.');
+        const payloadJson = JSON.parse(
+          atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'))
+        );
+        fidBig = BigInt(payloadJson.sub);
+        els.contextBar.textContent = `FID: ${fidBig.toString()} · Signed in`;
+      } catch (e) {
+        els.contextBar.textContent = 'QuickAuth failed. Open this inside a Farcaster client.';
+        return;
+      }
+
+      try {
+        r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
+        const fee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
+        const feeNum = Number(fee)/1e6;
+        els.feeInfo.textContent = `List fee: ${feeNum % 1 === 0 ? feeNum.toFixed(0) : feeNum.toFixed(6)} USDC`;
+      } catch {
+        els.feeInfo.textContent = 'List fee: (unavailable)';
+      }
+
+      els.connect.disabled = false;
+    })();
+
+    // -------------------- Wallet connect --------------------
+    async function ensureArbitrum(p) {
+      const id = await p.request({ method: 'eth_chainId' });
+      if (id !== ARBITRUM_HEX) {
+        try {
+          await p.request({ method:'wallet_switchEthereumChain', params:[{ chainId: ARBITRUM_HEX }] });
+        } catch {
+          await p.request({
+            method:'wallet_addEthereumChain',
+            params:[{
+              chainId: ARBITRUM_HEX, chainName:'Arbitrum One',
+              nativeCurrency:{ name:'Ether', symbol:'ETH', decimals:18 },
+              rpcUrls:['https://arb1.arbitrum.io/rpc'], blockExplorerUrls:['https://arbiscan.io']
+            }]
+          });
+        }
+      }
+    }
+
+    els.connect.onclick = async () => {
+      try {
+        provider = await sdk.wallet.getEthereumProvider();
+        await provider.request({ method:'eth_requestAccounts' });
+        await ensureArbitrum(provider);
+        els.connect.textContent = 'Wallet Connected';
+        els.connect.style.background = '#10b981';
+        els.create.disabled = false;
+        info('Wallet ready.');
+      } catch (e) { info(e?.message || 'Wallet connection failed.'); }
+    };
+
+    // -------------------- Create listing (compose cast → on-chain) --------------------
+    els.create.onclick = () => disableWhile(els.create, async () => {
+      try {
+        if (fidBig === undefined) throw new Error('QuickAuth did not provide FID.');
+        if (!provider) throw new Error('Connect your wallet first.');
+
+        const [from] = await provider.request({ method:'eth_accounts' }) || [];
+        if (!from) throw new Error('No wallet account connected.');
+        await ensureArbitrum(provider);
+        const landlordAddr = getAddress(from);
+
+        // Inputs + guards
+        const title = els.title.value.trim();
+        const shortDesc = els.shortDesc.value.trim();
+        if (!title) throw new Error('Title is required.');
+        if (!shortDesc) throw new Error('Short description is required.');
+        if (utf8BytesLen(title) > 64) throw new Error('Title exceeds 64 bytes.');
+        if (utf8BytesLen(shortDesc) > 140) throw new Error('Short description exceeds 140 bytes.');
+
+        const deposit    = parseDec6(els.deposit.value);
+        const rateDaily  = parseUnits(String(els.rateDaily.value||'0'),  USDC_DECIMALS);
+        const rateWeekly = parseUnits(String(els.rateWeekly.value||'0'), USDC_DECIMALS);
+        const rateMonthly= parseUnits(String(els.rateMonthly.value||'0'),USDC_DECIMALS);
+
+        const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
+        const geohashStr = latLonToGeohash(lat, lon, 7);
+        const geolen = geohashStr.length;
+
+        if (!r3ntAbi) {
+          r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
+        }
+        const listFee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
+
+        // 1) Compose the landlord's canonical cast and capture the hash
+        info('Open composer… Post your listing cast.');
+        const compose = await sdk.actions.composeCast({
+          text: `🏠 ${title}\n${shortDesc}\n\nView & book in r3nt ↓`,
+          embeds: [ 'https://r3nt.sqmu.net/index.html' ],
+          close: false
+        });
+        if (!compose || !compose.cast) throw new Error('Cast was not posted.');
+        const castHash = (compose.cast.hash || '').toLowerCase();
+        if (!/^0x[0-9a-f]{64}$/.test(castHash)) throw new Error('Invalid cast hash returned.');
+        info('Cast posted. Continuing on-chain…');
+
+        // 2) Prepare signers/threshold
+        const signersBytes = [
+          encodeErc7913Ecdsa(landlordAddr),
+          encodeErc7913Ecdsa(PLATFORM_SIGNER),
+        ];
+        const threshold = 2n;
+
+        // 3) Approve list fee if needed
+        const cur = await pub.readContract({ address: USDC_ADDRESS, abi: erc20Abi, functionName:'allowance', args:[landlordAddr, R3NT_ADDRESS] });
+        if (cur < listFee) {
+          info('Approving USDC list fee…');
+          const approveData = encodeFunctionData({ abi: erc20Abi, functionName:'approve', args:[R3NT_ADDRESS, listFee] });
+          await provider.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
+        }
+
+        // 4) Submit createListing with captured cast hash
+        info('Submitting createListing…');
+        const data = encodeFunctionData({
+          abi: r3ntAbi, functionName:'createListing',
+          args: [
+            USDC_ADDRESS,
+            deposit,
+            rateDaily, rateWeekly, rateMonthly,
+            geohashStr, geolen,
+            fidBig,
+            castHash,             // bytes32 on-chain
+            title, shortDesc,
+            signersBytes,
+            threshold
+          ]
+        });
+
+        const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to:R3NT_ADDRESS, data }] });
+        info(`Listing tx sent: ${txHash}`);
+      } catch (e) {
+        info(`Error: ${e?.message || e}`);
+      }
+    });
+  </script>
+</body>
+</html>
