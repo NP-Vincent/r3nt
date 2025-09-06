@@ -47,6 +47,7 @@ contract BookingRegistry is
         nonReentrant
     {
         require(endTsUTC > startTsUTC, "range");
+        require(startTsUTC % DAY == 0 && endTsUTC % DAY == 0, "midnight");
         (uint32 sDay, uint32 eDay) = _normalizeTsToDays(startTsUTC, endTsUTC);
         _requireFree(listing, sDay, eDay);
         _mark(listing, sDay, eDay, true);
@@ -60,6 +61,7 @@ contract BookingRegistry is
         nonReentrant
     {
         require(endTsUTC > startTsUTC, "range");
+        require(startTsUTC % DAY == 0 && endTsUTC % DAY == 0, "midnight");
         (uint32 sDay, uint32 eDay) = _normalizeTsToDays(startTsUTC, endTsUTC);
         _mark(listing, sDay, eDay, false);
         emit Released(listing, msg.sender, sDay, eDay);
