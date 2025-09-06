@@ -193,4 +193,6 @@ contract BookingRegistry is
         m = uint8(m0);
         d = uint8(d0);
     }
+
+    uint256[50] private __gap;
 }
