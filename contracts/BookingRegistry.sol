@@ -105,8 +105,8 @@ contract BookingRegistry is
     }
 
     function _isFree(address L, uint32 sDay, uint32 eDay) internal view returns (bool) {
-        (uint16 yS, uint8 mS, uint8 dS) = _civilFromDays(int256(uint256(sDay)));
-        (uint16 yE, uint8 mE, uint8 dE) = _civilFromDays(int256(uint256(eDay - 1))); // last occupied day
+        (uint16 yS, uint8 mS, ) = _civilFromDays(int256(uint256(sDay)));
+        (uint16 yE, uint8 mE, ) = _civilFromDays(int256(uint256(eDay - 1))); // last occupied day
         uint32 ymS = uint32(yS) * 12 + (mS - 1);
         uint32 ymE = uint32(yE) * 12 + (mE - 1);
 
