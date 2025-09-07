@@ -52,6 +52,11 @@ interface IListingFactory {
     function predict(address core, uint256 listingId) external view returns (address predicted);
 }
 
+interface IBookingRegistry {
+    function reserve(address listing, address tenant, uint64 startTsUTC, uint64 endTsUTC) external;
+    function release(address listing, uint64 startTsUTC, uint64 endTsUTC) external;
+}
+
 /* ------------------------------------ Core ------------------------------------- */
 
 contract r3nt is
@@ -117,8 +122,9 @@ contract r3nt is
     uint96  public viewFee;               // $0.10 in 6d
     uint32  public viewPassSeconds;       // e.g. 72h
 
-    // External factory
+    // External contracts
     IListingFactory public listingFactory;
+    IBookingRegistry public bookingRegistry;
 
     // Events
     event Listed(uint256 indexed id, address indexed owner, address vault);
@@ -144,6 +150,8 @@ contract r3nt is
     event PlatformUpdated(address indexed platform);
     event FeesUpdated(uint16 feeBps, uint96 listFee, uint96 viewFee, uint32 viewPassSeconds);
     event ListingFactoryUpdated(address factory);
+    event BookingRegistryUpdated(address);
+    event CalendarReserved(address indexed listing, address indexed tenant, uint64 startTsUTC, uint64 endTsUTC);
 
     // -----------------------
     // Initializer (UUPS)
@@ -157,6 +165,7 @@ contract r3nt is
      * @param _viewFee   e.g.   100_000 (=$0.10)
      * @param _viewPassSeconds e.g. 72*3600
      * @param _factory   ListingFactory address
+     * @param _bookingRegistry BookingRegistry address
      */
     function initialize(
         address _usdc,
@@ -165,7 +174,8 @@ contract r3nt is
         uint96  _listFee,
         uint96  _viewFee,
         uint32  _viewPassSeconds,
-        address _factory
+        address _factory,
+        address _bookingRegistry
     ) public initializer {
         require(_usdc != address(0) && _platform != address(0), "zero addr");
         __UUPSUpgradeable_init();
@@ -182,6 +192,10 @@ contract r3nt is
         if (_factory != address(0)) {
             listingFactory = IListingFactory(_factory);
             emit ListingFactoryUpdated(_factory);
+        }
+        if (_bookingRegistry != address(0)) {
+            bookingRegistry = IBookingRegistry(_bookingRegistry);
+            emit BookingRegistryUpdated(_bookingRegistry);
         }
     }
 
@@ -269,6 +283,12 @@ contract r3nt is
         require(_factory != address(0), "zero");
         listingFactory = IListingFactory(_factory);
         emit ListingFactoryUpdated(_factory);
+    }
+
+    function setBookingRegistry(address _registry) external onlyOwner {
+        require(_registry != address(0), "zero");
+        bookingRegistry = IBookingRegistry(_registry);
+        emit BookingRegistryUpdated(_registry);
     }
 
     function setPlatform(address p) external onlyOwner {
@@ -422,6 +442,12 @@ contract r3nt is
 
         _transferFunds(L, msg.sender, rent, fee, dep);
 
+        require(startDate % 86400 == 0 && endDate % 86400 == 0, "not midnight");
+        if (address(bookingRegistry) != address(0)) {
+            bookingRegistry.reserve(L.vault, msg.sender, startDate, endDate);
+            emit CalendarReserved(L.vault, msg.sender, startDate, endDate);
+        }
+
         _createBooking(msg.sender, L.owner, listingId, startDate, endDate, rent, fee, dep);
         bookingId = bookings.length - 1;
 
@@ -434,6 +460,20 @@ contract r3nt is
         require(B.status == BookingStatus.Booked, "bad status");
         B.status = BookingStatus.Completed;
         emit Completed(bookingId);
+    }
+
+    function cancel(uint256 bookingId) external nonReentrant {
+        Booking storage B = bookings[bookingId];
+        require(msg.sender == B.tenant || msg.sender == B.landlord, "not party");
+        require(B.status == BookingStatus.Booked, "bad status");
+        require(block.timestamp < B.startDate, "stay started");
+
+        if (address(bookingRegistry) != address(0)) {
+            address vault = listings[B.listingId].vault;
+            bookingRegistry.release(vault, B.startDate, B.endDate);
+        }
+
+        B.status = BookingStatus.Resolved;
     }
 
     // -----------------------
@@ -491,5 +531,5 @@ contract r3nt is
     // -----------------------
     // Storage gap (UUPS)
     // -----------------------
-    uint256[44] private __gap; // reduced by 1 due to the added `vault` field
+    uint256[43] private __gap; // reduced by 2 due to added `vault` and `bookingRegistry` fields
 }
