@@ -29,12 +29,22 @@
     <a href="./index.html">Home</a>
     <a href="./tenant.html">Tenant</a>
     <a href="./landlord.html">Landlord</a>
+    <a href="./admin.html">Admin</a>
   </nav>
   <h1>r3nt View Pass</h1>
   <button id="connect">Connect Wallet</button>
   <div id="address">Not connected</div>
   <button id="buy" disabled>Buy View Pass (0.25 USDC)</button>
   <div id="status">Loading…</div>
+  <h2>Select Dates</h2>
+  <div class="row">
+    <label>Start
+      <input type="date" id="startDate">
+    </label>
+    <label>End
+      <input type="date" id="endDate">
+    </label>
+  </div>
   <h2>Listings</h2>
   <div id="listings"></div>
 
@@ -57,6 +67,8 @@
       addr: document.getElementById('address'),
       status: document.getElementById('status'),
       listings: document.getElementById('listings'),
+      start: document.getElementById('startDate'),
+      end: document.getElementById('endDate'),
     };
 
     const ARBITRUM_HEX = '0xa4b1';           // 42161
@@ -74,15 +86,17 @@
 
     function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
-    let r3ntAbi, cfg, pub, feeBps;
+    let r3ntAbi, cfg, pub, feeBps, bookingAbi, bookingAddr;
     async function loadConfig(){
       if (!r3ntAbi) {
-        [r3ntAbi, cfg] = await Promise.all([
+        [r3ntAbi, cfg, bookingAbi] = await Promise.all([
           fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
           import('./js/config.js'),
+          fetch('./js/abi/BookingRegistry.json').then(r => r.json()).then(j => j.abi),
         ]);
         pub = createPublicClient({ chain: arbitrum, transport: http(cfg.RPC_URL || 'https://arb1.arbitrum.io/rpc') });
         feeBps = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'feeBps' });
+        bookingAddr = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'bookingRegistry' });
       }
     }
 
@@ -171,15 +185,28 @@
         await ensureArbitrum(p);
         await loadConfig();
 
-        const rent = BigInt(rate);
+        const start = els.start.value;
+        const end = els.end.value;
+        if (!start || !end) throw new Error('Select start and end dates.');
+        const startTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
+        const endTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
+        if (endTs <= startTs) throw new Error('End date must be after start.');
+        const dur = rtype === 1n ? 7n * 86400n : rtype === 2n ? 30n * 86400n : 86400n;
+        const diff = endTs - startTs;
+        if (diff % dur !== 0n) throw new Error('Date range misaligned with rate type.');
+        const units = diff / dur;
+
+        const listing = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName:'getListing', args:[BigInt(listingId)] });
+        const free = await pub.readContract({ address: bookingAddr, abi: bookingAbi, functionName:'isFree', args:[listing.vault, startTs, endTs] });
+        if (!free) { els.status.textContent = 'Selected dates not available.'; return; }
+
+        const rent = BigInt(rate) * units;
         const dep = BigInt(deposit);
         const fee = rent * BigInt(feeBps) / 10000n;
         const total = rent + fee + dep;
 
         const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [cfg.R3NT_ADDRESS, total] });
-        const now = BigInt(Math.floor(Date.now()/1000));
-        const dur = rtype === 1n ? 7n * 86400n : rtype === 2n ? 30n * 86400n : 86400n;
-        const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), rtype, 1n, now, now + dur] });
+        const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), rtype, units, startTs, endTs] });
 
         els.status.textContent = 'Submitting booking…';
 
