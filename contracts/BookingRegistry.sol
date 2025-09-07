@@ -135,7 +135,16 @@ contract BookingRegistry is
 
     // Build mask for portion of [sDay, eDay) that lies in (year, month)
     function _maskForMonthSpan(uint16 year, uint8 month, uint32 sDay, uint32 eDay) internal pure returns (uint32) {
-        uint32 monthStart = uint32(_daysFromCivil(int256(year), int256(month), int256(1)));
+        int256 mStartInt = _daysFromCivil(
+            int256(uint256(year)),
+            int256(uint256(month)),
+            1
+        );
+        require(
+            mStartInt >= 0 && mStartInt <= int256(uint256(type(uint32).max)),
+            "range"
+        );
+        uint32 monthStart = uint32(uint256(mStartInt));
         uint8 dim = _daysInMonth(year, month);
         uint32 monthEndExcl = monthStart + dim; // exclusive
 
