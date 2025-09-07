@@ -128,7 +128,7 @@
     import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
     import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './js/tools.js';
-    import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS, RPC_URL } from './js/config.js';
+    import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS, RPC_URL, REGISTRY_ADDRESS } from './js/config.js';
 
     // -------------------- Config --------------------
     const ARBITRUM_HEX   = '0xa4b1';
@@ -197,11 +197,8 @@
 
     async function loadBooking(){
       if (!bookingAbi) {
-        if (!r3ntAbi) {
-          r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
-        }
         bookingAbi = await fetch('./js/abi/BookingRegistry.json').then(r => r.json()).then(j => j.abi);
-        bookingAddr = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'bookingRegistry' });
+        bookingAddr = REGISTRY_ADDRESS;
       }
     }
 

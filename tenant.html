@@ -96,7 +96,7 @@
         ]);
         pub = createPublicClient({ chain: arbitrum, transport: http(cfg.RPC_URL || 'https://arb1.arbitrum.io/rpc') });
         feeBps = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'feeBps' });
-        bookingAddr = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'bookingRegistry' });
+        bookingAddr = cfg.REGISTRY_ADDRESS;
       }
     }
 

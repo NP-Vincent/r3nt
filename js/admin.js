@@ -1,7 +1,7 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, keccak256, encodePacked, stringToHex, concatHex } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
-import { R3NT_ADDRESS, RPC_URL } from './config.js';
+import { R3NT_ADDRESS, RPC_URL, REGISTRY_ADDRESS } from './config.js';
 
 // -------------------- Config --------------------
 const ARBITRUM_HEX   = '0xa4b1';
@@ -34,6 +34,7 @@ const els = {
   setRegistry:document.getElementById('setRegistry'),
   status:     document.getElementById('status'),
 };
+els.registry.value = REGISTRY_ADDRESS;
 const info = (t) => els.status.textContent = t;
 
 // -------------------- Boot --------------------
