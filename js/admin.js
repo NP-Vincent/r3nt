@@ -1,10 +1,10 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, keccak256, encodePacked, stringToHex, concatHex } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
+import { R3NT_ADDRESS, RPC_URL } from './config.js';
 
 // -------------------- Config --------------------
 const ARBITRUM_HEX   = '0xa4b1';
-const R3NT_ADDRESS   = '0x18Af5B8fFA27B8300494Aa1a8c4F6AE4ee087029';
 const USDC_DECIMALS  = 6;
 const RELEASE_PREFIX = stringToHex('DEPOSIT_RELEASE', { size: 32 });
 
@@ -30,13 +30,15 @@ const els = {
   sigLandlord:document.getElementById('sigLandlord'),
   sigPlatform:document.getElementById('sigPlatform'),
   confirm:    document.getElementById('confirm'),
+  registry:   document.getElementById('registryAddr'),
+  setRegistry:document.getElementById('setRegistry'),
   status:     document.getElementById('status'),
 };
 const info = (t) => els.status.textContent = t;
 
 // -------------------- Boot --------------------
 let provider;
-const pub = createPublicClient({ chain: arbitrum, transport: http('https://arb1.arbitrum.io/rpc') });
+const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 (async () => {
   try { await sdk.actions.ready(); } catch {}
   try {
@@ -72,6 +74,7 @@ els.connect.onclick = async () => {
     els.propose.disabled = false;
     els.sign.disabled = false;
     els.confirm.disabled = false;
+    els.setRegistry.disabled = false;
     info('Wallet ready.');
   } catch (e) {
     info(e?.message || 'Wallet connection failed.');
@@ -159,6 +162,22 @@ els.confirm.onclick = async () => {
     const data = encodeFunctionData({ abi:r3ntAbi, functionName:'confirmDepositRelease', args:[bookingId, combined] });
     const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to:R3NT_ADDRESS, data }] });
     info(`Confirm tx sent: ${txHash}`);
+  } catch (e) {
+    info(`Error: ${e?.message || e}`);
+  }
+};
+
+els.setRegistry.onclick = async () => {
+  try {
+    if (!provider) throw new Error('Connect wallet first.');
+    const [from] = await provider.request({ method:'eth_accounts' }) || [];
+    if (!from) throw new Error('No wallet account.');
+    await ensureArbitrum(provider);
+    const addr = els.registry.value.trim();
+    if (!addr) throw new Error('Enter address.');
+    const data = encodeFunctionData({ abi:r3ntAbi, functionName:'setBookingRegistry', args:[addr] });
+    const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to:R3NT_ADDRESS, data }] });
+    info(`Registry set tx: ${txHash}`);
   } catch (e) {
     info(`Error: ${e?.message || e}`);
   }

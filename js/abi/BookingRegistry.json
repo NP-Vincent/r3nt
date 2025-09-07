@@ -1,0 +1,26 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "isFree",
+      "stateMutability": "view",
+      "inputs": [
+        { "type": "address", "name": "listing" },
+        { "type": "uint64", "name": "startTsUTC" },
+        { "type": "uint64", "name": "endTsUTC" }
+      ],
+      "outputs": [ { "type": "bool" } ]
+    },
+    {
+      "type": "function",
+      "name": "monthMask",
+      "stateMutability": "view",
+      "inputs": [
+        { "type": "address", "name": "listing" },
+        { "type": "uint16", "name": "year" },
+        { "type": "uint8", "name": "month" }
+      ],
+      "outputs": [ { "type": "uint32" } ]
+    }
+  ]
+}
