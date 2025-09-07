@@ -32,6 +32,7 @@ The static frontend references assets with relative paths, so it can be served f
   - `Listing.sol`: cloneable per-property deposit vault.
   - `ListingFactory.sol`: UUPS factory that deploys deterministic `Listing` clones and manages a token allowlist.
   - `r3nt.sol`: upgradeable core that wires bookings and deposit handling to the factory.
+  - `BookingRegistry.sol`: calendar registry used for booking/reservation tracking.
 - **Frontend**: Farcaster Mini App (HTML+JS).
 - **Storage**:
   - On-chain: listing metadata (title, geohash, fid, castHash).
@@ -120,8 +121,11 @@ All deployments and upgrades are executed manually in **Remix**.
 2. **ListingFactory** – deploy implementation and UUPS proxy.
    - Call `initialize(listingImpl)`.
    - Call `setAllowedToken(USDC, true)` to whitelist your payment token.
-3. **r3nt** – deploy implementation and UUPS proxy.
-   - Call `initialize(_usdc, _platform, _feeBps, _listFee, _viewFee, _viewPassSeconds, factoryAddress)`.
+3. **BookingRegistry** – deploy implementation and UUPS proxy.
+   - Call `initialize(admin, address(0))`.
+4. **r3nt** – deploy implementation and UUPS proxy.
+   - Call `initialize(_usdc, _platform, _feeBps, _listFee, _viewFee, _viewPassSeconds, factoryAddress, bookingRegistryAddress)`.
+   - On `BookingRegistry`, grant `R3NT_ROLE` to the r3nt proxy so it can `reserve`/`release`.
 
 ### Post-Deployment Flow
 - From the landlord wallet, call `r3nt.createListing(...)` passing ERC-7913 signers and threshold.
@@ -144,6 +148,7 @@ All deployments and upgrades are executed manually in **Remix**.
   - `_viewFee`: `250_000` (=$0.25)
   - `_viewPassSeconds`: `259200` (72h)
   - `_factory`: ListingFactory proxy address
+  - `_bookingRegistry`: BookingRegistry proxy address
 
 ---
 
