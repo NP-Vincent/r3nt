@@ -105,8 +105,8 @@ contract BookingRegistry is
     }
 
     function _isFree(address L, uint32 sDay, uint32 eDay) internal view returns (bool) {
-        (uint16 yS, uint8 mS, uint8 dS) = _civilFromDays(int32(sDay));
-        (uint16 yE, uint8 mE, uint8 dE) = _civilFromDays(int32(eDay - 1)); // last occupied day
+        (uint16 yS, uint8 mS, uint8 dS) = _civilFromDays(int256(uint256(sDay)));
+        (uint16 yE, uint8 mE, uint8 dE) = _civilFromDays(int256(uint256(eDay - 1))); // last occupied day
         uint32 ymS = uint32(yS) * 12 + (mS - 1);
         uint32 ymE = uint32(yE) * 12 + (mE - 1);
 
@@ -119,8 +119,8 @@ contract BookingRegistry is
     }
 
     function _mark(address L, uint32 sDay, uint32 eDay, bool setBits) internal {
-        (uint16 yS, uint8 mS, ) = _civilFromDays(int32(sDay));
-        (uint16 yE, uint8 mE, ) = _civilFromDays(int32(eDay - 1));
+        (uint16 yS, uint8 mS, ) = _civilFromDays(int256(uint256(sDay)));
+        (uint16 yE, uint8 mE, ) = _civilFromDays(int256(uint256(eDay - 1)));
         uint32 ymS = uint32(yS) * 12 + (mS - 1);
         uint32 ymE = uint32(yE) * 12 + (mE - 1);
 
@@ -135,7 +135,7 @@ contract BookingRegistry is
 
     // Build mask for portion of [sDay, eDay) that lies in (year, month)
     function _maskForMonthSpan(uint16 year, uint8 month, uint32 sDay, uint32 eDay) internal pure returns (uint32) {
-        uint32 monthStart = uint32(_daysFromCivil(int32(year), int32(month), 1));
+        uint32 monthStart = uint32(_daysFromCivil(int256(year), int256(month), int256(1)));
         uint8 dim = _daysInMonth(year, month);
         uint32 monthEndExcl = monthStart + dim; // exclusive
 
@@ -169,31 +169,31 @@ contract BookingRegistry is
     }
 
     // days since 1970-01-01 (Unix epoch), can be negative for pre-1970
-    function _daysFromCivil(int32 y, int32 m, int32 d) internal pure returns (int32) {
+    function _daysFromCivil(int256 y, int256 m, int256 d) internal pure returns (int256) {
         // Shift March=1 … Feb=12
-        y -= (m <= 2) ? 1 : 0;
-        int32 era = (y >= 0 ? y : y - 399) / 400;
-        uint32 yoe = uint32(y - era * 400);
-        uint32 doy = (153 * uint32(m + (m > 2 ? -3 : 9)) + 2) / 5 + uint32(d - 1);
-        uint32 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        y -= (m <= 2) ? int256(1) : int256(0);
+        int256 era = (y >= 0 ? y : y - 399) / 400;
+        uint256 yoe = uint256(y - era * 400);
+        uint256 doy = (153 * uint256(m + (m > 2 ? int256(-3) : int256(9))) + 2) / 5 + uint256(d - int256(1));
+        uint256 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
         // 719468 = days from civil 0000-03-01 to 1970-01-01
-        return int32(era * 146097 + int32(doe) - 719468);
+        return era * 146097 + int256(doe) - 719468;
     }
 
-    function _civilFromDays(int32 z) internal pure returns (uint16 y, uint8 m, uint8 d) {
+    function _civilFromDays(int256 z) internal pure returns (uint16 y, uint8 m, uint8 d) {
         z += 719468;
-        int32 era = (z >= 0 ? z : z - 146096) / 146097;
-        uint32 doe = uint32(z - era * 146097);                   // [0, 146096]
-        uint32 yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365; // [0,399]
-        int32 yFull = int32(yoe) + era * 400;
-        uint32 doy = doe - (365*yoe + yoe/4 - yoe/100);          // [0, 365]
-        uint32 mp = (5*doy + 2) / 153;                           // [0, 11]
-        uint32 d0 = doy - (153*mp + 2)/5 + 1;                    // [1, 31]
-        uint32 m0 = mp + (mp < 10 ? 3 : -9);                     // [1, 12]
-        yFull += (m0 <= 2) ? 1 : 0;
-        y = uint16(yFull);
-        m = uint8(m0);
-        d = uint8(d0);
+        int256 era = (z >= 0 ? z : z - 146096) / 146097;
+        uint256 doe = uint256(z - era * 146097);                        // [0, 146096]
+        uint256 yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;  // [0,399]
+        int256 yFull = int256(yoe) + era * 400;
+        uint256 doy = doe - (365*yoe + yoe/4 - yoe/100);               // [0, 365]
+        int256 mp = int256((5*doy + 2) / 153);                         // [0, 11]
+        int256 d0 = int256(doy) - (153*mp + 2)/5 + 1;                  // [1, 31]
+        int256 m0 = mp + (mp < 10 ? int256(3) : int256(-9));           // [1, 12]
+        yFull += (m0 <= 2) ? int256(1) : int256(0);
+        y = uint16(uint256(yFull));
+        m = uint8(uint256(m0));
+        d = uint8(uint256(d0));
     }
 
     uint256[50] private __gap;
