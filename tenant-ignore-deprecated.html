@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>r3nt View Pass</title>
 
-  <!-- Embed metadata (ok) -->
   <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://r3nt.sqmu.net/assets/icon.png","button":{"title":"Open r3nt","action":{"type":"launch_miniapp","name":"r3nt","url":"https://r3nt.sqmu.net/index.html","splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png","splashBackgroundColor":"#FFFFFF"}}}' />
 
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 20px; }
+    :root { --fg:#0f172a; --bg:#ffffff; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 20px; background: var(--bg); color: var(--fg); }
     button { width: 100%; padding: 12px 16px; border: 0; border-radius: 8px; font-weight: 600; cursor: pointer; }
     button:disabled { opacity: .6; cursor: not-allowed; }
     #connect { background: #1f6feb; color: #fff; }
@@ -17,9 +17,19 @@
     #status { margin-top: 14px; min-height: 24px; font-size: 0.95rem; color: #444; }
     #address { margin-top: 6px; font-family: ui-monospace, Menlo, monospace; color: #333; }
     #listings { margin-top: 20px; }
+    .card { border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px; }
+    .row { display:flex; gap:8px; }
+    nav { margin-bottom:16px; }
+    nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
+    select { width:100%; padding:6px; margin:4px 0 8px; }
   </style>
 </head>
 <body>
+  <nav>
+    <a href="./index.html">Home</a>
+    <a href="./tenant.html">Tenant</a>
+    <a href="./landlord.html">Landlord</a>
+  </nav>
   <h1>r3nt View Pass</h1>
   <button id="connect">Connect Wallet</button>
   <div id="address">Not connected</div>
@@ -27,31 +37,19 @@
   <div id="status">Loading…</div>
   <h2>Listings</h2>
   <div id="listings"></div>
-  <p><a href="landlord.html">Landlord: Create Listing</a></p>
-  <p><a href="FIDTest.html">QuickAuth FID Test</a></p>
 
-  <!-- 1) READY FIRST: tiny module; no other imports. -->
+  <!-- 1) READY FIRST -->
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-    // Best practice: call ready as soon as the interface is stable.
-    // If we're not in a host, this no-ops.
-    (async () => {
-      try {
-        // Optional: check context (not required for ready)
-        // await sdk.isInMiniApp();
-        await sdk.actions.ready();
-      } catch {}
-      // Safety: hide splash even if host handshake is slow
-      setTimeout(()=>{ try { sdk.actions.ready(); } catch {} }, 800);
-    })();
+    (async () => { try { await sdk.actions.ready(); } catch {} setTimeout(()=>{ try { sdk.actions.ready(); } catch {} }, 800); })();
   </script>
 
-  <!-- 2) APP LOGIC: separate module. If this fails, splash is already hidden. -->
+  <!-- 2) APP LOGIC -->
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { encodeFunctionData, parseUnits, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
-    import { bytes32ToCastUrl } from './js/tools.js';
+    import { bytes32ToCastUrl, bytes32ToCastHash } from './js/tools.js';
 
     const els = {
       connect: document.getElementById('connect'),
@@ -65,95 +63,107 @@
     const PASS_PRICE_USDC = '0.25';          // 0.25 USDC
     const USDC_DECIMALS = 6;
 
-    // Keep small to avoid failures before ready()
-    let inHost = false;
-    try { inHost = await sdk.isInMiniApp(); } catch {}
-    els.status.textContent = inHost
-      ? 'Tap Connect to continue.'
-      : 'Viewing only. Open from a Farcaster Mini App embed.';
+    let inHost = false; try { inHost = await sdk.isInMiniApp(); } catch {}
+    els.status.textContent = inHost ? 'Tap Connect to continue.' : 'Viewing only. Open from a Farcaster Mini App embed.';
 
-    async function hostSupportsWallet() {
-      try {
-        const caps = await sdk.getCapabilities?.();
-        // If host exposes capabilities, verify; otherwise assume yes.
-        return !caps || caps.includes('wallet.getEthereumProvider');
-      } catch { return true; }
-    }
+    async function hostSupportsWallet(){ try { const caps = await sdk.getCapabilities?.(); return !caps || caps.includes('wallet.getEthereumProvider'); } catch { return true; } }
 
-    let provider; // EIP-1193
-    async function getProvider() {
-      if (!provider) provider = await sdk.wallet.getEthereumProvider();
-      return provider;
-    }
+    let provider; async function getProvider(){ if (!provider) provider = await sdk.wallet.getEthereumProvider(); return provider; }
 
-    async function ensureArbitrum(p) {
-      const id = await p.request({ method: 'eth_chainId' });
-      if (id !== ARBITRUM_HEX) {
-        try {
-          await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: ARBITRUM_HEX }] });
-        } catch {
-          try {
-            await p.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: ARBITRUM_HEX,
-                chainName: 'Arbitrum One',
-                nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-                rpcUrls: ['https://arb1.arbitrum.io/rpc'],
-                blockExplorerUrls: ['https://arbiscan.io']
-              }]
-            });
-          } catch {}
-        }
-      }
-    }
+    async function ensureArbitrum(p){ const id = await p.request({ method:'eth_chainId' }); if (id !== ARBITRUM_HEX) { try { await p.request({ method:'wallet_switchEthereumChain', params:[{ chainId: ARBITRUM_HEX }] }); } catch { try { await p.request({ method:'wallet_addEthereumChain', params:[{ chainId: ARBITRUM_HEX, chainName:'Arbitrum One', nativeCurrency:{ name:'Ether', symbol:'ETH', decimals:18 }, rpcUrls:['https://arb1.arbitrum.io/rpc'], blockExplorerUrls:['https://arbiscan.io'] }] }); } catch {} } } }
 
     function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
     let r3ntAbi, cfg, pub, feeBps;
-    async function loadConfig() {
+    async function loadConfig(){
       if (!r3ntAbi) {
         [r3ntAbi, cfg] = await Promise.all([
           fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
           import('./js/config.js'),
         ]);
-        pub = createPublicClient({ chain: arbitrum, transport: http(cfg.RPC_URL) });
-        // Cache the platform fee bps for rent calculations during booking
+        pub = createPublicClient({ chain: arbitrum, transport: http(cfg.RPC_URL || 'https://arb1.arbitrum.io/rpc') });
         feeBps = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'feeBps' });
       }
     }
 
-    async function loadListings() {
-      await loadConfig();
-      els.listings.textContent = 'Loading listings…';
-      const count = Number(await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listingsCount' }));
-      const ul = document.createElement('ul');
-      for (let i = 0; i < count; i++) {
-        const L = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'getListing', args: [BigInt(i)] });
-        if (!L.active) continue;
-        // Listing.castHash is stored on-chain as bytes32; convert it into a Warpcast URL
-        const url = bytes32ToCastUrl(L.castHash);
-        const li = document.createElement('li');
-        const rent = Number(L.rateDaily) / 1e6;
-        const dep = Number(L.deposit) / 1e6;
-        li.innerHTML = `<a href="${url}" target="_blank">${L.title || `Listing ${i}`}</a>` +
-                       `<div>Rent/day: ${rent} USDC</div>` +
-                       `<div>Deposit: ${dep} USDC</div>`;
-        const btn = document.createElement('button');
-        btn.textContent = 'Book 1 day';
-        btn.onclick = () => bookListing(i, L.rateDaily, L.deposit);
-        li.appendChild(btn);
-        ul.appendChild(li);
-      }
-      els.listings.innerHTML = '';
-      if (!ul.childElementCount) {
-        els.listings.textContent = 'No active listings.';
-      } else {
-        els.listings.appendChild(ul);
+    async function openCast(hash32 /* bytes32 from contract */){
+      const cast20 = bytes32ToCastHash(hash32);
+      try {
+        await sdk.actions.viewCast({ hash: cast20 });
+      } catch {
+        // fallback: open in Warpcast
+        window.open(bytes32ToCastUrl(hash32), '_blank');
       }
     }
 
-    async function bookListing(listingId, rateDaily, deposit) {
+    async function loadListings(){
+      await loadConfig();
+      els.listings.textContent = 'Loading listings…';
+      const count = Number(await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listingsCount' }));
+      const items = await Promise.all(
+        Array.from({length: count}, (_,i)=> pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'getListing', args:[ BigInt(i) ] }).then(L=>({i, L})))
+      );
+      els.listings.innerHTML = '';
+      let shown = 0;
+      for (const {i, L} of items) {
+        if (!L.active) continue;
+        shown++;
+        const card = document.createElement('div');
+        card.className = 'card';
+        const title = document.createElement('div');
+        title.textContent = L.title || `Listing ${i}`;
+        const rateLabel = document.createElement('label');
+        rateLabel.textContent = 'Rent: ';
+        const sel = document.createElement('select');
+        if (Number(L.rateDaily) > 0) {
+          const o = document.createElement('option');
+          o.value = L.rateDaily;
+          o.dataset.rtype = '0';
+          o.textContent = `Daily - ${Number(L.rateDaily)/1e6} USDC`;
+          sel.appendChild(o);
+        }
+        if (Number(L.rateWeekly) > 0) {
+          const o = document.createElement('option');
+          o.value = L.rateWeekly;
+          o.dataset.rtype = '1';
+          o.textContent = `Weekly - ${Number(L.rateWeekly)/1e6} USDC`;
+          sel.appendChild(o);
+        }
+        if (Number(L.rateMonthly) > 0) {
+          const o = document.createElement('option');
+          o.value = L.rateMonthly;
+          o.dataset.rtype = '2';
+          o.textContent = `Monthly - ${Number(L.rateMonthly)/1e6} USDC`;
+          sel.appendChild(o);
+        }
+        rateLabel.appendChild(sel);
+        const dep = document.createElement('div');
+        dep.textContent = `Deposit: ${Number(L.deposit)/1e6} USDC`;
+
+        const row = document.createElement('div');
+        row.className = 'row';
+        const btnCast = document.createElement('button');
+        btnCast.textContent = 'Open Cast';
+        btnCast.onclick = () => openCast(L.castHash);
+        const btnBook = document.createElement('button');
+        btnBook.textContent = 'Book';
+        btnBook.onclick = () => {
+          const opt = sel.options[sel.selectedIndex];
+          bookListing(i, BigInt(opt.dataset.rtype), opt.value, L.deposit);
+        };
+        row.appendChild(btnCast);
+        row.appendChild(btnBook);
+
+        card.appendChild(title);
+        card.appendChild(rateLabel);
+        card.appendChild(dep);
+        card.appendChild(row);
+        els.listings.appendChild(card);
+      }
+      if (!shown) els.listings.textContent = 'No active listings.';
+    }
+
+    async function bookListing(listingId, rtype, rate, deposit){
       try {
         const p = await getProvider();
         const [from] = await p.request({ method: 'eth_accounts' }) || [];
@@ -161,41 +171,26 @@
         await ensureArbitrum(p);
         await loadConfig();
 
-        const rent = BigInt(rateDaily);
+        const rent = BigInt(rate);
         const dep = BigInt(deposit);
         const fee = rent * BigInt(feeBps) / 10000n;
         const total = rent + fee + dep;
 
-        const approveData = encodeFunctionData({
-          abi: erc20Abi, functionName: 'approve', args: [cfg.R3NT_ADDRESS, total]
-        });
+        const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [cfg.R3NT_ADDRESS, total] });
         const now = BigInt(Math.floor(Date.now()/1000));
-        const bookData = encodeFunctionData({
-          abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), 0n, 1n, now, now + 86400n]
-        });
+        const dur = rtype === 1n ? 7n * 86400n : rtype === 2n ? 30n * 86400n : 86400n;
+        const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), rtype, 1n, now, now + dur] });
 
         els.status.textContent = 'Submitting booking…';
 
         try {
-          await p.request({
-            method: 'wallet_sendCalls',
-            params: [{ calls: [
-              { to: cfg.USDC_ADDRESS, data: approveData },
-              { to: cfg.R3NT_ADDRESS, data: bookData }
-            ] }]
-          });
+          await p.request({ method:'wallet_sendCalls', params:[{ calls: [ { to: cfg.USDC_ADDRESS, data: approveData }, { to: cfg.R3NT_ADDRESS, data: bookData } ] }] });
         } catch {
           try {
-            await p.request({
-              method: 'wallet_sendCalls',
-              params: [
-                { to: cfg.USDC_ADDRESS, data: approveData },
-                { to: cfg.R3NT_ADDRESS, data: bookData }
-              ]
-            });
+            await p.request({ method:'wallet_sendCalls', params:[ { to: cfg.USDC_ADDRESS, data: approveData }, { to: cfg.R3NT_ADDRESS, data: bookData } ] });
           } catch {
-            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: cfg.USDC_ADDRESS, data: approveData }] });
-            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: cfg.R3NT_ADDRESS, data: bookData }] });
+            await p.request({ method:'eth_sendTransaction', params:[{ from, to: cfg.USDC_ADDRESS, data: approveData }] });
+            await p.request({ method:'eth_sendTransaction', params:[{ from, to: cfg.R3NT_ADDRESS, data: bookData }] });
           }
         }
 
@@ -207,21 +202,19 @@
       }
     }
 
-    async function checkViewPass(addr) {
+    async function checkViewPass(addr){
       try {
         await loadConfig();
         const expiry = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'viewPassExpiry', args: [addr] });
         const active = expiry > BigInt(Math.floor(Date.now()/1000));
         if (active) {
-          els.status.textContent = 'View pass active.';
+          const ts = Number(expiry) * 1000; const d = new Date(ts).toISOString().replace('T',' ').slice(0,16);
+          els.status.textContent = `View pass active. Expires: ${d} UTC.`;
           await loadListings();
         } else {
           els.status.textContent = 'No active view pass. Buy to see listings.';
         }
-      } catch (e) {
-        console.error(e);
-        els.status.textContent = 'Unable to verify view pass.';
-      }
+      } catch (e) { console.error(e); els.status.textContent = 'Unable to verify view pass.'; }
     }
 
     // ——— Connect ———
@@ -229,83 +222,49 @@
       try {
         if (!inHost) { els.status.textContent = 'Open in Farcaster app to connect wallet.'; return; }
         if (!(await hostSupportsWallet())) { els.status.textContent = 'This client does not support wallets for Mini Apps.'; return; }
-
         const p = await getProvider();
         await p.request({ method: 'eth_requestAccounts' });
         const [addr] = await p.request({ method: 'eth_accounts' });
         if (!addr) throw new Error('No account found.');
         await ensureArbitrum(p);
-
         els.addr.textContent = `Connected: ${short(addr)}`;
         els.connect.textContent = `Connected ${short(addr)}`;
         els.connect.style.background = '#10b981';
         els.buy.disabled = false;
         els.status.textContent = 'Ready.';
         await checkViewPass(addr);
-      } catch (e) {
-        console.error(e);
-        els.status.textContent = e?.message || 'Wallet connection failed.';
-      }
+      } catch (e) { console.error(e); els.status.textContent = e?.message || 'Wallet connection failed.'; }
     };
 
-    // ——— Buy (lazy-load ABIs/config right before use) ———
+    // ——— Buy pass ———
     els.buy.onclick = async () => {
       try {
         const p = await getProvider();
         const [from] = await p.request({ method: 'eth_accounts' }) || [];
         if (!from) throw new Error('No wallet account connected.');
         await ensureArbitrum(p);
-
-        // Lazy-load r3nt ABI & config via fetch/import
-        const [r3ntAbi, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
+        const [r3ntAbiLocal, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
           fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
           import('./js/config.js'),
         ]);
-
         const amount = parseUnits(PASS_PRICE_USDC, USDC_DECIMALS);
-
-        const approveData = encodeFunctionData({
-          abi: erc20Abi, functionName: 'approve', args: [R3NT_ADDRESS, amount]
-        });
-        const buyData = encodeFunctionData({
-          abi: r3ntAbi, functionName: 'buyViewPass', args: []
-        });
-
+        const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [R3NT_ADDRESS, amount] });
+        const buyData = encodeFunctionData({ abi: r3ntAbiLocal, functionName: 'buyViewPass', args: [] });
         els.status.textContent = 'Approving & purchasing…';
-
-        // Prefer EIP-5792 if supported
         try {
-          await p.request({
-            method: 'wallet_sendCalls',
-            params: [{ calls: [
-              { to: USDC_ADDRESS, data: approveData },
-              { to: R3NT_ADDRESS, data: buyData }
-            ] }]
-          });
+          await p.request({ method:'wallet_sendCalls', params:[{ calls: [ { to: USDC_ADDRESS, data: approveData }, { to: R3NT_ADDRESS, data: buyData } ] }] });
         } catch {
           try {
-            // Legacy syntax: params is an array of call objects
-            await p.request({
-              method: 'wallet_sendCalls',
-              params: [
-                { to: USDC_ADDRESS, data: approveData },
-                { to: R3NT_ADDRESS, data: buyData }
-              ]
-            });
+            await p.request({ method:'wallet_sendCalls', params:[ { to: USDC_ADDRESS, data: approveData }, { to: R3NT_ADDRESS, data: buyData } ] });
           } catch {
-            // Fallback: two txs
             await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
             await p.request({ method: 'eth_sendTransaction', params: [{ from, to: R3NT_ADDRESS, data: buyData }] });
           }
         }
-
         els.status.textContent = 'Success. View pass purchased.';
         alert('View pass purchased!');
         await checkViewPass(from);
-      } catch (err) {
-        console.error(err);
-        els.status.textContent = `Error: ${err?.message || err}`;
-      }
+      } catch (err) { console.error(err); els.status.textContent = `Error: ${err?.message || err}`; }
     };
   </script>
 </body>
