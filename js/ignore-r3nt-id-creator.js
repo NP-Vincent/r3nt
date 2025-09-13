@@ -3,7 +3,7 @@ function buildBookingMetadata({ id, area, startDate, endDate, landlord, tenant }
   return {
     name: `r3nt-SQMU #${id}`,
     description: `Represents ${area} sqm booked from ${startDate} to ${endDate}.`,
-    image: "https://sqmu.net/assets/booking-placeholder.png",
+    image: "./assets/icon.png",
     external_url: `https://r3nt.sqmu.net/booking/${id}`,
     attributes: [
       { trait_type: "Area (sqm)", value: area },
