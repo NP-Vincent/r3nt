@@ -1,5 +1,5 @@
 {
-  "name": "SQMU-R Token",
+  "name": "r3nt-SQMU",
   "description": "Represents 1 square metre of tokenised booking under the r3nt-SQMU standard.",
   "image": "./assets/icon.png",
   "external_url": "https://r3nt.sqmu.net",
