@@ -6,7 +6,10 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import "./BookingRegistry.sol";
+interface IBookingRegistry {
+    function reserve(address listing, address tenant, uint64 startTsUTC, uint64 endTsUTC) external;
+    function release(address listing, uint64 startTsUTC, uint64 endTsUTC) external;
+}
 
 interface IR3NT {
     function USDC() external view returns (IERC20);
@@ -28,7 +31,7 @@ contract R3NTSQMU is ERC1155Supply, AccessControl {
     IR3NT public immutable core;
     IERC20 public immutable usdc;
     address public immutable platform;
-    BookingRegistry public immutable registry;
+    IBookingRegistry public bookingRegistry;
 
     uint16 public feeBps = 100; // 1% platform fee on rent
 
@@ -78,18 +81,29 @@ contract R3NTSQMU is ERC1155Supply, AccessControl {
     mapping(uint256 => Booking) public bookings;
     uint256 public nextId;
 
+    event BookingRegistryUpdated(address indexed bookingRegistry);
+
     constructor(
         IR3NT _core,
-        BookingRegistry _registry,
+        address _registry,
         string memory uri
     ) ERC1155(uri) {
         core = _core;
         usdc = _core.USDC();
         platform = _core.platform();
-        registry = _registry;
+        if (_registry != address(0)) {
+            bookingRegistry = IBookingRegistry(_registry);
+            emit BookingRegistryUpdated(_registry);
+        }
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(R3NT_ROLE, msg.sender);
+    }
+
+    function setBookingRegistry(address _registry) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_registry != address(0), "zero");
+        bookingRegistry = IBookingRegistry(_registry);
+        emit BookingRegistryUpdated(_registry);
     }
 
     /// @notice Intake a booking, reserve calendar, distribute rent and mint tokens
@@ -104,7 +118,7 @@ contract R3NTSQMU is ERC1155Supply, AccessControl {
         bookingId = ++nextId;
 
         // Reserve nights via BookingRegistry (requires R3NT_ROLE on this contract)
-        registry.reserve(listing, msg.sender, startTsUTC, endTsUTC);
+        bookingRegistry.reserve(listing, msg.sender, startTsUTC, endTsUTC);
 
         uint256 grossRent = area * rentPerSqM;
         uint256 fee = grossRent * feeBps / 10_000;
@@ -207,7 +221,7 @@ contract R3NTSQMU is ERC1155Supply, AccessControl {
         Booking memory b = bookings[bookingId];
         require(msg.sender == b.tenant || hasRole(R3NT_ROLE, msg.sender), "unauthorized");
 
-        registry.release(b.listing, b.start, b.end);
+        bookingRegistry.release(b.listing, b.start, b.end);
         _burn(b.tenant, bookingId, b.area);
         delete bookings[bookingId];
         delete tokenizationRequests[bookingId];
