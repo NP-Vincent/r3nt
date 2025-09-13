@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
+import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ERC1155SupplyUpgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155SupplyUpgradeable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 interface IBookingRegistry {
     function reserve(address listing, address tenant, uint64 startTsUTC, uint64 endTsUTC) external;
@@ -20,15 +22,15 @@ interface IR3NT {
 /// @notice Mints SQMU-R tokens representing square metre bookings and
 ///         interacts with r3nt and BookingRegistry for calendar management
 ///         and rent distribution.
-contract R3NTSQMU is ERC1155Supply, OwnableUpgradeable {
+contract R3NTSQMU is Initializable, ERC1155SupplyUpgradeable, OwnableUpgradeable, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     string public constant name = "r3nt-SQMU";
     string public constant symbol = "SQMU-R";
 
-    IR3NT public immutable core;
-    IERC20 public immutable usdc;
-    address public immutable platform;
+    IR3NT public core;
+    IERC20 public usdc;
+    address public platform;
     IBookingRegistry public bookingRegistry;
 
     uint16 public feeBps = 100; // 1% platform fee on rent
@@ -81,12 +83,15 @@ contract R3NTSQMU is ERC1155Supply, OwnableUpgradeable {
 
     event BookingRegistryUpdated(address indexed bookingRegistry);
 
-    constructor(
+    function initialize(
         IR3NT _core,
         address _registry,
         string memory uri
-    ) ERC1155(uri) initializer {
+    ) public initializer {
+        __ERC1155_init(uri);
+        __ERC1155Supply_init();
         __Ownable_init(msg.sender);
+        __UUPSUpgradeable_init();
         core = _core;
         usdc = _core.USDC();
         platform = _core.platform();
@@ -222,5 +227,9 @@ contract R3NTSQMU is ERC1155Supply, OwnableUpgradeable {
         delete bookings[bookingId];
         delete tokenizationRequests[bookingId];
     }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    uint256[50] private __gap;
 }
 
