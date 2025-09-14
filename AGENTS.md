@@ -16,6 +16,7 @@ For development and troubleshooting tips, consult the [Farcaster Mini App Agents
   - `Listing.sol` – per-property deposit vault clone.
   - `ListingFactory.sol` – UUPS factory that deploys deterministic `Listing` clones and manages a token allowlist.
   - `r3nt.sol` – UUPS core that wires bookings and deposit release to the factory.
+  - `r3nt-SQMU.sol` – ERC-1155 tokenises future rent streams (SQMU-R) while remaining upgradeable.
 - **Network**: Arbitrum One
 - **Token**: Canonical USDC (6 decimals)
 - **Core Concepts**:
@@ -40,10 +41,14 @@ For development and troubleshooting tips, consult the [Farcaster Mini App Agents
   - Pays: rent + platform fee + deposit.  
   - Rent → landlord, fee → platform, deposit → escrow.  
 
-- **Platform (Owner)**  
-  - Receives listing/view fees + 2% commission.  
-  - Confirms deposit release with `confirmDepositRelease()`.  
-  - Manages upgrades via UUPS.  
+- **Platform (Owner)**
+  - Receives listing/view fees + 2% commission.
+  - Confirms deposit release with `confirmDepositRelease()`.
+  - Manages upgrades via UUPS.
+
+- **Investor**
+  - Holds **SQMU-R** tokens representing future rent streams.
+  - Expects tokens to map to weekly or monthly schedules based on `frequency`.
 
 ---
 
@@ -62,12 +67,13 @@ For development and troubleshooting tips, consult the [Farcaster Mini App Agents
 ---
 
 ## Best Practices for Codex Iteration
-1. **Do not remove upgradeability**. Always preserve `_authorizeUpgrade()` and `__gap`.
+1. **Do not remove upgradeability**. Always preserve `_authorizeUpgrade()` and `__gap`, especially for ERC-1155 tokenisation like `r3nt-SQMU`.
 2. **Keep on-chain data minimal**. Images, long descriptions → Farcaster cast.
 3. **Respect USDC decimals** (6). Never assume 18 decimals in UI.
 4. **Frontend reads** should use RPC (`createPublicClient`) not the wallet provider, which may block `eth_call`.
 5. **Frontend writes** (transactions) must first call `approve()` for exact USDC required.
 6. **Always test** with small values on Arbitrum testnets before mainnet.
+7. **Document tokenisation parameters** (`feeBps`, `rateBps`, `frequency`) whenever rent streams are tokenised.
 
 ---
 
