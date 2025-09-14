@@ -10,6 +10,24 @@ It enables landlords to list properties, tenants to book with USDC, and deposits
 
 For developer and debugging guidance, see the [Farcaster Mini App Agents Checklist](https://miniapps.farcaster.xyz/docs/guides/agents-checklist). More detailed information is available in `notes/Codex-minapp-farcaster-reference.txt`, a local copy of the upstream `llms-full.txt`.
 
+## r3nt Functions and Services
+
+### Core Rental Flow
+- **Landlord listings** – Landlords pay a $2 USDC fee to register properties and define deposit and rate schedules. Listings are stored on-chain, with rich details kept in a linked Farcaster cast.
+- **Tenant access** – Tenants purchase a 72‑hour view pass for $0.25 USDC before booking and then pay rent plus deposit in USDC when booking. The system splits fees between landlord and platform, and it records booking details for future reference.
+- **Deposit escrow & release** – Deposits flow into a per‑listing vault. After a stay, landlords propose a tenant/landlord split and the platform confirms the release using multi-signature verification.
+
+### Smart-Contract Services
+- **ListingFactory** – Deploys deterministic Listing clones with a token allowlist, creating isolated deposit vaults for each property.
+- **BookingRegistry** – Manages reservation calendars via month bitmasks with functions to reserve, release, and query availability for arbitrary date ranges.
+- **R3NTSQMU (SQMU‑R token)** – Tokenizes long‑term bookings into ERC‑1155 shares, enabling proposals, approvals, investments, and fee distribution over weekly or monthly schedules.
+
+### Front-End Utilities
+- **Geolocation helpers** – Encode/decode geohashes and compute approximate cell sizes to map property coordinates.
+- **Farcaster cast utilities** – Validate and normalize cast hashes and URLs for linking on-chain listings to off-chain content.
+
+These components together provide a full-stack rental dApp: landlords create upgradeable listings with secure deposit handling, tenants book and pay in USDC, the platform manages calendars and deposit releases, and longer bookings can be tokenized for investors.
+
 ### Hosting
 The static frontend references assets with relative paths, so it can be served from any directory. Hosting at the domain root is not required.
 
