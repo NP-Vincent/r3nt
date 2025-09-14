@@ -131,6 +131,9 @@ contract R3NTSQMU is Initializable, ERC1155SupplyUpgradeable, OwnableUpgradeable
         uint64 startTsUTC,
         uint64 endTsUTC
     ) external returns (uint256 bookingId) {
+        uint64 duration = endTsUTC - startTsUTC;
+        require(duration >= 1_814_400, "duration < 3 weeks");
+
         bookingId = ++nextId;
 
         // Reserve nights via BookingRegistry
