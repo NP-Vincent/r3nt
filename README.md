@@ -22,8 +22,11 @@ The static frontend references assets with relative paths, so it can be served f
   - Rent → landlord immediately.  
   - 2% commission → platform.  
   - Deposit → escrow until completion.  
-- **Partial deposit release**: landlord proposes split, platform confirms.  
-- **Minimal on-chain footprint**: all images, extended descriptions live off-chain in landlord’s Farcaster cast.  
+- **Partial deposit release**: landlord proposes split, platform confirms.
+- **Minimal on-chain footprint**: all images, extended descriptions live off-chain in landlord’s Farcaster cast.
+
+### r3nt-SQMU.sol
+`r3nt-SQMU.sol` mints the **SQMU-R** ERC-1155 token. Landlords or tenants can tokenise bookings longer than three weeks and choose a weekly or monthly rent schedule, creating tradable rent shares for investors.
 
 ---
 
@@ -33,6 +36,7 @@ The static frontend references assets with relative paths, so it can be served f
   - `ListingFactory.sol`: UUPS factory that deploys deterministic `Listing` clones and manages a token allowlist.
   - `r3nt.sol`: upgradeable core that wires bookings and deposit handling to the factory.
   - `BookingRegistry.sol`: calendar registry used for booking/reservation tracking.
+  - `r3nt-SQMU.sol`: UUPS ERC-1155 that tokenises square-metre bookings, reserves dates via `BookingRegistry`, and reads USDC and platform settings from `r3nt`.
 - **Frontend**: Farcaster Mini App (HTML+JS).
 - **Storage**:
   - On-chain: listing metadata (title, geohash, fid, castHash).
@@ -126,6 +130,9 @@ All deployments and upgrades are executed manually in **Remix**.
 4. **r3nt** – deploy implementation and UUPS proxy.
    - Call `initialize(_usdc, _platform, _feeBps, _listFee, _viewFee, _viewPassSeconds, factoryAddress, bookingRegistryAddress)`.
    - On `BookingRegistry`, grant `R3NT_ROLE` to the r3nt proxy so it can `reserve`/`release`.
+5. **r3nt-SQMU** – deploy implementation and UUPS proxy.
+   - Call `initialize(r3ntProxy, bookingRegistryAddress, uri)`.
+   - On `BookingRegistry`, grant `R3NT_ROLE` to the r3nt-SQMU proxy so it can `reserve`/`release`.
 
 ### Post-Deployment Flow
 - From the landlord wallet, call `r3nt.createListing(...)` passing ERC-7913 signers and threshold.
@@ -149,6 +156,15 @@ All deployments and upgrades are executed manually in **Remix**.
   - `_viewPassSeconds`: `259200` (72h)
   - `_factory`: ListingFactory proxy address
   - `_bookingRegistry`: BookingRegistry proxy address
+- **r3nt-SQMU.initialize**:
+  - `_core`: r3nt proxy address
+  - `_registry`: BookingRegistry proxy address
+  - `uri`: base metadata URI
+
+## Investor Flow
+1. Landlord or tenant proposes tokenisation for a booking longer than three weeks and selects a weekly or monthly distribution schedule.
+2. After platform approval, investors mint **SQMU-R** tokens representing the tokenised rent.
+3. Rent is streamed to SQMU-R holders according to the chosen schedule; tokens are burned when the stay concludes.
 
 ---
 
