@@ -78,6 +78,13 @@ contract R3NTSQMU is Initializable, ERC1155SupplyUpgradeable, OwnableUpgradeable
         uint16 rateBps
     );
 
+    event Invested(
+        uint256 indexed bookingId,
+        address indexed investor,
+        uint256 amount,
+        uint256 fee
+    );
+
     mapping(uint256 => Booking) public bookings;
     uint256 public nextId;
 
@@ -105,6 +112,14 @@ contract R3NTSQMU is Initializable, ERC1155SupplyUpgradeable, OwnableUpgradeable
         require(_registry != address(0), "zero");
         bookingRegistry = IBookingRegistry(_registry);
         emit BookingRegistryUpdated(_registry);
+    }
+
+    event FeeBpsUpdated(uint16 oldFeeBps, uint16 newFeeBps);
+
+    function setFeeBps(uint16 newFeeBps) external onlyOwner {
+        uint16 old = feeBps;
+        feeBps = newFeeBps;
+        emit FeeBpsUpdated(old, newFeeBps);
     }
 
     /// @notice Intake a booking, reserve calendar, distribute rent and mint tokens
@@ -215,6 +230,22 @@ contract R3NTSQMU is Initializable, ERC1155SupplyUpgradeable, OwnableUpgradeable
             feeBps_,
             rateBps_
         );
+    }
+
+    function invest(uint256 bookingId, uint256 amount) external {
+        TokenizationRequest memory r = tokenizationRequests[bookingId];
+        require(r.approved, "not approved");
+
+        Booking memory b = bookings[bookingId];
+        address payee = r.landlord ? b.landlord : b.tenant;
+
+        uint256 fee = amount * r.feeBps / 10_000;
+        usdc.safeTransferFrom(msg.sender, payee, amount - fee);
+        usdc.safeTransferFrom(msg.sender, platform, fee);
+
+        _mint(msg.sender, bookingId, amount, "");
+
+        emit Invested(bookingId, msg.sender, amount, fee);
     }
 
     /// @notice Release booking and burn tokens after the stay concludes
