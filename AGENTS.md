@@ -97,3 +97,16 @@ All deployments are manual via Remix; no script-based tooling is expected.
 
 ---
 
+## Development & Testing
+All deployments and testing are performed manually. Tasks in this repository should focus solely on coding; do not automate or script deployment or test flows.
+
+### SQMU Tokenisation Manual Scenarios
+- **Proposal**: Landlord proposes SQMU-R parameters (rate, frequency). Verify event emission and parameters using a public RPC client.
+- **Approval**: Platform owner approves the proposal. Confirm only the owner can call and that the storage layout is unchanged.
+- **Investment**: Investor approves USDC and purchases SQMU-R tokens. Check token balances and schedule metadata via RPC.
+- **Rent Claim**: Token holders claim accrued rent. Validate distributions against the tokenised schedule and confirm balances drop accordingly.
+
+#### RPC / Provider Caveats
+- Use `createPublicClient` or another RPC client for reads; injected providers in the Farcaster Mini App may block `eth_call`.
+- Ensure the RPC endpoint supports ERC-1155 calls and points to the correct Arbitrum network.
+- Accounts must hold enough ETH for gas; L2 finality may delay rent claim availability.
