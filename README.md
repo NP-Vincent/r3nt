@@ -151,6 +151,6 @@ Key events emitted by `Listing.sol` include `BookingCreated`, `DepositSplitPropo
 - **Off-chain metadata** – `RentToken` URIs point to JSON generated off-chain describing the
   booking; keep on-chain state minimal and index events for analytics.
 
-For historical context, the legacy contracts (`r3nt.sol`, `r3nt-SQMU.sol`, `Listing.sol`,
-`RentDistribution.sol`) can be referenced in the upstream repository, but the Clean-Slate
+For historical context, the legacy contracts (`r3nt-ignore-deprecated.sol`, `r3nt-SQMU-ignore-deprecated.sol`, `Listing-ignore-deprecated.sol`,
+`RentDistribution-ignore-deprecated.sol`) can be referenced in the upstream repository, but the Clean-Slate
 architecture replaces them with the modular suite described above.
