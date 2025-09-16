@@ -1,130 +1,123 @@
 # AGENTS.md
 
 ## Purpose
-This document is for Codex that develops & works on this repository.  
-It describes the context, architecture, and interaction patterns so Codex can:
-- Understand the role of each component.
-- Suggest improvements without breaking the upgradeable contract design.
-- Troubleshoot errors from the Farcaster Mini App, RPC calls, or contract execution.
+This repository hosts the Clean-Slate rebuild of the r3nt smart-contract suite. Use this document to
+align any code or documentation changes with the new architecture so that future implementation
+work remains consistent, upgradeable and easy to reason about.
 
-For development and troubleshooting tips, consult the [Farcaster Mini App Agents Checklist](https://miniapps.farcaster.xyz/docs/guides/agents-checklist). More detailed background is available in [`minapp-farcaster-llms-full.txt`](./minapp-farcaster-llms-full.txt), which mirrors the upstream `llms-full.txt`.
+## Clean-Slate Objectives
+- Merge short-term bookings and tokenised bookings into a single `Listing` flow.
+- Operate strictly on **USDC (6 decimals)** with tenant and landlord fee basis points applied by the
+  platform.
+- Keep deposits escrowed inside each listing and require platform (multi-sig) confirmation before
+  releasing funds.
+- Make ERC-1155 tokenisation optional for every booking; there is no separate SQMU contract.
+- Stream rent to investors using an accumulator so the system never loops over all holders.
+- Maintain a modular, upgradeable architecture built from `Platform`, `ListingFactory`,
+  `Listing` clones, `BookingRegistry` and `RentToken`.
 
-## r3nt Functions and Services
+## Contract Modules & Responsibilities
+### Platform (`Platform.sol`)
+- Owns global configuration: USDC token address, tenant/landlord fee basis points, listing/view
+  pricing and other shared parameters.
+- Stores module addresses (`ListingFactory`, `BookingRegistry`, `RentToken`) and exposes them to
+  the UI.
+- Only the owner (platform multi-sig) can update configuration, set module addresses or approve
+  upgrades via `_authorizeUpgrade`.
+- Provides `createListing(address landlord, ListingParams params)` which delegates clone creation
+  to the factory and emits `ListingCreated(listing, landlord)`.
 
-### Core Rental Flow
-- **Landlord listings** – Landlords pay a $2 USDC fee to register properties and define deposit and rate schedules. Listings are stored on-chain, with rich details kept in a linked Farcaster cast.
-- **Tenant access** – Tenants purchase a 72‑hour view pass for $0.25 USDC before booking and then pay rent plus deposit in USDC when booking. The system splits fees between landlord and platform, and it records booking details for future reference.
-- **Deposit escrow & release** – Deposits flow into a per‑listing vault. After a stay, landlords propose a tenant/landlord split and the platform confirms the release using multi-signature verification.
+### ListingFactory (`ListingFactory.sol`)
+- Holds the address of the canonical `Listing` implementation.
+- `createListing(landlord, params)` clones the implementation, calls
+  `initialize(landlord, platform, bookingRegistry, rentToken, params)` and emits
+  `ListingCreated` for indexers.
+- Owner-only `updateImplementation(newImpl)` swaps the template used for future clones.
 
-### Smart-Contract Services
-- **ListingFactory** – Deploys deterministic Listing clones with a token allowlist, creating isolated deposit vaults for each property.
-- **BookingRegistry** – Manages reservation calendars via month bitmasks with functions to reserve, release, and query availability for arbitrary date ranges.
-- **R3NTSQMU (SQMU‑R token)** – Tokenizes long‑term bookings into ERC‑1155 shares, enabling proposals, approvals, investments, and fee distribution over weekly or monthly schedules.
+### BookingRegistry (`BookingRegistry.sol`)
+- Maintains each listing’s reservation calendar (bitmap, mapping, etc.).
+- Enforces access control so only an authorised listing (or the platform for emergency overrides)
+  can `reserve` or `release` a range.
+- Optionally exposes `isAvailable` for off-chain reads.
 
-### Front-End Utilities
-- **Geolocation helpers** – Encode/decode geohashes and compute approximate cell sizes to map property coordinates.
-- **Farcaster cast utilities** – Validate and normalize cast hashes and URLs for linking on-chain listings to off-chain content.
+### RentToken (`RentToken.sol`)
+- ERC-1155 token contract where each booking id maps to a unique `tokenId`.
+- Grants `MINTER_ROLE` to listing clones so they can mint and burn shares.
+- Allows a listing to `lockTransfers(tokenId)` after fundraising to simplify downstream rent
+  streaming.
+- Metadata is served from an off-chain URI template like `https://api.r3nt.xyz/booking/{id}.json`.
 
-These components together provide a full-stack rental dApp: landlords create upgradeable listings with secure deposit handling, tenants book and pay in USDC, the platform manages calendars and deposit releases, and longer bookings can be tokenized for investors.
+### Listing (`Listing.sol`)
+- Cloneable per-property contract initialised with landlord, platform, registry and rent token
+  addresses plus rate/deposit parameters.
+- Handles the full lifecycle: booking, deposit escrow, landlord/platform approvals, optional
+  tokenisation, rent payments, investor claims, cancellations and defaults.
+- Stores bookings in mappings keyed by `bookingId` to avoid gas-heavy iteration.
+- Emits events for every significant action so the front-end/subgraph can rebuild state off-chain.
 
----
+## Booking & Tokenisation Flow
+1. **Book** – `book(rt, units, start, end)` verifies availability via the `BookingRegistry`,
+   calculates rent, applies tenant/landlord fees and escrows the deposit within the listing.
+2. **Deposit management** – landlord proposes a split with `proposeDepositSplit(bookingId, tenantBps)`;
+   the platform multi-sig finalises it through `confirmDepositSplit(bookingId, signature)`.
+3. **Tokenisation (optional)** – landlord or tenant proposes parameters (`totalShares`,
+   `pricePerShare`, `feeBps`, `Period`); the platform approves; investors `invest` and receive
+   ERC-1155 shares minted by the listing.
+4. **Rent streaming** – tenants call `payRent(bookingId, amount)` which updates the accumulator
+   `accRentPerShare = accRentPerShare + amount * 1e18 / totalShares`. Investors call
+   `claim(bookingId)` to withdraw accrued rent without loops.
+5. **Cancellations & defaults** – the platform can `cancelBooking` before funding or
+   `handleDefault` to allocate seized deposits/penalties to investors.
 
-## Contract Overview
-- **Contracts**:
-  - `Listing.sol` – per-property deposit vault clone.
-  - `ListingFactory.sol` – UUPS factory that deploys deterministic `Listing` clones and manages a token allowlist.
-  - `r3nt.sol` – UUPS core that wires bookings and deposit release to the factory.
-  - `r3nt-SQMU.sol` – ERC-1155 tokenises future rent streams (SQMU-R) while remaining upgradeable.
-- **Network**: Arbitrum One
-- **Token**: Canonical USDC (6 decimals)
-- **Core Concepts**:
-  - **Listings**: Landlords register properties with minimal on-chain data. ($2 USDC listing fee)
-  - **View Pass**: Tenants pay $0.25 USDC for a 72h pass to browse listings.
-  - **Booking**: Tenant books with rent + deposit. Platform charges 2% commission on rent.
-  - **Escrow**: Deposit held in contract, landlord proposes split, platform (owner) confirms release.
-  - **Off-chain details**: Farcaster `(fid, castHash)` link points to rich metadata (images, text).
+## Booking State & Events
+Bookings use the following core structure and status enums:
+```
+enum Status { NONE, ACTIVE, COMPLETED, CANCELLED, DEFAULTED }
+enum Period { NONE, WEEK, MONTH }
+struct Booking {
+    address tenant;
+    uint64 start;
+    uint64 end;
+    uint256 rent;
+    uint256 deposit;
+    Status status;
+    bool tokenised;
+    uint256 totalShares;
+    uint256 soldShares;
+    uint256 pricePerShare;
+    uint16 feeBps;
+    Period period;
+    address proposer;
+    uint256 accRentPerShare;
+    mapping(address => uint256) userDebt;
+}
+```
 
----
+Key events to retain/emit: `BookingCreated`, `DepositSplitProposed`, `DepositReleased`,
+`TokenisationProposed`, `TokenisationApproved`, `SharesMinted`, `RentPaid`, `Claimed`,
+`BookingCancelled`, `BookingCompleted`.
 
-## Roles
-- **Landlord**  
-  - Calls `createListing()` (after approving $2 fee in USDC).  
-  - Can toggle listing active/inactive.  
-  - Calls `markCompleted()` after rental.  
-  - Calls `proposeDepositSplit()` to suggest deposit distribution.  
+## Implementation Plan Snapshot
+1. Deploy `RentToken`; grant `MINTER_ROLE` to the authority that will register listings.
+2. Deploy `BookingRegistry` and wire allow-lists for authorised listings.
+3. Deploy the `Listing` implementation (uninitialised).
+4. Deploy `ListingFactory` pointing to the implementation.
+5. Deploy `Platform`, configure USDC and module addresses.
+6. Platform calls `createListing(landlord, params)` to initialise each property clone.
+7. Update front-end/subgraph integrations to the new module addresses.
 
-- **Tenant**  
-  - Calls `buyViewPass()` (after approving $0.25 USDC).  
-  - Can book active listings with `book()`.  
-  - Pays: rent + platform fee + deposit.  
-  - Rent → landlord, fee → platform, deposit → escrow.  
+## Design Notes & Constraints
+- **Upgradeability** – every upgradeable module must inherit from `UUPSUpgradeable`, protect
+  `_authorizeUpgrade` with `onlyOwner` and maintain storage gaps.
+- **Deposits** – continue to use multi-sig/ERC-7913 signature verification when confirming splits.
+- **Roles** – enforce permissions for landlord, tenant, investor and platform flows as described
+  above; never expose unrestricted reserve/release/tokenisation endpoints.
+- **Data hygiene** – keep on-chain storage minimal and rely on events + off-chain metadata for rich
+  detail. All monetary values stay in 6-decimal USDC.
+- **Testing** – there are no automated scripts in this repository. Run targeted Foundry/Hardhat
+  tests locally when you modify Solidity contracts, or provide reasoning if tests are not run.
 
-- **Platform (Owner)**
-  - Receives listing/view fees + 2% commission.
-  - Confirms deposit release with `confirmDepositRelease()`.
-  - Manages upgrades via UUPS.
-
-- **Investor**
-  - Holds **SQMU-R** tokens representing future rent streams.
-  - Expects tokens to map to weekly or monthly schedules based on `frequency`.
-
----
-
-## Error Classes & Debugging
-- **Frontend Errors**  
-  - `"eth_call not supported"` → ensure reads use **RPC client** not injected provider.  
-  - `"insufficient funds for gas + fee"` → user must top up ETH (L2 gas + L1 data).  
-  - `"ERC20: insufficient allowance"` → tenant/landlord must `approve()` USDC before action.  
-  - `"no view pass"` → tenant must buy/renew pass before booking.
-
-- **Contract Reverts**  
-  - `"bad geohash"` → string must match `geolen`.  
-  - `"sum != deposit"` → landlord’s split does not match escrowed deposit.  
-  - `"not landlord / not completed / bad status"` → caller role mismatch.  
-
----
-
-## Best Practices for Codex Iteration
-1. **Do not remove upgradeability**. Always preserve `_authorizeUpgrade()` and `__gap`, especially for ERC-1155 tokenisation like `r3nt-SQMU`.
-2. **Keep on-chain data minimal**. Images, long descriptions → Farcaster cast.
-3. **Respect USDC decimals** (6). Never assume 18 decimals in UI.
-4. **Frontend reads** should use RPC (`createPublicClient`) not the wallet provider, which may block `eth_call`.
-5. **Frontend writes** (transactions) must first call `approve()` for exact USDC required.
-6. **Always test** with small values on Arbitrum testnets before mainnet.
-7. **Document tokenisation parameters** (`feeBps`, `rateBps`, `frequency`) whenever rent streams are tokenised.
-
----
-
-## Iteration Guidance
-When Codex sees errors in frontend logs:
-- Check **approve/allowance** first for ERC20 transfers.
-- If UI shows `"Viewing only"` → provider not injected → must run inside Farcaster Mini App host.
-- For upgrade proposals: ensure **new implementation preserves storage layout**.
-
-## Deployment (Remix)
-1. Deploy `Listing.sol` implementation.
-2. Deploy `ListingFactory` implementation and UUPS proxy, then call `initialize(listingImpl)` and `setAllowedToken(USDC, true)`.
-3. Deploy `r3nt` implementation and UUPS proxy, then call `initialize(_usdc, _platform, _feeBps, _listFee, _viewFee, _viewPassSeconds, factoryAddr)`.
-4. Landlord calls `r3nt.createListing(...)` (ERC-7913 signers + threshold) and checks `getListing(id).vault` ≠ `0`.
-5. Tenant approves rent + fee + deposit and books; deposit moves into the `Listing` vault.
-6. End of stay: landlord `markCompleted` → `proposeDepositSplit` → platform `confirmDepositRelease`.
-
-To upgrade `Listing`, deploy a new implementation and call `setImplementation(newImpl)` on the factory; existing clones remain.
-
-All deployments are manual via Remix; no script-based tooling is expected.
-
----
-
-## Development & Testing
-All deployments and testing are performed manually. Tasks in this repository should focus solely on coding; do not automate or script deployment or test flows.
-
-### SQMU Tokenisation Manual Scenarios
-- **Proposal**: Landlord proposes SQMU-R parameters (rate, frequency). Verify event emission and parameters using a public RPC client.
-- **Approval**: Platform owner approves the proposal. Confirm only the owner can call and that the storage layout is unchanged.
-- **Investment**: Investor approves USDC and purchases SQMU-R tokens. Check token balances and schedule metadata via RPC.
-- **Rent Claim**: Token holders claim accrued rent. Validate distributions against the tokenised schedule and confirm balances drop accordingly.
-
-#### RPC / Provider Caveats
-- Use `createPublicClient` or another RPC client for reads; injected providers in the Farcaster Mini App may block `eth_call`.
-- Ensure the RPC endpoint supports ERC-1155 calls and points to the correct Arbitrum network.
-- Accounts must hold enough ETH for gas; L2 finality may delay rent claim availability.
+## Reference Materials
+For legacy background, consult the historical contracts referenced in the Clean-Slate plan
+(`r3nt.sol`, `r3nt-SQMU.sol`, `Listing.sol`, `RentDistribution.sol`, `BookingRegistry.sol`). The
+Clean-Slate architecture supersedes them with the modular suite described above.
