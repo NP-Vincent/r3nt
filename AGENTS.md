@@ -119,5 +119,5 @@ Key events to retain/emit: `BookingCreated`, `DepositSplitProposed`, `DepositRel
 
 ## Reference Materials
 For legacy background, consult the historical contracts referenced in the Clean-Slate plan
-(`r3nt.sol`, `r3nt-SQMU.sol`, `Listing.sol`, `RentDistribution.sol`, `BookingRegistry.sol`). The
+(`r3nt-ignore-deprecated.sol`, `r3nt-SQMU-ignore-deprecated.sol`, `Listing-ignore-deprecated.sol`, `RentDistribution-ignore-deprecated.sol`, `BookingRegistry-ignore-deprecated.sol`). The
 Clean-Slate architecture supersedes them with the modular suite described above.
