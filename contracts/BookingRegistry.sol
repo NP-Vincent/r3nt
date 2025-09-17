@@ -74,10 +74,8 @@ contract BookingRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     function initialize(InitializeParams calldata params) external initializer {
         require(params.owner != address(0), "owner=0");
 
-        __Ownable_init();
+        __Ownable_init(params.owner);
         __UUPSUpgradeable_init();
-
-        _transferOwnership(params.owner);
 
         address initialPlatform = params.platform;
         platform = initialPlatform;
