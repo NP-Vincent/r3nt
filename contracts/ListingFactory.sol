@@ -23,7 +23,7 @@ contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             address landlord,
             address platform,
             address bookingRegistry,
-            address rentToken,
+            address sqmuToken,
             Platform.ListingParams calldata params
         ) external;
     }
@@ -125,12 +125,12 @@ contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
         listing = implementation.clone();
 
-        (address currentFactory, address bookingRegistry, address rentToken) = Platform(platform).modules();
+        (address currentFactory, address bookingRegistry, address sqmuToken) = Platform(platform).modules();
         require(currentFactory == address(this), "factory mismatch");
         require(bookingRegistry != address(0), "registry=0");
-        require(rentToken != address(0), "rentToken=0");
+        require(sqmuToken != address(0), "sqmuToken=0");
 
-        IListing(listing).initialize(landlord, platform, bookingRegistry, rentToken, params);
+        IListing(listing).initialize(landlord, platform, bookingRegistry, sqmuToken, params);
 
         emit ListingCreated(listing, landlord);
     }

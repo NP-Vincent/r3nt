@@ -15,8 +15,8 @@ interface IBookingRegistry {
     function release(uint64 start, uint64 end) external returns (uint64, uint64);
 }
 
-/// @notice Minimal interface for interacting with the rent token contract.
-interface IRentToken {
+/// @notice Minimal interface for interacting with the r3nt-SQMU token contract.
+interface IR3ntSQMU {
     function mint(address to, uint256 id, uint256 amount, bytes calldata data) external;
 
     function burn(address from, uint256 id, uint256 amount) external;
@@ -61,13 +61,13 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         uint256 deposit;
         Status status;
         bool tokenised;
-        uint256 totalShares;
-        uint256 soldShares;
-        uint256 pricePerShare;
+        uint256 totalSqmu;
+        uint256 soldSqmu;
+        uint256 pricePerSqmu;
         uint16 feeBps;
         Period period;
         address proposer;
-        uint256 accRentPerShare;
+        uint256 accRentPerSqmu;
         mapping(address => uint256) userDebt;
     }
 
@@ -82,13 +82,13 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         uint256 deposit;
         Status status;
         bool tokenised;
-        uint256 totalShares;
-        uint256 soldShares;
-        uint256 pricePerShare;
+        uint256 totalSqmu;
+        uint256 soldSqmu;
+        uint256 pricePerSqmu;
         uint16 feeBps;
         Period period;
         address proposer;
-        uint256 accRentPerShare;
+        uint256 accRentPerSqmu;
         uint256 landlordAccrued;
         bool depositReleased;
         uint16 depositTenantBps;
@@ -106,8 +106,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     struct TokenisationProposal {
         bool exists;
         address proposer;
-        uint256 totalShares;
-        uint256 pricePerShare;
+        uint256 totalSqmu;
+        uint256 pricePerSqmu;
         uint16 feeBps;
         Period period;
     }
@@ -123,8 +123,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     struct TokenisationView {
         bool exists;
         address proposer;
-        uint256 totalShares;
-        uint256 pricePerShare;
+        uint256 totalSqmu;
+        uint256 pricePerSqmu;
         uint16 feeBps;
         Period period;
     }
@@ -142,8 +142,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     /// @notice Booking registry responsible for availability management.
     address public bookingRegistry;
 
-    /// @notice Rent token used for investor share issuance.
-    address public rentToken;
+    /// @notice r3nt-SQMU token used for investor SQMU-R issuance.
+    address public sqmuToken;
 
     /// @notice USDC token used for all monetary settlements.
     address public usdc;
@@ -232,23 +232,23 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     event TokenisationProposed(
         uint256 indexed bookingId,
         address indexed proposer,
-        uint256 totalShares,
-        uint256 pricePerShare,
+        uint256 totalSqmu,
+        uint256 pricePerSqmu,
         uint16 feeBps,
         Period period
     );
     event TokenisationApproved(
         uint256 indexed bookingId,
         address indexed approver,
-        uint256 totalShares,
-        uint256 pricePerShare,
+        uint256 totalSqmu,
+        uint256 pricePerSqmu,
         uint16 feeBps,
         Period period
     );
-    event SharesMinted(
+    event SQMUTokensMinted(
         uint256 indexed bookingId,
         address indexed investor,
-        uint256 shares,
+        uint256 sqmuAmount,
         uint256 cost,
         uint256 platformFee
     );
@@ -292,35 +292,35 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
      * @param landlord_ Address of the landlord controlling the listing.
      * @param platform_ Address of the platform contract orchestrating bookings.
      * @param bookingRegistry_ Booking registry handling availability.
-     * @param rentToken_ Rent token used for investor share issuance.
+     * @param sqmuToken_ r3nt-SQMU token used for investor SQMU-R issuance.
      * @param params Listing parameters forwarded from the platform.
      */
     function initialize(
         address landlord_,
         address platform_,
         address bookingRegistry_,
-        address rentToken_,
+        address sqmuToken_,
         Platform.ListingParams calldata params
     ) external initializer {
         require(landlord_ != address(0), "landlord=0");
         require(platform_ != address(0), "platform=0");
         require(bookingRegistry_ != address(0), "registry=0");
-        require(rentToken_ != address(0), "rentToken=0");
+        require(sqmuToken_ != address(0), "sqmuToken=0");
 
         __ReentrancyGuard_init();
 
         landlord = landlord_;
         platform = platform_;
         bookingRegistry = bookingRegistry_;
-        rentToken = rentToken_;
+        sqmuToken = sqmuToken_;
 
         address usdcToken = Platform(platform_).usdc();
         require(usdcToken != address(0), "usdc=0");
         usdc = usdcToken;
 
-        (, address registryFromPlatform, address rentTokenFromPlatform) = Platform(platform_).modules();
+        (, address registryFromPlatform, address sqmuTokenFromPlatform) = Platform(platform_).modules();
         require(registryFromPlatform == bookingRegistry_, "registry mismatch");
-        require(rentTokenFromPlatform == rentToken_, "rent token mismatch");
+        require(sqmuTokenFromPlatform == sqmuToken_, "sqmu token mismatch");
 
         fid = params.fid;
         castHash = params.castHash;
@@ -369,13 +369,13 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         booking.deposit = depositAmount;
         booking.status = Status.ACTIVE;
         booking.tokenised = false;
-        booking.totalShares = 0;
-        booking.soldShares = 0;
-        booking.pricePerShare = 0;
+        booking.totalSqmu = 0;
+        booking.soldSqmu = 0;
+        booking.pricePerSqmu = 0;
         booking.feeBps = 0;
         booking.period = Period.NONE;
         booking.proposer = address(0);
-        booking.accRentPerShare = 0;
+        booking.accRentPerSqmu = 0;
 
         _grossRentPaid[bookingId] = 0;
         _expectedNetRent[bookingId] = expectedNetRent;
@@ -577,20 +577,20 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     /**
      * @notice Landlord or tenant proposes tokenisation parameters for the booking.
      * @param bookingId Identifier of the booking to tokenise.
-     * @param totalShares Total number of shares that will be minted if approved.
-     * @param pricePerShare Price per share denominated in USDC (6 decimals).
+     * @param totalSqmu Total number of SQMU-R tokens that will be minted if approved.
+     * @param pricePerSqmu Price per SQMU-R token denominated in USDC (6 decimals).
      * @param feeBps Platform fee applied to investments (basis points).
      * @param period Rent distribution cadence for informational purposes.
      */
     function proposeTokenisation(
         uint256 bookingId,
-        uint256 totalShares,
-        uint256 pricePerShare,
+        uint256 totalSqmu,
+        uint256 pricePerSqmu,
         uint16 feeBps,
         Period period
     ) external {
-        require(totalShares > 0, "shares=0");
-        require(pricePerShare > 0, "price=0");
+        require(totalSqmu > 0, "sqmu=0");
+        require(pricePerSqmu > 0, "price=0");
         require(feeBps <= BPS_DENOMINATOR, "fee bps too high");
         require(period != Period.NONE, "period none");
 
@@ -602,15 +602,15 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         _tokenisationProposals[bookingId] = TokenisationProposal({
             exists: true,
             proposer: msg.sender,
-            totalShares: totalShares,
-            pricePerShare: pricePerShare,
+            totalSqmu: totalSqmu,
+            pricePerSqmu: pricePerSqmu,
             feeBps: feeBps,
             period: period
         });
 
         booking.proposer = msg.sender;
 
-        emit TokenisationProposed(bookingId, msg.sender, totalShares, pricePerShare, feeBps, period);
+        emit TokenisationProposed(bookingId, msg.sender, totalSqmu, pricePerSqmu, feeBps, period);
     }
 
     /**
@@ -626,8 +626,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         require(proposal.exists, "no proposal");
 
         booking.tokenised = true;
-        booking.totalShares = proposal.totalShares;
-        booking.pricePerShare = proposal.pricePerShare;
+        booking.totalSqmu = proposal.totalSqmu;
+        booking.pricePerSqmu = proposal.pricePerSqmu;
         booking.feeBps = proposal.feeBps;
         booking.period = proposal.period;
         booking.proposer = proposal.proposer;
@@ -637,36 +637,36 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         emit TokenisationApproved(
             bookingId,
             msg.sender,
-            booking.totalShares,
-            booking.pricePerShare,
+            booking.totalSqmu,
+            booking.pricePerSqmu,
             booking.feeBps,
             booking.period
         );
     }
 
     /**
-     * @notice Invest in a tokenised booking by purchasing shares.
+     * @notice Invest in a tokenised booking by purchasing SQMU-R tokens.
      * @param bookingId Identifier of the booking.
-     * @param shares Number of shares to purchase.
-     * @param recipient Address receiving the minted shares (defaults to msg.sender when zero).
+     * @param sqmuAmount Number of SQMU-R tokens to purchase.
+     * @param recipient Address receiving the minted SQMU-R tokens (defaults to msg.sender when zero).
      * @return totalCost Total USDC transferred from the purchaser.
      */
-    function invest(uint256 bookingId, uint256 shares, address recipient)
+    function invest(uint256 bookingId, uint256 sqmuAmount, address recipient)
         external
         nonReentrant
         returns (uint256 totalCost)
     {
-        require(shares > 0, "shares=0");
+        require(sqmuAmount > 0, "sqmu=0");
         Booking storage booking = _bookings[bookingId];
         require(booking.status == Status.ACTIVE, "not active");
         require(booking.tokenised, "not tokenised");
-        require(booking.pricePerShare > 0, "price unset");
-        require(booking.totalShares > 0, "shares unset");
-        require(booking.soldShares + shares <= booking.totalShares, "exceeds supply");
+        require(booking.pricePerSqmu > 0, "price unset");
+        require(booking.totalSqmu > 0, "sqmu unset");
+        require(booking.soldSqmu + sqmuAmount <= booking.totalSqmu, "exceeds supply");
 
         address investor = recipient == address(0) ? msg.sender : recipient;
 
-        totalCost = booking.pricePerShare * shares;
+        totalCost = booking.pricePerSqmu * sqmuAmount;
         require(totalCost > 0, "cost=0");
 
         IERC20Upgradeable token = IERC20Upgradeable(usdc);
@@ -683,40 +683,40 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             token.safeTransfer(landlord, proceeds);
         }
 
-        IRentToken rent = IRentToken(rentToken);
-        rent.mint(investor, bookingId, shares, "");
+        IR3ntSQMU sqmu = IR3ntSQMU(sqmuToken);
+        sqmu.mint(investor, bookingId, sqmuAmount, "");
 
-        uint256 acc = booking.accRentPerShare;
+        uint256 acc = booking.accRentPerSqmu;
         if (acc > 0) {
-            booking.userDebt[investor] += (shares * acc) / RENT_PRECISION;
+            booking.userDebt[investor] += (sqmuAmount * acc) / RENT_PRECISION;
         }
 
-        booking.soldShares += shares;
+        booking.soldSqmu += sqmuAmount;
 
-        emit SharesMinted(bookingId, investor, shares, totalCost, platformFee);
+        emit SQMUTokensMinted(bookingId, investor, sqmuAmount, totalCost, platformFee);
 
-        if (booking.soldShares == booking.totalShares) {
+        if (booking.soldSqmu == booking.totalSqmu) {
             // Best-effort attempt to lock transfers; ignore failures for backwards compatibility.
-            try rent.lockTransfers(bookingId) {} catch {}
+            try sqmu.lockTransfers(bookingId) {} catch {}
         }
     }
 
     /**
-     * @notice Claim accrued rent for a tokenised booking based on share ownership.
+     * @notice Claim accrued rent for a tokenised booking based on SQMU-R ownership.
      * @param bookingId Identifier of the booking being claimed.
      * @return amount Amount of USDC transferred to the caller.
      */
     function claim(uint256 bookingId) external nonReentrant returns (uint256 amount) {
         Booking storage booking = _bookings[bookingId];
         require(booking.tokenised, "not tokenised");
-        require(booking.soldShares > 0, "no shares minted");
+        require(booking.soldSqmu > 0, "no sqmu minted");
 
-        IRentToken rent = IRentToken(rentToken);
-        uint256 shares = rent.balanceOf(msg.sender, bookingId);
-        require(shares > 0, "no shares");
+        IR3ntSQMU sqmu = IR3ntSQMU(sqmuToken);
+        uint256 sqmuBalance = sqmu.balanceOf(msg.sender, bookingId);
+        require(sqmuBalance > 0, "no sqmu");
 
-        uint256 acc = booking.accRentPerShare;
-        uint256 accumulated = (shares * acc) / RENT_PRECISION;
+        uint256 acc = booking.accRentPerSqmu;
+        uint256 accumulated = (sqmuBalance * acc) / RENT_PRECISION;
         uint256 debt = booking.userDebt[msg.sender];
         require(accumulated > debt, "nothing to claim");
 
@@ -731,22 +731,22 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     /**
      * @notice Preview the claimable rent for a given account without modifying state.
      * @param bookingId Identifier of the booking.
-     * @param account Address holding booking shares.
+     * @param account Address holding booking SQMU-R tokens.
      * @return pending Amount of USDC currently claimable.
      */
     function previewClaim(uint256 bookingId, address account) external view returns (uint256 pending) {
         Booking storage booking = _bookings[bookingId];
-        if (!booking.tokenised || booking.soldShares == 0) {
+        if (!booking.tokenised || booking.soldSqmu == 0) {
             return 0;
         }
 
-        uint256 shares = IRentToken(rentToken).balanceOf(account, bookingId);
-        if (shares == 0) {
+        uint256 sqmuBalance = IR3ntSQMU(sqmuToken).balanceOf(account, bookingId);
+        if (sqmuBalance == 0) {
             return 0;
         }
 
-        uint256 acc = booking.accRentPerShare;
-        uint256 accumulated = (shares * acc) / RENT_PRECISION;
+        uint256 acc = booking.accRentPerSqmu;
+        uint256 accumulated = (sqmuBalance * acc) / RENT_PRECISION;
         uint256 debt = booking.userDebt[account];
         if (accumulated <= debt) {
             return 0;
@@ -803,13 +803,13 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             deposit: booking.deposit,
             status: booking.status,
             tokenised: booking.tokenised,
-            totalShares: booking.totalShares,
-            soldShares: booking.soldShares,
-            pricePerShare: booking.pricePerShare,
+            totalSqmu: booking.totalSqmu,
+            soldSqmu: booking.soldSqmu,
+            pricePerSqmu: booking.pricePerSqmu,
             feeBps: booking.feeBps,
             period: booking.period,
             proposer: booking.proposer,
-            accRentPerShare: booking.accRentPerShare,
+            accRentPerSqmu: booking.accRentPerSqmu,
             landlordAccrued: _landlordAccruals[bookingId],
             depositReleased: _depositReleased[bookingId],
             depositTenantBps: _confirmedDepositTenantBps[bookingId],
@@ -835,8 +835,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         viewData = TokenisationView({
             exists: proposal.exists,
             proposer: proposal.proposer,
-            totalShares: proposal.totalShares,
-            pricePerShare: proposal.pricePerShare,
+            totalSqmu: proposal.totalSqmu,
+            pricePerSqmu: proposal.pricePerSqmu,
             feeBps: proposal.feeBps,
             period: proposal.period
         });
@@ -899,8 +899,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         }
 
         Booking storage booking = _bookings[bookingId];
-        if (booking.tokenised && booking.soldShares > 0) {
-            booking.accRentPerShare += (amount * RENT_PRECISION) / booking.soldShares;
+        if (booking.tokenised && booking.soldSqmu > 0) {
+            booking.accRentPerSqmu += (amount * RENT_PRECISION) / booking.soldSqmu;
         } else {
             _landlordAccruals[bookingId] += amount;
         }

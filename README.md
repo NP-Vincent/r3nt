@@ -13,14 +13,14 @@ OpenZeppelin UUPS pattern.
   same per-property `Listing` clone.
 - **Per-unit booking** – listings manage their own calendars; tenants reserve entire units,
   not square metres.
-- **Integrated tokenisation** – ERC-1155 shares can be minted for any booking without a
-  separate SQMU contract.
+- **Integrated tokenisation** – ERC-1155 SQMU-R tokens (via the r3nt-SQMU contract) can be
+  minted for any booking without a separate deployment.
 - **Transparent deposit handling** – deposits sit in the listing escrow until a multi-sig
   release is confirmed by the platform.
 - **Scalable rent streaming** – recurring rent is distributed via an accumulator pattern that
   avoids iterating over every investor.
 - **Modular architecture** – `Platform`, `ListingFactory`, `Listing` clones,
-  `BookingRegistry` and `RentToken` each focus on a single concern and can be upgraded
+  `BookingRegistry` and `r3nt-SQMU` each focus on a single concern and can be upgraded
   independently through UUPS proxies.
 
 ## Module Architecture
@@ -28,7 +28,7 @@ OpenZeppelin UUPS pattern.
 The platform contract owns global configuration and orchestrates listing creation.
 - Stores the USDC address, tenant/landlord fee basis points and any additional pricing
   configuration (listing fee, view-pass price, etc.).
-- Holds the addresses of the `ListingFactory`, `BookingRegistry` and `RentToken` so the UI can
+- Holds the addresses of the `ListingFactory`, `BookingRegistry` and `r3nt-SQMU` so the UI can
   route calls correctly.
 - Only the platform multi-sig may update parameters or authorise upgrades via setters such as
   `setTreasury`, `setFees`, `setListingPricing` and `setModules`.
@@ -41,7 +41,7 @@ The platform contract owns global configuration and orchestrates listing creatio
 A minimal proxy factory that deploys listing clones on demand.
 - Tracks the address of the current `Listing` implementation.
 - `createListing(address landlord, ListingParams params)` deploys a clone, then calls
-  `initialize(landlord, platform, bookingRegistry, rentToken, params)` on it.
+  `initialize(landlord, platform, bookingRegistry, sqmuToken, params)` on it.
 - Emits `ListingCreated(listing, landlord)` for indexing.
 - `updateImplementation(address newImpl)` (owner-only) swaps the template used for future
   clones.
@@ -54,21 +54,22 @@ A shared calendar that enforces unit-level availability.
   overrides, while non-whitelisted callers are rejected.
 - Optionally exposes `isAvailable(listing, start, end)` for off-chain checks.
 
-### RentToken (`RentToken.sol`)
-An ERC-1155 representing investor shares in a booking.
-- Each booking uses a unique `tokenId` for minted shares.
-- `MINTER_ROLE` is granted to authorised listings so they can mint/burn for their bookings while
-  `grantListingMinter`/`revokeListingMinter` stay restricted to MANAGER_ROLE holders (owner or
+### r3nt-SQMU (`r3nt-SQMU.sol`)
+An ERC-1155 collection (name: **r3nt-SQMU**, symbol: **SQMU-R**) representing investor positions in
+each booking.
+- Each booking uses a unique `tokenId` for minted SQMU-R tokens.
+- `MINTER_ROLE` is granted to authorised listings so they can mint/burn SQMU-R for their bookings
+  while `grantListingMinter`/`revokeListingMinter` stay restricted to MANAGER_ROLE holders (owner or
   platform).
 - `setBaseURI` updates the metadata template and `lockTransfers(tokenId)` lets a listing freeze
-  secondary trading once funding is complete.
+  secondary trading once fundraising is complete.
 - Metadata is generated off-chain using a URI template such as `https://api.r3nt.xyz/booking/{id}.json`.
 
 ### Listing (`Listing.sol`)
 The per-property clone that handles bookings, deposit escrow, tokenisation and rent streaming.
-- Initialised via `initialize(landlord, platform, bookingRegistry, rentToken, params)` which pulls
+- Initialised via `initialize(landlord, platform, bookingRegistry, sqmuToken, params)` which pulls
   USDC, module and metadata configuration from the platform.
-- Stores references to the platform, booking registry, rent token and USDC token alongside the
+- Stores references to the platform, booking registry, r3nt-SQMU token and USDC token alongside the
   landlord, deposit amount and base daily rate that drives rent calculations.
 - Implements the full booking lifecycle, deposit split approvals, optional tokenisation,
   rent payments and investor claims.
@@ -102,18 +103,19 @@ The per-property clone that handles bookings, deposit escrow, tokenisation and r
 
 ### Tokenisation (Optional)
 - Landlord or tenant proposes tokenisation with `proposeTokenisation`, specifying
-  `totalShares`, `pricePerShare`, `feeBps` and periodic rent cadence (`Period` enum).
+  `totalSqmu`, `pricePerSqmu`, `feeBps` and periodic rent cadence (`Period` enum).
 - The platform approves via `approveTokenisation` to ensure the raise aligns with remaining
   rent expectations.
-- Investors call `invest(bookingId, shares)`; USDC is collected, the landlord receives proceeds
-  minus platform fees, and `RentToken` mints ERC-1155 shares for `tokenId = bookingId`.
-- Once all shares sell, transfers can be locked to simplify future rent streaming.
+- Investors call `invest(bookingId, sqmuAmount)`; USDC is collected, the landlord receives
+  proceeds minus platform fees, and `r3nt-SQMU` mints ERC-1155 SQMU-R tokens for
+  `tokenId = bookingId`.
+- Once all SQMU-R tokens sell, transfers can be locked to simplify future rent streaming.
 
 ### Rent Streaming
 - Tenants make recurring payments with `payRent(bookingId, grossAmount)`, which collects tenant
   and landlord fees, forwards treasury fees when configured and accrues net rent to investors or
   the landlord.
-- The contract updates `accRentPerShare = accRentPerShare + netAmount * 1e18 / totalShares` and
+- The contract updates `accRentPerSqmu = accRentPerSqmu + netAmount * 1e18 / totalSqmu` and
   each investor’s debt checkpoint.
 - Investors withdraw via `claim(bookingId)` without requiring iteration over every holder.
 
@@ -137,23 +139,23 @@ struct Booking {
     uint256 deposit;
     Status status;
     bool tokenised;
-    uint256 totalShares;
-    uint256 soldShares;
-    uint256 pricePerShare;
+    uint256 totalSqmu;
+    uint256 soldSqmu;
+    uint256 pricePerSqmu;
     uint16 feeBps;
     Period period;
     address proposer;
-    uint256 accRentPerShare;
+    uint256 accRentPerSqmu;
     mapping(address => uint256) userDebt;
 }
 ```
 
 Key events emitted by `Listing.sol` include `BookingCreated`, `DepositSplitProposed`,
-`DepositReleased`, `TokenisationProposed`, `TokenisationApproved`, `SharesMinted`, `RentPaid`,
-`Claimed`, `BookingCancelled` and `BookingCompleted`.
+`DepositReleased`, `TokenisationProposed`, `TokenisationApproved`, `SQMUTokensMinted`,
+`RentPaid`, `Claimed`, `BookingCancelled` and `BookingCompleted`.
 
 ## Implementation Plan
-1. Deploy `RentToken` and grant `MINTER_ROLE` to the entity that will authorise listing clones.
+1. Deploy `r3nt-SQMU` and grant `MINTER_ROLE` to the entity that will authorise listing clones.
 2. Deploy `BookingRegistry`, enabling it to record authorised listings.
 3. Deploy the `Listing` implementation without initialising it.
 4. Deploy `ListingFactory`, pointing it at the `Listing` implementation.
@@ -170,7 +172,7 @@ Key events emitted by `Listing.sol` include `BookingCreated`, `DepositSplitPropo
   deposit splits.
 - **Roles & permissions** – tenants interact only with their bookings, landlords manage their
   listings, investors can invest and claim, and the platform executes administrative actions.
-- **Off-chain metadata** – `RentToken` URIs point to JSON generated off-chain describing the
+- **Off-chain metadata** – `r3nt-SQMU` URIs point to JSON generated off-chain describing the
   booking; keep on-chain state minimal and index events for analytics.
 - **Client utilities** – the Mini App uses `tools.js` helpers to encode/decode geohashes,
   estimate cell sizes, normalise Farcaster cast hashes/URLs and assemble the Farcaster deep-link
