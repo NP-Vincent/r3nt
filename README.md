@@ -30,7 +30,10 @@ The platform contract owns global configuration and orchestrates listing creatio
   configuration (listing fee, view-pass price, etc.).
 - Holds the addresses of the `ListingFactory`, `BookingRegistry` and `RentToken` so the UI can
   route calls correctly.
-- Only the platform multi-sig may update parameters or authorise upgrades.
+- Only the platform multi-sig may update parameters or authorise upgrades via setters such as
+  `setTreasury`, `setFees`, `setListingPricing` and `setModules`.
+- Read helpers like `modules()` and `fees()` surface the active configuration to off-chain
+  consumers.
 - `createListing(address landlord, ListingParams params)` requests the factory to clone a new
   listing and emits `ListingCreated(listing, landlord)`.
 
@@ -46,22 +49,27 @@ A minimal proxy factory that deploys listing clones on demand.
 ### BookingRegistry (`BookingRegistry.sol`)
 A shared calendar that enforces unit-level availability.
 - Maintains per-listing reservations (bitmap, mapping, or similar structure).
-- Exposes `reserve(listing, start, end)` and `release(listing, start, end)` for listings to
-  block or free ranges.
-- Restricts writes so only the listing (or the platform for admin overrides) can manage its
-  calendar.
+- Authorised listings call `reserve(start, end)` / `release(start, end)` to block or free ranges.
+- The platform owner can register listings and use `reserveFor` / `releaseFor` for administrative
+  overrides, while non-whitelisted callers are rejected.
 - Optionally exposes `isAvailable(listing, start, end)` for off-chain checks.
 
 ### RentToken (`RentToken.sol`)
 An ERC-1155 representing investor shares in a booking.
 - Each booking uses a unique `tokenId` for minted shares.
-- `MINTER_ROLE` is granted to authorised listings so they can mint/burn for their bookings.
-- `lockTransfers(tokenId)` lets a listing freeze secondary trading once funding is complete.
+- `MINTER_ROLE` is granted to authorised listings so they can mint/burn for their bookings while
+  `grantListingMinter`/`revokeListingMinter` stay restricted to MANAGER_ROLE holders (owner or
+  platform).
+- `setBaseURI` updates the metadata template and `lockTransfers(tokenId)` lets a listing freeze
+  secondary trading once funding is complete.
 - Metadata is generated off-chain using a URI template such as `https://api.r3nt.xyz/booking/{id}.json`.
 
 ### Listing (`Listing.sol`)
 The per-property clone that handles bookings, deposit escrow, tokenisation and rent streaming.
-- Initialised with landlord, platform, registry and rent token addresses plus pricing params.
+- Initialised via `initialize(landlord, platform, bookingRegistry, rentToken, params)` which pulls
+  USDC, module and metadata configuration from the platform.
+- Stores references to the platform, booking registry, rent token and USDC token alongside the
+  landlord, deposit amount and base daily rate that drives rent calculations.
 - Implements the full booking lifecycle, deposit split approvals, optional tokenisation,
   rent payments and investor claims.
 - Persists rich property metadata including the landlord’s Farcaster fid, the canonical cast
@@ -81,9 +89,9 @@ The per-property clone that handles bookings, deposit escrow, tokenisation and r
 
 ## Booking Lifecycle
 ### Booking
-- `book(RateType rt, uint256 units, uint64 start, uint64 end)` checks availability through
-  `BookingRegistry.reserve`, calculates rent, applies tenant/landlord fee basis points and
-  escrows the deposit in the listing contract.
+- `book(uint64 start, uint64 end)` checks availability through `BookingRegistry.reserve`,
+  multiplies the configured daily rate by the stay duration, applies tenant/landlord fee basis
+  points for reference and escrows the deposit in the listing contract.
 - Booking data is stored against `bookingId` and `BookingCreated` is emitted.
 
 ### Deposit Escrow and Release
@@ -97,20 +105,23 @@ The per-property clone that handles bookings, deposit escrow, tokenisation and r
   `totalShares`, `pricePerShare`, `feeBps` and periodic rent cadence (`Period` enum).
 - The platform approves via `approveTokenisation` to ensure the raise aligns with remaining
   rent expectations.
-- Investors call `invest(bookingId, shares)`; USDC is collected, the proposer receives proceeds
+- Investors call `invest(bookingId, shares)`; USDC is collected, the landlord receives proceeds
   minus platform fees, and `RentToken` mints ERC-1155 shares for `tokenId = bookingId`.
 - Once all shares sell, transfers can be locked to simplify future rent streaming.
 
 ### Rent Streaming
-- Tenants make recurring payments with `payRent(bookingId, amount)`.
-- The contract updates `accRentPerShare = accRentPerShare + amount * 1e18 / totalShares` and
+- Tenants make recurring payments with `payRent(bookingId, grossAmount)`, which collects tenant
+  and landlord fees, forwards treasury fees when configured and accrues net rent to investors or
+  the landlord.
+- The contract updates `accRentPerShare = accRentPerShare + netAmount * 1e18 / totalShares` and
   each investor’s debt checkpoint.
 - Investors withdraw via `claim(bookingId)` without requiring iteration over every holder.
 
 ### Cancellations & Defaults
-- `cancelBooking(bookingId)` (platform-only) refunds rent and deposit before funding occurs.
-- `handleDefault(bookingId, seizedAmount)` lets the platform allocate seized deposits or
-  penalties to investors by updating the accumulator if rent is unpaid.
+- `cancelBooking(bookingId)` (landlord or platform) refunds the deposit when no rent has been
+  paid and releases the calendar back to the registry.
+- `handleDefault(bookingId)` lets the platform mark a stay as defaulted and route any escrowed
+  deposit to investors/landlord through the existing accrual logic.
 
 ## State and Events
 Bookings track tenant, start/end dates, rent, deposit, status, tokenisation parameters,
