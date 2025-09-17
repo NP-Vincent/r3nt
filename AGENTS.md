@@ -116,6 +116,13 @@ Key events to retain/emit: `BookingCreated`, `DepositSplitProposed`, `DepositRel
   detail. All monetary values stay in 6-decimal USDC.
 - **Testing** – there are no automated scripts in this repository. Run targeted Foundry/Hardhat
   tests locally when you modify Solidity contracts, or provide reasoning if tests are not run.
+- **Farcaster linkage** – listings must retain the landlord’s fid and cast hash. Front-end helpers
+  (`tools.js`) normalise incoming hashes and build the "View full details on Farcaster" deep-link
+  via `buildFarcasterCastUrl` so Mini App users can jump back to the canonical cast.
+- **Geospatial metadata** – derive/stash geohashes for every listing and leverage the helper
+  functions to encode/decode them or estimate cell sizes when mapping properties.
+- **Square metre area** – capture `areaSqm` during listing creation to support sq.m-driven
+  tokenisation strategies on future upgrades.
 
 ## Reference Materials
 For legacy background, consult the historical contracts referenced in the Clean-Slate plan

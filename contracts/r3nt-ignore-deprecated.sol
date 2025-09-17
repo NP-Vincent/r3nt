@@ -84,6 +84,7 @@ contract r3nt is
         uint96  rateMonthly;      // 6d
         bytes32 geohash;          // ASCII left-aligned
         uint8   geolen;           // 4..10
+        uint32  areaSqm;          // whole square metres available for tokenisation
         uint256 fid;              // Farcaster landlord FID
         bytes32 castHash;         // Farcaster cast hash
         string  title;            // short
@@ -322,6 +323,7 @@ contract r3nt is
      * @param rateDaily/Weekly/Monthly Price schedule (6d)
      * @param geohashStr ASCII geohash string (length == geolen)
      * @param geolen 4..10 inclusive
+     * @param areaSqm Whole square metres represented by this property
      * @param fid/castHash Farcaster pointer
      * @param title/shortDesc Short metadata strings
      * @param signers ERC-7913 signer identities for platform multisig
@@ -335,6 +337,7 @@ contract r3nt is
         uint96  rateMonthly,
         string calldata geohashStr,
         uint8   geolen,
+        uint32  areaSqm,
         uint256 fid,
         bytes32 castHash,
         string calldata title,
@@ -346,6 +349,7 @@ contract r3nt is
         require(usdc != address(0), "usdc zero");
         require(geolen >= 4 && geolen <= 10, "bad geolen");
         require(bytes(geohashStr).length == geolen, "bad geohash");
+        require(areaSqm > 0, "area=0");
 
         // Pull $1 list fee in canonical USDC
         USDC.safeTransferFrom(msg.sender, platform, listFee);
@@ -361,6 +365,7 @@ contract r3nt is
             rateMonthly: rateMonthly,
             geohash: _toBytes32(geohashStr),
             geolen: geolen,
+            areaSqm: areaSqm,
             fid: fid,
             castHash: castHash,
             title: title,
