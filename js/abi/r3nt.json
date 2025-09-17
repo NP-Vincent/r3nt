@@ -245,6 +245,11 @@
           "type": "uint8"
         },
         {
+          "internalType": "uint32",
+          "name": "areaSqm",
+          "type": "uint32"
+        },
+        {
           "internalType": "uint256",
           "name": "fid",
           "type": "uint256"
@@ -947,6 +952,11 @@
               "type": "uint8"
             },
             {
+              "internalType": "uint32",
+              "name": "areaSqm",
+              "type": "uint32"
+            },
+            {
               "internalType": "uint256",
               "name": "fid",
               "type": "uint256"
@@ -1060,6 +1070,11 @@
           "internalType": "uint8",
           "name": "geolen",
           "type": "uint8"
+        },
+        {
+          "internalType": "uint32",
+          "name": "areaSqm",
+          "type": "uint32"
         },
         {
           "internalType": "uint256",

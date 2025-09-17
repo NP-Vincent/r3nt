@@ -192,3 +192,29 @@ export function bytes32ToCastHash(castHash32) {
 export function bytes32ToCastUrl(castHash32) {
   return `https://warpcast.com/~/casts/${bytes32ToCastHash(castHash32)}`;
 }
+
+/**
+ * Build a Farcaster URL that points to the landlord's cast. If we know the
+ * author's fid we can deep-link through the `/~/profiles/{fid}` route so the
+ * client loads the cast in the correct profile context; otherwise we fall back
+ * to the global casts path.
+ * @param {bigint|number|string|null} fid
+ * @param {string} castHash32 bytes32 hex from the contract
+ * @returns {string} URL suitable for "View full details on Farcaster"
+ */
+export function buildFarcasterCastUrl(fid, castHash32) {
+  const castHash20 = bytes32ToCastHash(castHash32);
+  let fidStr = null;
+  try {
+    if (fid !== undefined && fid !== null) {
+      const big = typeof fid === 'bigint' ? fid : BigInt(fid);
+      if (big > 0n) fidStr = big.toString();
+    }
+  } catch {
+    fidStr = null;
+  }
+  if (fidStr) {
+    return `https://warpcast.com/~/profiles/${fidStr}?castHash=${castHash20}`;
+  }
+  return `https://warpcast.com/~/casts/${castHash20}`;
+}

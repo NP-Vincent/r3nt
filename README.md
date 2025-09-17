@@ -64,9 +64,20 @@ The per-property clone that handles bookings, deposit escrow, tokenisation and r
 - Initialised with landlord, platform, registry and rent token addresses plus pricing params.
 - Implements the full booking lifecycle, deposit split approvals, optional tokenisation,
   rent payments and investor claims.
+- Persists rich property metadata including the landlord’s Farcaster fid, the canonical cast
+  hash, a geohash of the coordinates, and the total property area in whole square metres for
+  later tokenisation splits.
 - Stores booking information in mappings keyed by `bookingId` to avoid gas-heavy arrays.
 - Emits events so the subgraph/front-end can reconstruct bookings, investor positions and rent
   flows without on-chain iteration.
+
+### Farcaster linkage & property metadata
+- Listings keep the `(fid, castHash)` pair so the UI can build a "View full details on Farcaster"
+  link using `buildFarcasterCastUrl(fid, castHash)`.
+- Property size is captured during listing creation (`areaSqm`) to enable downstream sq.m based
+  tokenisation math.
+- Geohash strings are derived client-side from latitude/longitude and stored on-chain alongside
+  their precision.
 
 ## Booking Lifecycle
 ### Booking
@@ -150,6 +161,9 @@ Key events emitted by `Listing.sol` include `BookingCreated`, `DepositSplitPropo
   listings, investors can invest and claim, and the platform executes administrative actions.
 - **Off-chain metadata** – `RentToken` URIs point to JSON generated off-chain describing the
   booking; keep on-chain state minimal and index events for analytics.
+- **Client utilities** – the Mini App uses `tools.js` helpers to encode/decode geohashes,
+  estimate cell sizes, normalise Farcaster cast hashes/URLs and assemble the Farcaster deep-link
+  that corresponds to each listing’s stored `(fid, castHash)` pair.
 
 For historical context, the legacy contracts (`r3nt-ignore-deprecated.sol`, `r3nt-SQMU-ignore-deprecated.sol`, `Listing-ignore-deprecated.sol`,
 `RentDistribution-ignore-deprecated.sol`) can be referenced in the upstream repository, but the Clean-Slate

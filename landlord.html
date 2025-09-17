@@ -81,6 +81,9 @@
     <label>Deposit (USDC)
       <input id="deposit" placeholder="100.00" inputmode="decimal">
     </label>
+    <label>Property size (m²)
+      <input id="areaSqm" placeholder="85" inputmode="numeric">
+    </label>
   </div>
 
   <div class="row">
@@ -162,6 +165,7 @@
       title:       document.getElementById('title'),
       shortDesc:   document.getElementById('shortDesc'),
       deposit:     document.getElementById('deposit'),
+      areaSqm:     document.getElementById('areaSqm'),
       rateDaily:   document.getElementById('rateDaily'),
       rateWeekly:  document.getElementById('rateWeekly'),
       rateMonthly: document.getElementById('rateMonthly'),
@@ -186,6 +190,15 @@
       if (v === '') throw new Error('Missing numeric value.');
       if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
       return parseUnits(v, USDC_DECIMALS);
+    }
+    function parseAreaSqm(input) {
+      const v = String(input ?? '').trim();
+      if (v === '') throw new Error('Square metre area is required.');
+      if (!/^\d+$/.test(v)) throw new Error('Area must be a whole number.');
+      const value = BigInt(v);
+      if (value === 0n) throw new Error('Area must be greater than zero.');
+      if (value > 4_294_967_295n) throw new Error('Area exceeds uint32 limit.');
+      return value;
     }
     function normalizeCastHash(h) {
       if (typeof h !== 'string') return null;
@@ -292,6 +305,7 @@
         const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
         const geohashStr = latLonToGeohash(lat, lon, 7);
         const geolen = geohashStr.length;
+        const areaSqm = parseAreaSqm(els.areaSqm.value);
 
         if (!r3ntAbi) {
           r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
@@ -305,7 +319,8 @@
           `title=${encodeURIComponent(title)}`,
           `shortDesc=${encodeURIComponent(shortDesc)}`,
           `lat=${encodeURIComponent(String(lat))}`,
-          `lon=${encodeURIComponent(String(lon))}`
+          `lon=${encodeURIComponent(String(lon))}`,
+          `areaSqm=${encodeURIComponent(areaSqm.toString())}`
         ].join('&');
         const embedUrl = `https://r3nt.sqmu.net/index.html?${qs}`;
         const res = await sdk.actions.composeCast({
@@ -350,6 +365,7 @@
             deposit,
             rateDaily, rateWeekly, rateMonthly,
             geohashStr, geolen,
+            areaSqm,
             fidBig,
             castHash,             // bytes32 on-chain
             title, shortDesc,

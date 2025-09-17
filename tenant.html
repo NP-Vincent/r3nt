@@ -22,6 +22,8 @@
     nav { margin-bottom:16px; }
     nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
     select { width:100%; padding:6px; margin:4px 0 8px; }
+    a.listing-link { display:inline-block; margin-top:8px; color:#1f6feb; font-weight:600; text-decoration:none; }
+    a.listing-link:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
@@ -59,7 +61,7 @@
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { encodeFunctionData, parseUnits, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
-    import { bytes32ToCastUrl, bytes32ToCastHash } from './js/tools.js';
+    import { bytes32ToCastHash, buildFarcasterCastUrl } from './js/tools.js';
 
     const els = {
       connect: document.getElementById('connect'),
@@ -100,13 +102,13 @@
       }
     }
 
-    async function openCast(hash32 /* bytes32 from contract */){
+    async function openCast(fid, hash32, fallbackUrl){
       const cast20 = bytes32ToCastHash(hash32);
       try {
         await sdk.actions.viewCast({ hash: cast20 });
       } catch {
-        // fallback: open in Warpcast
-        window.open(bytes32ToCastUrl(hash32), '_blank');
+        // fallback: open in Warpcast via the generated profile-aware URL
+        window.open(fallbackUrl, '_blank');
       }
     }
 
@@ -153,25 +155,40 @@
         rateLabel.appendChild(sel);
         const dep = document.createElement('div');
         dep.textContent = `Deposit: ${Number(L.deposit)/1e6} USDC`;
+        const areaVal = typeof L.areaSqm === 'bigint' ? Number(L.areaSqm) : Number(L.areaSqm || 0);
+        const area = areaVal > 0 ? document.createElement('div') : null;
+        if (area) {
+          area.textContent = `Area: ${areaVal} m²`;
+        }
 
         const row = document.createElement('div');
         row.className = 'row';
-        const btnCast = document.createElement('button');
-        btnCast.textContent = 'Open Cast';
-        btnCast.onclick = () => openCast(L.castHash);
         const btnBook = document.createElement('button');
         btnBook.textContent = 'Book';
         btnBook.onclick = () => {
           const opt = sel.options[sel.selectedIndex];
           bookListing(i, BigInt(opt.dataset.rtype), opt.value, L.deposit);
         };
-        row.appendChild(btnCast);
         row.appendChild(btnBook);
+
+        const farcasterUrl = buildFarcasterCastUrl(L.fid, L.castHash);
+        const viewLink = document.createElement('a');
+        viewLink.href = farcasterUrl;
+        viewLink.target = '_blank';
+        viewLink.rel = 'noopener';
+        viewLink.textContent = 'View full details on Farcaster';
+        viewLink.className = 'listing-link';
+        viewLink.onclick = (ev) => {
+          ev.preventDefault();
+          openCast(L.fid, L.castHash, farcasterUrl);
+        };
 
         card.appendChild(title);
         card.appendChild(rateLabel);
         card.appendChild(dep);
+        if (area) card.appendChild(area);
         card.appendChild(row);
+        card.appendChild(viewLink);
         els.listings.appendChild(card);
       }
       if (!shown) els.listings.textContent = 'No active listings.';
