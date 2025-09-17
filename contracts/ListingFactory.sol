@@ -72,13 +72,11 @@ contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         require(params.platform != address(0), "platform=0");
         require(params.implementation != address(0), "impl=0");
 
-        __Ownable_init();
+        __Ownable_init(params.owner);
         __UUPSUpgradeable_init();
 
         platform = params.platform;
         listingImplementation = params.implementation;
-
-        _transferOwnership(params.owner);
 
         emit PlatformUpdated(address(0), params.platform);
         emit ListingImplementationUpdated(address(0), params.implementation);

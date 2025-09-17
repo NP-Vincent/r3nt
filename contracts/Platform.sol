@@ -128,7 +128,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         require(params.owner != address(0), "owner=0");
         require(params.usdc != address(0), "usdc=0");
 
-        __Ownable_init();
+        __Ownable_init(params.owner);
         __UUPSUpgradeable_init();
 
         _setUsdc(params.usdc);
@@ -136,8 +136,6 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         _setModules(params.listingFactory, params.bookingRegistry, params.sqmuToken);
         _setFees(params.tenantFeeBps, params.landlordFeeBps);
         _setListingPricing(params.listingCreationFee, params.viewPassPrice);
-
-        _transferOwnership(params.owner);
 
         emit PlatformInitialized(params.owner, params.usdc, params.treasury);
     }
