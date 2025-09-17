@@ -9,12 +9,14 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 /**
- * @title RentToken
- * @notice ERC-1155 token representing fractional investor ownership in r3nt bookings.
+ * @title r3nt-SQMU
+ * @notice ERC-1155 token (ticker: SQMU-R) representing fractional investor ownership in r3nt
+ *         bookings.
  * @dev Upgradeable through UUPS. Listings granted the MINTER_ROLE may mint/burn their booking
- *      shares and optionally lock transfers once fundraising completes to simplify rent streaming.
+ *      SQMU-R positions and optionally lock transfers once fundraising completes to simplify rent
+ *      streaming.
  */
-contract RentToken is
+contract R3ntSQMU is
     Initializable,
     ERC1155Upgradeable,
     ERC1155SupplyUpgradeable,
@@ -25,13 +27,16 @@ contract RentToken is
     /// @notice Role allowed to administer minter permissions (owner + platform).
     bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
 
-    /// @notice Role granted to listing clones so they can mint/burn their booking shares.
+    /// @notice Role granted to listing clones so they can mint/burn their booking SQMU-R tokens.
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
-    /// @notice Human readable token collection name (off-chain convenience).
+    string private constant _DEFAULT_NAME = "r3nt-SQMU";
+    string private constant _DEFAULT_SYMBOL = "SQMU-R";
+
+    /// @notice Human readable token collection name (always `r3nt-SQMU`).
     string public name;
 
-    /// @notice Human readable token collection symbol (off-chain convenience).
+    /// @notice Human readable token collection symbol (always `SQMU-R`).
     string public symbol;
 
     /// @notice Platform contract authorised to manage listing roles.
@@ -40,16 +45,14 @@ contract RentToken is
     /// @dev Tracks whether transfers are locked for a given booking tokenId.
     mapping(uint256 => bool) private _transferLocked;
 
-    /// @notice Initialization arguments for the rent token.
+    /// @notice Initialization arguments for the r3nt-SQMU token.
     struct InitializeParams {
         address owner; // Platform multi-sig controlling upgrades/configuration
         address platform; // Platform contract allowed to manage listing minters
-        string name; // Collection name used off-chain
-        string symbol; // Collection symbol used off-chain
         string baseURI; // Metadata URI template (expects {id} replacement)
     }
 
-    event RentTokenInitialized(address indexed owner, address indexed platform, string uri);
+    event R3ntSQMUInitialized(address indexed owner, address indexed platform, string uri);
     event PlatformUpdated(address indexed previousPlatform, address indexed newPlatform);
     event BaseURISet(string uri);
     event ListingMinterGranted(address indexed listing, address indexed caller);
@@ -62,7 +65,7 @@ contract RentToken is
     }
 
     /**
-     * @notice Initialize the rent token with admin authority and metadata URI template.
+     * @notice Initialize the r3nt-SQMU token with admin authority and metadata URI template.
      * @param params Struct bundling initial configuration values.
      */
     function initialize(InitializeParams calldata params) external initializer {
@@ -76,8 +79,8 @@ contract RentToken is
 
         _transferOwnership(params.owner);
 
-        name = params.name;
-        symbol = params.symbol;
+        name = _DEFAULT_NAME;
+        symbol = _DEFAULT_SYMBOL;
 
         _setRoleAdmin(MINTER_ROLE, MANAGER_ROLE);
 
@@ -91,7 +94,7 @@ contract RentToken is
             emit PlatformUpdated(address(0), initialPlatform);
         }
 
-        emit RentTokenInitialized(params.owner, initialPlatform, params.baseURI);
+        emit R3ntSQMUInitialized(params.owner, initialPlatform, params.baseURI);
     }
 
     // -------------------------------------------------
@@ -132,7 +135,7 @@ contract RentToken is
     // -------------------------------------------------
 
     /**
-     * @notice Grant minting rights to a listing clone so it can issue booking shares.
+     * @notice Grant minting rights to a listing clone so it can issue booking SQMU-R tokens.
      * @param listing Listing contract address receiving MINTER_ROLE.
      */
     function grantListingMinter(address listing) external onlyRole(MANAGER_ROLE) {
@@ -156,10 +159,10 @@ contract RentToken is
     // -------------------------------------------------
 
     /**
-     * @notice Mint booking shares to an investor or distribution address.
-     * @param to Recipient of the minted shares.
+     * @notice Mint booking SQMU-R tokens to an investor or distribution address.
+     * @param to Recipient of the minted SQMU-R tokens.
      * @param id Booking identifier used as the ERC-1155 token id.
-     * @param amount Number of shares to mint.
+     * @param amount Number of SQMU-R tokens to mint.
      * @param data Optional calldata forwarded to the receiver hook.
      */
     function mint(address to, uint256 id, uint256 amount, bytes calldata data) external onlyRole(MINTER_ROLE) {
@@ -168,10 +171,10 @@ contract RentToken is
     }
 
     /**
-     * @notice Mint multiple booking share ids in a single transaction.
-     * @param to Recipient of the minted shares.
+     * @notice Mint multiple booking SQMU-R token ids in a single transaction.
+     * @param to Recipient of the minted SQMU-R tokens.
      * @param ids Array of booking identifiers.
-     * @param amounts Array of share amounts corresponding to each id.
+     * @param amounts Array of SQMU-R token amounts corresponding to each id.
      * @param data Optional calldata forwarded to the receiver hook.
      */
     function mintBatch(
@@ -187,20 +190,21 @@ contract RentToken is
     }
 
     /**
-     * @notice Burn booking shares from an account. Callable by listing clones with MINTER_ROLE.
-     * @param from Address holding the shares to burn.
+     * @notice Burn booking SQMU-R tokens from an account. Callable by listing clones with
+     *         MINTER_ROLE.
+     * @param from Address holding the SQMU-R tokens to burn.
      * @param id Booking identifier (token id).
-     * @param amount Number of shares to burn.
+     * @param amount Number of SQMU-R tokens to burn.
      */
     function burn(address from, uint256 id, uint256 amount) external onlyRole(MINTER_ROLE) {
         _burn(from, id, amount);
     }
 
     /**
-     * @notice Burn multiple booking share ids from an account.
-     * @param from Address holding the shares to burn.
+     * @notice Burn multiple booking SQMU-R token ids from an account.
+     * @param from Address holding the SQMU-R tokens to burn.
      * @param ids Array of booking identifiers.
-     * @param amounts Array of amounts corresponding to each id.
+     * @param amounts Array of SQMU-R token amounts corresponding to each id.
      */
     function burnBatch(address from, uint256[] calldata ids, uint256[] calldata amounts)
         external

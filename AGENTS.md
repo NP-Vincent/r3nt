@@ -11,16 +11,16 @@ work remains consistent, upgradeable and easy to reason about.
   platform.
 - Keep deposits escrowed inside each listing and require platform (multi-sig) confirmation before
   releasing funds.
-- Make ERC-1155 tokenisation optional for every booking; there is no separate SQMU contract.
+- Make ERC-1155 tokenisation optional for every booking through the r3nt-SQMU (SQMU-R) token.
 - Stream rent to investors using an accumulator so the system never loops over all holders.
 - Maintain a modular, upgradeable architecture built from `Platform`, `ListingFactory`,
-  `Listing` clones, `BookingRegistry` and `RentToken`.
+  `Listing` clones, `BookingRegistry` and `r3nt-SQMU`.
 
 ## Contract Modules & Responsibilities
 ### Platform (`Platform.sol`)
 - Owns global configuration: USDC token address, tenant/landlord fee basis points, listing/view
   pricing and other shared parameters.
-- Stores module addresses (`ListingFactory`, `BookingRegistry`, `RentToken`) and exposes them to
+- Stores module addresses (`ListingFactory`, `BookingRegistry`, `r3nt-SQMU`) and exposes them to
   the UI.
 - Only the owner (platform multi-sig) can update configuration, set module addresses or approve
   upgrades via `_authorizeUpgrade` and owner-only setters (`setTreasury`, `setFees`,
@@ -33,7 +33,7 @@ work remains consistent, upgradeable and easy to reason about.
 ### ListingFactory (`ListingFactory.sol`)
 - Holds the address of the canonical `Listing` implementation.
 - `createListing(landlord, params)` clones the implementation, calls
-  `initialize(landlord, platform, bookingRegistry, rentToken, params)` and emits
+  `initialize(landlord, platform, bookingRegistry, sqmuToken, params)` and emits
   `ListingCreated` for indexers.
 - Owner-only `updateImplementation(newImpl)` swaps the template used for future clones.
 
@@ -44,10 +44,11 @@ work remains consistent, upgradeable and easy to reason about.
   `reserveFor`/`releaseFor` for emergency overrides.
 - Optionally exposes `isAvailable` for off-chain reads.
 
-### RentToken (`RentToken.sol`)
-- ERC-1155 token contract where each booking id maps to a unique `tokenId`.
-- Grants `MINTER_ROLE` to listing clones so they can mint and burn shares, managed by MANAGER_ROLE
-  holders (owner/platform).
+### r3nt-SQMU (`r3nt-SQMU.sol`)
+- ERC-1155 token contract (name: **r3nt-SQMU**, symbol: **SQMU-R**) where each booking id maps to a
+  unique `tokenId`.
+- Grants `MINTER_ROLE` to listing clones so they can mint and burn SQMU-R tokens, managed by
+  MANAGER_ROLE holders (owner/platform).
 - Owner can update metadata via `setBaseURI`, while token ids continue to match their
   corresponding booking ids.
 - Allows a listing to `lockTransfers(tokenId)` after fundraising to simplify downstream rent
@@ -55,11 +56,11 @@ work remains consistent, upgradeable and easy to reason about.
 - Metadata is served from an off-chain URI template like `https://api.r3nt.xyz/booking/{id}.json`.
 
 ### Listing (`Listing.sol`)
-- Cloneable per-property contract initialised with landlord, platform, registry and rent token
-  addresses plus pricing/metadata parameters via `initialize(landlord, platform, bookingRegistry,
-  rentToken, params)`.
-- Stores references to the platform, booking registry, rent token and USDC token for subsequent
-  fee pulls, registry access and share issuance.
+- Cloneable per-property contract initialised with landlord, platform, registry and r3nt-SQMU
+  token addresses plus pricing/metadata parameters via `initialize(landlord, platform,
+  bookingRegistry, sqmuToken, params)`.
+- Stores references to the platform, booking registry, r3nt-SQMU token and USDC token for
+  subsequent fee pulls, registry access and SQMU-R issuance.
 - Handles the full lifecycle: booking, deposit escrow, landlord/platform approvals, optional
   tokenisation, rent payments, investor claims, cancellations and defaults.
 - Stores bookings in mappings keyed by `bookingId` to avoid gas-heavy iteration.
@@ -71,12 +72,12 @@ work remains consistent, upgradeable and easy to reason about.
    escrows the deposit within the listing.
 2. **Deposit management** – landlord proposes a split with `proposeDepositSplit(bookingId, tenantBps)`;
    the platform multi-sig finalises it through `confirmDepositSplit(bookingId, signature)`.
-3. **Tokenisation (optional)** – landlord or tenant proposes parameters (`totalShares`,
-   `pricePerShare`, `feeBps`, `Period`); the platform approves; investors `invest` and receive
-   ERC-1155 shares minted by the listing while proceeds (minus platform fee) flow to the landlord.
+3. **Tokenisation (optional)** – landlord or tenant proposes parameters (`totalSqmu`,
+   `pricePerSqmu`, `feeBps`, `Period`); the platform approves; investors `invest` and receive
+   ERC-1155 SQMU-R tokens minted by the listing while proceeds (minus platform fee) flow to the landlord.
 4. **Rent streaming** – tenants call `payRent(bookingId, grossAmount)` which deducts tenant and
    landlord platform fees, forwards treasury fees when configured and updates the accumulator
-   `accRentPerShare = accRentPerShare + netAmount * 1e18 / totalShares`. Investors call
+   `accRentPerSqmu = accRentPerSqmu + netAmount * 1e18 / totalSqmu`. Investors call
    `claim(bookingId)` to withdraw accrued rent without loops.
 5. **Cancellations & defaults** – the landlord or platform can `cancelBooking` before any rent is
    paid (refunding the tenant’s deposit), while the platform can `handleDefault` to mark a stay as
@@ -95,23 +96,23 @@ struct Booking {
     uint256 deposit;
     Status status;
     bool tokenised;
-    uint256 totalShares;
-    uint256 soldShares;
-    uint256 pricePerShare;
+    uint256 totalSqmu;
+    uint256 soldSqmu;
+    uint256 pricePerSqmu;
     uint16 feeBps;
     Period period;
     address proposer;
-    uint256 accRentPerShare;
+    uint256 accRentPerSqmu;
     mapping(address => uint256) userDebt;
 }
 ```
 
 Key events to retain/emit: `BookingCreated`, `DepositSplitProposed`, `DepositReleased`,
-`TokenisationProposed`, `TokenisationApproved`, `SharesMinted`, `RentPaid`, `Claimed`,
+`TokenisationProposed`, `TokenisationApproved`, `SQMUTokensMinted`, `RentPaid`, `Claimed`,
 `BookingCancelled`, `BookingCompleted`.
 
 ## Implementation Plan Snapshot
-1. Deploy `RentToken`; grant `MINTER_ROLE` to the authority that will register listings.
+1. Deploy `r3nt-SQMU`; grant `MINTER_ROLE` to the authority that will register listings.
 2. Deploy `BookingRegistry` and wire allow-lists for authorised listings.
 3. Deploy the `Listing` implementation (uninitialised).
 4. Deploy `ListingFactory` pointing to the implementation.

@@ -39,7 +39,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         address usdc; // Canonical USDC token address used for settlements
         address listingFactory; // Listing factory responsible for cloning listings
         address bookingRegistry; // Shared registry maintaining booking availability
-        address rentToken; // ERC-1155 token contract handling investor shares
+        address sqmuToken; // ERC-1155 token contract handling investor SQMU-R positions
         uint16 tenantFeeBps; // Platform fee applied to tenants in basis points
         uint16 landlordFeeBps; // Platform fee applied to landlords in basis points
         uint256 listingCreationFee; // Fee charged for creating a listing (USDC, 6 decimals)
@@ -69,8 +69,8 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /// @notice Address of the BookingRegistry shared by all listings.
     address public bookingRegistry;
 
-    /// @notice Address of the RentToken ERC-1155 contract used for investor shares.
-    address public rentToken;
+    /// @notice Address of the r3nt-SQMU ERC-1155 contract used for investor SQMU-R positions.
+    address public sqmuToken;
 
     /// @notice Platform fee applied to tenant rent payments (in basis points).
     uint16 public tenantFeeBps;
@@ -106,7 +106,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     event PlatformInitialized(address indexed owner, address indexed usdc, address indexed treasury);
     event UsdcUpdated(address indexed previousUsdc, address indexed newUsdc);
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
-    event ModulesUpdated(address indexed listingFactory, address indexed bookingRegistry, address indexed rentToken);
+    event ModulesUpdated(address indexed listingFactory, address indexed bookingRegistry, address indexed sqmuToken);
     event FeesUpdated(uint16 tenantFeeBps, uint16 landlordFeeBps);
     event ListingPricingUpdated(uint256 listingCreationFee, uint256 viewPassPrice);
     event ListingRegistered(address indexed listing, address indexed landlord, uint256 indexed listingId);
@@ -133,7 +133,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
         _setUsdc(params.usdc);
         _setTreasury(params.treasury);
-        _setModules(params.listingFactory, params.bookingRegistry, params.rentToken);
+        _setModules(params.listingFactory, params.bookingRegistry, params.sqmuToken);
         _setFees(params.tenantFeeBps, params.landlordFeeBps);
         _setListingPricing(params.listingCreationFee, params.viewPassPrice);
 
@@ -158,9 +158,9 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     function setModules(
         address newListingFactory,
         address newBookingRegistry,
-        address newRentToken
+        address newSqmuToken
     ) external onlyOwner {
-        _setModules(newListingFactory, newBookingRegistry, newRentToken);
+        _setModules(newListingFactory, newBookingRegistry, newSqmuToken);
     }
 
     function setFees(uint16 newTenantFeeBps, uint16 newLandlordFeeBps) external onlyOwner {
@@ -189,7 +189,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         require(landlord != address(0), "landlord=0");
         require(listingFactory != address(0), "factory=0");
         require(bookingRegistry != address(0), "registry=0");
-        require(rentToken != address(0), "rentToken=0");
+        require(sqmuToken != address(0), "sqmuToken=0");
 
         listing = IListingFactory(listingFactory).createListing(landlord, params);
         require(listing != address(0), "listing=0");
@@ -218,10 +218,10 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         returns (
             address currentListingFactory,
             address currentBookingRegistry,
-            address currentRentToken
+            address currentSqmuToken
         )
     {
-        return (listingFactory, bookingRegistry, rentToken);
+        return (listingFactory, bookingRegistry, sqmuToken);
     }
 
     function allListings() external view returns (address[] memory) {
@@ -247,12 +247,12 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     function _setModules(
         address newListingFactory,
         address newBookingRegistry,
-        address newRentToken
+        address newSqmuToken
     ) internal {
         listingFactory = newListingFactory;
         bookingRegistry = newBookingRegistry;
-        rentToken = newRentToken;
-        emit ModulesUpdated(newListingFactory, newBookingRegistry, newRentToken);
+        sqmuToken = newSqmuToken;
+        emit ModulesUpdated(newListingFactory, newBookingRegistry, newSqmuToken);
     }
 
     function _setFees(uint16 newTenantFeeBps, uint16 newLandlordFeeBps) internal {
