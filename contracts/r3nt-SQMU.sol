@@ -74,10 +74,8 @@ contract R3ntSQMU is
         __ERC1155_init(params.baseURI);
         __ERC1155Supply_init();
         __AccessControl_init();
-        __Ownable_init();
+        __Ownable_init(params.owner);
         __UUPSUpgradeable_init();
-
-        _transferOwnership(params.owner);
 
         name = _DEFAULT_NAME;
         symbol = _DEFAULT_SYMBOL;
@@ -240,20 +238,18 @@ contract R3ntSQMU is
     // Internal hooks
     // -------------------------------------------------
 
-    function _beforeTokenTransfer(
-        address operator,
+    function _update(
         address from,
         address to,
         uint256[] memory ids,
-        uint256[] memory amounts,
-        bytes memory data
+        uint256[] memory amounts
     ) internal override(ERC1155Upgradeable, ERC1155SupplyUpgradeable) {
         if (from != address(0) && to != address(0)) {
             for (uint256 i = 0; i < ids.length; ++i) {
                 require(!_transferLocked[ids[i]], "transfers locked");
             }
         }
-        super._beforeTokenTransfer(operator, from, to, ids, amounts, data);
+        super._update(from, to, ids, amounts);
     }
 
     function supportsInterface(bytes4 interfaceId)
