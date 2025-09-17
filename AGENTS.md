@@ -23,7 +23,10 @@ work remains consistent, upgradeable and easy to reason about.
 - Stores module addresses (`ListingFactory`, `BookingRegistry`, `RentToken`) and exposes them to
   the UI.
 - Only the owner (platform multi-sig) can update configuration, set module addresses or approve
-  upgrades via `_authorizeUpgrade`.
+  upgrades via `_authorizeUpgrade` and owner-only setters (`setTreasury`, `setFees`,
+  `setListingPricing`, `setModules`, `setUsdc`).
+- View helpers like `modules()` and `fees()` expose the current configuration to off-chain
+  consumers.
 - Provides `createListing(address landlord, ListingParams params)` which delegates clone creation
   to the factory and emits `ListingCreated(listing, landlord)`.
 
@@ -36,38 +39,48 @@ work remains consistent, upgradeable and easy to reason about.
 
 ### BookingRegistry (`BookingRegistry.sol`)
 - Maintains each listing’s reservation calendar (bitmap, mapping, etc.).
-- Enforces access control so only an authorised listing (or the platform for emergency overrides)
-  can `reserve` or `release` a range.
+- Enforces access control so only an authorised listing can `reserve(start, end)` or
+  `release(start, end)` for its own calendar, while the owner/platform may call
+  `reserveFor`/`releaseFor` for emergency overrides.
 - Optionally exposes `isAvailable` for off-chain reads.
 
 ### RentToken (`RentToken.sol`)
 - ERC-1155 token contract where each booking id maps to a unique `tokenId`.
-- Grants `MINTER_ROLE` to listing clones so they can mint and burn shares.
+- Grants `MINTER_ROLE` to listing clones so they can mint and burn shares, managed by MANAGER_ROLE
+  holders (owner/platform).
+- Owner can update metadata via `setBaseURI`, while token ids continue to match their
+  corresponding booking ids.
 - Allows a listing to `lockTransfers(tokenId)` after fundraising to simplify downstream rent
   streaming.
 - Metadata is served from an off-chain URI template like `https://api.r3nt.xyz/booking/{id}.json`.
 
 ### Listing (`Listing.sol`)
 - Cloneable per-property contract initialised with landlord, platform, registry and rent token
-  addresses plus rate/deposit parameters.
+  addresses plus pricing/metadata parameters via `initialize(landlord, platform, bookingRegistry,
+  rentToken, params)`.
+- Stores references to the platform, booking registry, rent token and USDC token for subsequent
+  fee pulls, registry access and share issuance.
 - Handles the full lifecycle: booking, deposit escrow, landlord/platform approvals, optional
   tokenisation, rent payments, investor claims, cancellations and defaults.
 - Stores bookings in mappings keyed by `bookingId` to avoid gas-heavy iteration.
 - Emits events for every significant action so the front-end/subgraph can rebuild state off-chain.
 
 ## Booking & Tokenisation Flow
-1. **Book** – `book(rt, units, start, end)` verifies availability via the `BookingRegistry`,
-   calculates rent, applies tenant/landlord fees and escrows the deposit within the listing.
+1. **Book** – `book(start, end)` verifies availability via the `BookingRegistry`, multiplies the
+   configured daily rate by the stay duration, records expected net rent after platform fees and
+   escrows the deposit within the listing.
 2. **Deposit management** – landlord proposes a split with `proposeDepositSplit(bookingId, tenantBps)`;
    the platform multi-sig finalises it through `confirmDepositSplit(bookingId, signature)`.
 3. **Tokenisation (optional)** – landlord or tenant proposes parameters (`totalShares`,
    `pricePerShare`, `feeBps`, `Period`); the platform approves; investors `invest` and receive
-   ERC-1155 shares minted by the listing.
-4. **Rent streaming** – tenants call `payRent(bookingId, amount)` which updates the accumulator
-   `accRentPerShare = accRentPerShare + amount * 1e18 / totalShares`. Investors call
+   ERC-1155 shares minted by the listing while proceeds (minus platform fee) flow to the landlord.
+4. **Rent streaming** – tenants call `payRent(bookingId, grossAmount)` which deducts tenant and
+   landlord platform fees, forwards treasury fees when configured and updates the accumulator
+   `accRentPerShare = accRentPerShare + netAmount * 1e18 / totalShares`. Investors call
    `claim(bookingId)` to withdraw accrued rent without loops.
-5. **Cancellations & defaults** – the platform can `cancelBooking` before funding or
-   `handleDefault` to allocate seized deposits/penalties to investors.
+5. **Cancellations & defaults** – the landlord or platform can `cancelBooking` before any rent is
+   paid (refunding the tenant’s deposit), while the platform can `handleDefault` to mark a stay as
+   defaulted and route deposits through the same accrual mechanism used for rent.
 
 ## Booking State & Events
 Bookings use the following core structure and status enums:
