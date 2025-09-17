@@ -1,0 +1,908 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.26;
+
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+
+import {Platform} from "./Platform.sol";
+
+/// @notice Minimal interface for interacting with the booking registry.
+interface IBookingRegistry {
+    function reserve(uint64 start, uint64 end) external returns (uint64, uint64);
+
+    function release(uint64 start, uint64 end) external returns (uint64, uint64);
+}
+
+/// @notice Minimal interface for interacting with the rent token contract.
+interface IRentToken {
+    function mint(address to, uint256 id, uint256 amount, bytes calldata data) external;
+
+    function burn(address from, uint256 id, uint256 amount) external;
+
+    function lockTransfers(uint256 id) external;
+
+    function balanceOf(address account, uint256 id) external view returns (uint256);
+
+    function totalSupply(uint256 id) external view returns (uint256);
+}
+
+/**
+ * @title Listing
+ * @notice Cloneable per-property contract handling bookings, deposit escrow, optional tokenisation
+ *         and rent streaming for the r3nt platform.
+ */
+contract Listing is Initializable, ReentrancyGuardUpgradeable {
+    using SafeERC20Upgradeable for IERC20Upgradeable;
+
+    /// @notice Booking lifecycle statuses.
+    enum Status {
+        NONE,
+        ACTIVE,
+        COMPLETED,
+        CANCELLED,
+        DEFAULTED
+    }
+
+    /// @notice Supported rent payment cadences.
+    enum Period {
+        NONE,
+        WEEK,
+        MONTH
+    }
+
+    /// @notice Core booking storage structure.
+    struct Booking {
+        address tenant;
+        uint64 start;
+        uint64 end;
+        uint256 rent;
+        uint256 deposit;
+        Status status;
+        bool tokenised;
+        uint256 totalShares;
+        uint256 soldShares;
+        uint256 pricePerShare;
+        uint16 feeBps;
+        Period period;
+        address proposer;
+        uint256 accRentPerShare;
+        mapping(address => uint256) userDebt;
+    }
+
+    /// @notice View helper exposing booking details without mappings.
+    struct BookingView {
+        address tenant;
+        uint64 start;
+        uint64 end;
+        uint256 grossRent;
+        uint256 expectedNetRent;
+        uint256 rentPaid;
+        uint256 deposit;
+        Status status;
+        bool tokenised;
+        uint256 totalShares;
+        uint256 soldShares;
+        uint256 pricePerShare;
+        uint16 feeBps;
+        Period period;
+        address proposer;
+        uint256 accRentPerShare;
+        uint256 landlordAccrued;
+        bool depositReleased;
+        uint16 depositTenantBps;
+        bool calendarReleased;
+    }
+
+    /// @notice Pending deposit split proposal awaiting platform confirmation.
+    struct DepositSplitProposal {
+        bool exists;
+        uint16 tenantBps;
+        address proposer;
+    }
+
+    /// @notice Pending tokenisation proposal awaiting platform approval.
+    struct TokenisationProposal {
+        bool exists;
+        address proposer;
+        uint256 totalShares;
+        uint256 pricePerShare;
+        uint16 feeBps;
+        Period period;
+    }
+
+    /// @notice Snapshot of a deposit split proposal for off-chain consumers.
+    struct DepositSplitView {
+        bool exists;
+        uint16 tenantBps;
+        address proposer;
+    }
+
+    /// @notice Snapshot of a tokenisation proposal for off-chain consumers.
+    struct TokenisationView {
+        bool exists;
+        address proposer;
+        uint256 totalShares;
+        uint256 pricePerShare;
+        uint16 feeBps;
+        Period period;
+    }
+
+    uint256 internal constant RENT_PRECISION = 1e18;
+    uint16 internal constant BPS_DENOMINATOR = 10_000;
+    uint64 internal constant SECONDS_PER_DAY = 86_400;
+
+    /// @notice Address of the platform orchestrating this listing.
+    address public platform;
+
+    /// @notice Address controlling landlord actions for the property.
+    address public landlord;
+
+    /// @notice Booking registry responsible for availability management.
+    address public bookingRegistry;
+
+    /// @notice Rent token used for investor share issuance.
+    address public rentToken;
+
+    /// @notice USDC token used for all monetary settlements.
+    address public usdc;
+
+    /// @notice Farcaster identifier for the landlord (off-chain linkage).
+    uint256 public fid;
+
+    /// @notice Canonical Farcaster cast hash (normalized 32-byte form).
+    bytes32 public castHash;
+
+    /// @notice Geospatial geohash stored as bytes32 (left aligned, zero padded).
+    bytes32 public geohash;
+
+    /// @notice Significant characters in the stored geohash.
+    uint8 public geohashPrecision;
+
+    /// @notice Property area in whole square metres.
+    uint32 public areaSqm;
+
+    /// @notice Base price per day denominated in USDC (6 decimals).
+    uint256 public baseDailyRate;
+
+    /// @notice Security deposit denominated in USDC (6 decimals).
+    uint256 public depositAmount;
+
+    /// @notice Minimum notice required before the booking start (seconds).
+    uint64 public minBookingNotice;
+
+    /// @notice Maximum look-ahead window tenants can book (seconds).
+    uint64 public maxBookingWindow;
+
+    /// @notice Off-chain metadata pointer (IPFS/HTTPS).
+    string public metadataURI;
+
+    /// @notice Counter used to allocate sequential booking identifiers.
+    uint256 public nextBookingId;
+
+    /// @dev Mapping of booking id to booking storage structure.
+    mapping(uint256 => Booking) private _bookings;
+
+    /// @dev Gross rent paid so far for each booking (pre-fees).
+    mapping(uint256 => uint256) private _grossRentPaid;
+
+    /// @dev Expected net rent (after landlord fee) for each booking.
+    mapping(uint256 => uint256) private _expectedNetRent;
+
+    /// @dev Landlord proceeds accrued for non-tokenised bookings.
+    mapping(uint256 => uint256) private _landlordAccruals;
+
+    /// @dev Tracks whether the reservation range has been released back to the registry.
+    mapping(uint256 => bool) private _rangeReleased;
+
+    /// @dev Tracks whether the deposit has been fully released for a booking.
+    mapping(uint256 => bool) private _depositReleased;
+
+    /// @dev Stores the confirmed tenant share of the deposit split (in basis points).
+    mapping(uint256 => uint16) private _confirmedDepositTenantBps;
+
+    /// @dev Pending deposit split proposals keyed by booking id.
+    mapping(uint256 => DepositSplitProposal) private _depositSplitProposals;
+
+    /// @dev Pending tokenisation proposals keyed by booking id.
+    mapping(uint256 => TokenisationProposal) private _tokenisationProposals;
+
+    // -------------------------------------------------
+    // Events
+    // -------------------------------------------------
+
+    event ListingInitialized(address indexed landlord, address indexed platform, uint256 fid);
+    event BookingCreated(
+        uint256 indexed bookingId,
+        address indexed tenant,
+        uint64 start,
+        uint64 end,
+        uint256 grossRent,
+        uint256 expectedNetRent,
+        uint256 deposit
+    );
+    event DepositSplitProposed(uint256 indexed bookingId, uint16 tenantBps, address indexed proposer);
+    event DepositReleased(
+        uint256 indexed bookingId,
+        address indexed confirmer,
+        uint256 tenantAmount,
+        uint256 landlordAmount
+    );
+    event TokenisationProposed(
+        uint256 indexed bookingId,
+        address indexed proposer,
+        uint256 totalShares,
+        uint256 pricePerShare,
+        uint16 feeBps,
+        Period period
+    );
+    event TokenisationApproved(
+        uint256 indexed bookingId,
+        address indexed approver,
+        uint256 totalShares,
+        uint256 pricePerShare,
+        uint16 feeBps,
+        Period period
+    );
+    event SharesMinted(
+        uint256 indexed bookingId,
+        address indexed investor,
+        uint256 shares,
+        uint256 cost,
+        uint256 platformFee
+    );
+    event RentPaid(uint256 indexed bookingId, address indexed payer, uint256 grossAmount, uint256 netAmount);
+    event Claimed(uint256 indexed bookingId, address indexed account, uint256 amount);
+    event LandlordWithdrawal(uint256 indexed bookingId, address indexed recipient, uint256 amount);
+    event BookingCancelled(uint256 indexed bookingId, address indexed caller);
+    event BookingCompleted(uint256 indexed bookingId, address indexed caller);
+    event BookingDefaulted(uint256 indexed bookingId, address indexed caller);
+
+    // -------------------------------------------------
+    // Modifiers
+    // -------------------------------------------------
+
+    modifier onlyLandlord() {
+        require(msg.sender == landlord, "not landlord");
+        _;
+    }
+
+    modifier onlyPlatform() {
+        require(msg.sender == platform, "not platform");
+        _;
+    }
+
+    modifier onlyLandlordOrPlatform() {
+        require(msg.sender == landlord || msg.sender == platform, "not authorised");
+        _;
+    }
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    // -------------------------------------------------
+    // Initializer
+    // -------------------------------------------------
+
+    /**
+     * @notice Initialise the listing clone with landlord, platform and metadata parameters.
+     * @param landlord_ Address of the landlord controlling the listing.
+     * @param platform_ Address of the platform contract orchestrating bookings.
+     * @param bookingRegistry_ Booking registry handling availability.
+     * @param rentToken_ Rent token used for investor share issuance.
+     * @param params Listing parameters forwarded from the platform.
+     */
+    function initialize(
+        address landlord_,
+        address platform_,
+        address bookingRegistry_,
+        address rentToken_,
+        Platform.ListingParams calldata params
+    ) external initializer {
+        require(landlord_ != address(0), "landlord=0");
+        require(platform_ != address(0), "platform=0");
+        require(bookingRegistry_ != address(0), "registry=0");
+        require(rentToken_ != address(0), "rentToken=0");
+
+        __ReentrancyGuard_init();
+
+        landlord = landlord_;
+        platform = platform_;
+        bookingRegistry = bookingRegistry_;
+        rentToken = rentToken_;
+
+        address usdcToken = Platform(platform_).usdc();
+        require(usdcToken != address(0), "usdc=0");
+        usdc = usdcToken;
+
+        (, address registryFromPlatform, address rentTokenFromPlatform) = Platform(platform_).modules();
+        require(registryFromPlatform == bookingRegistry_, "registry mismatch");
+        require(rentTokenFromPlatform == rentToken_, "rent token mismatch");
+
+        fid = params.fid;
+        castHash = params.castHash;
+        geohash = params.geohash;
+        geohashPrecision = params.geohashPrecision;
+        areaSqm = params.areaSqm;
+        baseDailyRate = params.baseDailyRate;
+        depositAmount = params.depositAmount;
+        minBookingNotice = params.minBookingNotice;
+        maxBookingWindow = params.maxBookingWindow;
+        metadataURI = params.metadataURI;
+
+        emit ListingInitialized(landlord_, platform_, params.fid);
+    }
+
+    // -------------------------------------------------
+    // Booking lifecycle
+    // -------------------------------------------------
+
+    /**
+     * @notice Book the listing for the provided time range. Calculates expected rent, applies
+     *         platform fees for reference and escrows the security deposit.
+     * @param start Booking start timestamp (seconds).
+     * @param end Booking end timestamp (seconds).
+     * @return bookingId Identifier assigned to the new booking.
+     */
+    function book(uint64 start, uint64 end) external nonReentrant returns (uint256 bookingId) {
+        require(start < end, "invalid range");
+        require(start >= block.timestamp + minBookingNotice, "notice too short");
+        if (maxBookingWindow != 0) {
+            require(start <= block.timestamp + maxBookingWindow, "beyond window");
+        }
+
+        uint256 grossRent = _calculateRent(start, end);
+        (uint16 tenantFeeBps, uint16 landlordFeeBps) = Platform(platform).fees();
+        uint256 landlordFeeAmount = (grossRent * landlordFeeBps) / BPS_DENOMINATOR;
+        uint256 expectedNetRent = grossRent - landlordFeeAmount;
+
+        bookingId = ++nextBookingId;
+        Booking storage booking = _bookings[bookingId];
+
+        booking.tenant = msg.sender;
+        booking.start = start;
+        booking.end = end;
+        booking.rent = grossRent;
+        booking.deposit = depositAmount;
+        booking.status = Status.ACTIVE;
+        booking.tokenised = false;
+        booking.totalShares = 0;
+        booking.soldShares = 0;
+        booking.pricePerShare = 0;
+        booking.feeBps = 0;
+        booking.period = Period.NONE;
+        booking.proposer = address(0);
+        booking.accRentPerShare = 0;
+
+        _grossRentPaid[bookingId] = 0;
+        _expectedNetRent[bookingId] = expectedNetRent;
+
+        uint256 deposit = depositAmount;
+        if (deposit > 0) {
+            IERC20Upgradeable(usdc).safeTransferFrom(msg.sender, address(this), deposit);
+        }
+
+        IBookingRegistry(bookingRegistry).reserve(start, end);
+
+        emit BookingCreated(bookingId, msg.sender, start, end, grossRent, expectedNetRent, deposit);
+    }
+
+    /**
+     * @notice Pay rent for an active booking. Applies platform tenant/landlord fees and accrues
+     *         the net proceeds to the landlord or investors.
+     * @param bookingId Identifier of the booking being paid.
+     * @param grossAmount Gross rent amount being settled (before platform fees).
+     * @return netAmount Net amount accrued to the landlord/investors after fees.
+     */
+    function payRent(uint256 bookingId, uint256 grossAmount)
+        external
+        nonReentrant
+        returns (uint256 netAmount)
+    {
+        require(grossAmount > 0, "amount=0");
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE, "inactive booking");
+        require(msg.sender == booking.tenant, "not tenant");
+
+        uint256 totalGrossPaid = _grossRentPaid[bookingId] + grossAmount;
+        require(totalGrossPaid <= booking.rent, "exceeds rent");
+
+        (uint16 tenantFeeBps, uint16 landlordFeeBps) = Platform(platform).fees();
+        uint256 tenantFee = (grossAmount * tenantFeeBps) / BPS_DENOMINATOR;
+        uint256 landlordFee = (grossAmount * landlordFeeBps) / BPS_DENOMINATOR;
+        netAmount = grossAmount - landlordFee;
+
+        IERC20Upgradeable token = IERC20Upgradeable(usdc);
+        uint256 totalTransfer = grossAmount + tenantFee;
+        token.safeTransferFrom(msg.sender, address(this), totalTransfer);
+
+        address treasury = Platform(platform).treasury();
+        if (tenantFee > 0 && treasury != address(0)) {
+            token.safeTransfer(treasury, tenantFee);
+        }
+        if (landlordFee > 0 && treasury != address(0)) {
+            token.safeTransfer(treasury, landlordFee);
+        }
+
+        _grossRentPaid[bookingId] = totalGrossPaid;
+        if (netAmount > 0) {
+            _handleLandlordIncome(bookingId, netAmount);
+        }
+
+        emit RentPaid(bookingId, msg.sender, grossAmount, netAmount);
+    }
+
+    /**
+     * @notice Mark a booking as completed once the stay has finished.
+     * @param bookingId Identifier of the booking being completed.
+     */
+    function completeBooking(uint256 bookingId) external onlyLandlordOrPlatform {
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE, "not active");
+        require(block.timestamp >= booking.end, "stay ongoing");
+
+        booking.status = Status.COMPLETED;
+        _releaseBookingRange(bookingId);
+
+        emit BookingCompleted(bookingId, msg.sender);
+    }
+
+    /**
+     * @notice Cancel an upcoming booking before it begins. Only callable by the landlord or platform
+     *         when no rent has been paid.
+     * @param bookingId Identifier of the booking being cancelled.
+     */
+    function cancelBooking(uint256 bookingId) external nonReentrant onlyLandlordOrPlatform {
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE, "not active");
+        require(block.timestamp < booking.start, "already started");
+        require(!_depositReleased[bookingId], "deposit handled");
+        require(_grossRentPaid[bookingId] == 0, "rent paid");
+
+        booking.status = Status.CANCELLED;
+        _releaseBookingRange(bookingId);
+
+        uint256 deposit = booking.deposit;
+        if (deposit > 0) {
+            booking.deposit = 0;
+            _depositReleased[bookingId] = true;
+            _confirmedDepositTenantBps[bookingId] = BPS_DENOMINATOR;
+            IERC20Upgradeable(usdc).safeTransfer(booking.tenant, deposit);
+            emit DepositReleased(bookingId, msg.sender, deposit, 0);
+        }
+
+        emit BookingCancelled(bookingId, msg.sender);
+    }
+
+    /**
+     * @notice Handle a tenant default by marking the booking accordingly and allocating the deposit
+     *         to the landlord/investors.
+     * @param bookingId Identifier of the booking in default.
+     */
+    function handleDefault(uint256 bookingId) external onlyPlatform {
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE, "not active");
+
+        booking.status = Status.DEFAULTED;
+        _releaseBookingRange(bookingId);
+
+        if (!_depositReleased[bookingId]) {
+            uint256 deposit = booking.deposit;
+            if (deposit > 0) {
+                booking.deposit = 0;
+                _depositReleased[bookingId] = true;
+                _confirmedDepositTenantBps[bookingId] = 0;
+                _handleLandlordIncome(bookingId, deposit);
+                emit DepositReleased(bookingId, msg.sender, 0, deposit);
+            }
+        }
+
+        emit BookingDefaulted(bookingId, msg.sender);
+    }
+
+    // -------------------------------------------------
+    // Deposit management
+    // -------------------------------------------------
+
+    /**
+     * @notice Landlord proposes how the security deposit should be split between tenant and landlord.
+     * @param bookingId Identifier of the booking whose deposit is being split.
+     * @param tenantBps Portion allocated to the tenant in basis points.
+     */
+    function proposeDepositSplit(uint256 bookingId, uint16 tenantBps) external onlyLandlord {
+        require(tenantBps <= BPS_DENOMINATOR, "bps too high");
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE || booking.status == Status.COMPLETED, "invalid status");
+        require(!_depositReleased[bookingId], "deposit handled");
+
+        _depositSplitProposals[bookingId] = DepositSplitProposal({exists: true, tenantBps: tenantBps, proposer: msg.sender});
+
+        emit DepositSplitProposed(bookingId, tenantBps, msg.sender);
+    }
+
+    /**
+     * @notice Platform confirms the deposit split and releases funds to the tenant and landlord.
+     * @param bookingId Identifier of the booking whose deposit is being released.
+     * @param signature Reserved for future signature validation (currently unused).
+     * @return tenantAmount Amount returned to the tenant.
+     * @return landlordAmount Amount allocated to the landlord/investors.
+     */
+    function confirmDepositSplit(uint256 bookingId, bytes calldata signature)
+        external
+        nonReentrant
+        onlyPlatform
+        returns (uint256 tenantAmount, uint256 landlordAmount)
+    {
+        // Silence unused variable warning until signature-based approvals are implemented.
+        if (signature.length == 0) {
+            // no-op
+        }
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE || booking.status == Status.COMPLETED, "invalid status");
+        require(!_depositReleased[bookingId], "deposit handled");
+
+        DepositSplitProposal storage proposal = _depositSplitProposals[bookingId];
+        require(proposal.exists, "no proposal");
+
+        uint256 deposit = booking.deposit;
+        require(deposit > 0, "no deposit");
+
+        uint16 tenantBps = proposal.tenantBps;
+        tenantAmount = (deposit * tenantBps) / BPS_DENOMINATOR;
+        landlordAmount = deposit - tenantAmount;
+
+        booking.deposit = 0;
+        _depositReleased[bookingId] = true;
+        _confirmedDepositTenantBps[bookingId] = tenantBps;
+        delete _depositSplitProposals[bookingId];
+
+        IERC20Upgradeable token = IERC20Upgradeable(usdc);
+        if (tenantAmount > 0) {
+            token.safeTransfer(booking.tenant, tenantAmount);
+        }
+        if (landlordAmount > 0) {
+            _handleLandlordIncome(bookingId, landlordAmount);
+        }
+
+        emit DepositReleased(bookingId, msg.sender, tenantAmount, landlordAmount);
+    }
+
+    // -------------------------------------------------
+    // Tokenisation lifecycle
+    // -------------------------------------------------
+
+    /**
+     * @notice Landlord or tenant proposes tokenisation parameters for the booking.
+     * @param bookingId Identifier of the booking to tokenise.
+     * @param totalShares Total number of shares that will be minted if approved.
+     * @param pricePerShare Price per share denominated in USDC (6 decimals).
+     * @param feeBps Platform fee applied to investments (basis points).
+     * @param period Rent distribution cadence for informational purposes.
+     */
+    function proposeTokenisation(
+        uint256 bookingId,
+        uint256 totalShares,
+        uint256 pricePerShare,
+        uint16 feeBps,
+        Period period
+    ) external {
+        require(totalShares > 0, "shares=0");
+        require(pricePerShare > 0, "price=0");
+        require(feeBps <= BPS_DENOMINATOR, "fee bps too high");
+        require(period != Period.NONE, "period none");
+
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE, "not active");
+        require(!booking.tokenised, "already tokenised");
+        require(msg.sender == landlord || msg.sender == booking.tenant, "unauthorised");
+
+        _tokenisationProposals[bookingId] = TokenisationProposal({
+            exists: true,
+            proposer: msg.sender,
+            totalShares: totalShares,
+            pricePerShare: pricePerShare,
+            feeBps: feeBps,
+            period: period
+        });
+
+        booking.proposer = msg.sender;
+
+        emit TokenisationProposed(bookingId, msg.sender, totalShares, pricePerShare, feeBps, period);
+    }
+
+    /**
+     * @notice Platform approves a pending tokenisation proposal enabling fundraising.
+     * @param bookingId Identifier of the booking being tokenised.
+     */
+    function approveTokenisation(uint256 bookingId) external onlyPlatform {
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE, "not active");
+        require(!booking.tokenised, "already tokenised");
+
+        TokenisationProposal storage proposal = _tokenisationProposals[bookingId];
+        require(proposal.exists, "no proposal");
+
+        booking.tokenised = true;
+        booking.totalShares = proposal.totalShares;
+        booking.pricePerShare = proposal.pricePerShare;
+        booking.feeBps = proposal.feeBps;
+        booking.period = proposal.period;
+        booking.proposer = proposal.proposer;
+
+        delete _tokenisationProposals[bookingId];
+
+        emit TokenisationApproved(
+            bookingId,
+            msg.sender,
+            booking.totalShares,
+            booking.pricePerShare,
+            booking.feeBps,
+            booking.period
+        );
+    }
+
+    /**
+     * @notice Invest in a tokenised booking by purchasing shares.
+     * @param bookingId Identifier of the booking.
+     * @param shares Number of shares to purchase.
+     * @param recipient Address receiving the minted shares (defaults to msg.sender when zero).
+     * @return totalCost Total USDC transferred from the purchaser.
+     */
+    function invest(uint256 bookingId, uint256 shares, address recipient)
+        external
+        nonReentrant
+        returns (uint256 totalCost)
+    {
+        require(shares > 0, "shares=0");
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status == Status.ACTIVE, "not active");
+        require(booking.tokenised, "not tokenised");
+        require(booking.pricePerShare > 0, "price unset");
+        require(booking.totalShares > 0, "shares unset");
+        require(booking.soldShares + shares <= booking.totalShares, "exceeds supply");
+
+        address investor = recipient == address(0) ? msg.sender : recipient;
+
+        totalCost = booking.pricePerShare * shares;
+        require(totalCost > 0, "cost=0");
+
+        IERC20Upgradeable token = IERC20Upgradeable(usdc);
+        token.safeTransferFrom(msg.sender, address(this), totalCost);
+
+        uint256 platformFee = (totalCost * booking.feeBps) / BPS_DENOMINATOR;
+        address treasury = Platform(platform).treasury();
+        if (platformFee > 0 && treasury != address(0)) {
+            token.safeTransfer(treasury, platformFee);
+        }
+
+        uint256 proceeds = totalCost - platformFee;
+        if (proceeds > 0) {
+            token.safeTransfer(landlord, proceeds);
+        }
+
+        IRentToken rent = IRentToken(rentToken);
+        rent.mint(investor, bookingId, shares, "");
+
+        uint256 acc = booking.accRentPerShare;
+        if (acc > 0) {
+            booking.userDebt[investor] += (shares * acc) / RENT_PRECISION;
+        }
+
+        booking.soldShares += shares;
+
+        emit SharesMinted(bookingId, investor, shares, totalCost, platformFee);
+
+        if (booking.soldShares == booking.totalShares) {
+            // Best-effort attempt to lock transfers; ignore failures for backwards compatibility.
+            try rent.lockTransfers(bookingId) {} catch {}
+        }
+    }
+
+    /**
+     * @notice Claim accrued rent for a tokenised booking based on share ownership.
+     * @param bookingId Identifier of the booking being claimed.
+     * @return amount Amount of USDC transferred to the caller.
+     */
+    function claim(uint256 bookingId) external nonReentrant returns (uint256 amount) {
+        Booking storage booking = _bookings[bookingId];
+        require(booking.tokenised, "not tokenised");
+        require(booking.soldShares > 0, "no shares minted");
+
+        IRentToken rent = IRentToken(rentToken);
+        uint256 shares = rent.balanceOf(msg.sender, bookingId);
+        require(shares > 0, "no shares");
+
+        uint256 acc = booking.accRentPerShare;
+        uint256 accumulated = (shares * acc) / RENT_PRECISION;
+        uint256 debt = booking.userDebt[msg.sender];
+        require(accumulated > debt, "nothing to claim");
+
+        amount = accumulated - debt;
+        booking.userDebt[msg.sender] = accumulated;
+
+        IERC20Upgradeable(usdc).safeTransfer(msg.sender, amount);
+
+        emit Claimed(bookingId, msg.sender, amount);
+    }
+
+    /**
+     * @notice Preview the claimable rent for a given account without modifying state.
+     * @param bookingId Identifier of the booking.
+     * @param account Address holding booking shares.
+     * @return pending Amount of USDC currently claimable.
+     */
+    function previewClaim(uint256 bookingId, address account) external view returns (uint256 pending) {
+        Booking storage booking = _bookings[bookingId];
+        if (!booking.tokenised || booking.soldShares == 0) {
+            return 0;
+        }
+
+        uint256 shares = IRentToken(rentToken).balanceOf(account, bookingId);
+        if (shares == 0) {
+            return 0;
+        }
+
+        uint256 acc = booking.accRentPerShare;
+        uint256 accumulated = (shares * acc) / RENT_PRECISION;
+        uint256 debt = booking.userDebt[account];
+        if (accumulated <= debt) {
+            return 0;
+        }
+
+        pending = accumulated - debt;
+    }
+
+    // -------------------------------------------------
+    // Landlord proceeds
+    // -------------------------------------------------
+
+    /**
+     * @notice Withdraw accrued rent for non-tokenised bookings.
+     * @param bookingId Identifier of the booking whose proceeds are being withdrawn.
+     * @param recipient Address receiving the funds (defaults to landlord when zero).
+     * @return amount Amount transferred to the recipient.
+     */
+    function withdrawLandlord(uint256 bookingId, address recipient)
+        external
+        nonReentrant
+        onlyLandlord
+        returns (uint256 amount)
+    {
+        amount = _landlordAccruals[bookingId];
+        require(amount > 0, "nothing accrued");
+        _landlordAccruals[bookingId] = 0;
+
+        address to = recipient == address(0) ? landlord : recipient;
+        IERC20Upgradeable(usdc).safeTransfer(to, amount);
+
+        emit LandlordWithdrawal(bookingId, to, amount);
+    }
+
+    // -------------------------------------------------
+    // Views
+    // -------------------------------------------------
+
+    /**
+     * @notice Return booking details excluding mapping fields.
+     * @param bookingId Identifier of the booking to inspect.
+     */
+    function bookingInfo(uint256 bookingId) external view returns (BookingView memory info) {
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status != Status.NONE, "unknown booking");
+
+        info = BookingView({
+            tenant: booking.tenant,
+            start: booking.start,
+            end: booking.end,
+            grossRent: booking.rent,
+            expectedNetRent: _expectedNetRent[bookingId],
+            rentPaid: _grossRentPaid[bookingId],
+            deposit: booking.deposit,
+            status: booking.status,
+            tokenised: booking.tokenised,
+            totalShares: booking.totalShares,
+            soldShares: booking.soldShares,
+            pricePerShare: booking.pricePerShare,
+            feeBps: booking.feeBps,
+            period: booking.period,
+            proposer: booking.proposer,
+            accRentPerShare: booking.accRentPerShare,
+            landlordAccrued: _landlordAccruals[bookingId],
+            depositReleased: _depositReleased[bookingId],
+            depositTenantBps: _confirmedDepositTenantBps[bookingId],
+            calendarReleased: _rangeReleased[bookingId]
+        });
+    }
+
+    /**
+     * @notice Return a pending deposit split proposal (if any).
+     * @param bookingId Identifier of the booking.
+     */
+    function pendingDepositSplit(uint256 bookingId) external view returns (DepositSplitView memory viewData) {
+        DepositSplitProposal storage proposal = _depositSplitProposals[bookingId];
+        viewData = DepositSplitView({exists: proposal.exists, tenantBps: proposal.tenantBps, proposer: proposal.proposer});
+    }
+
+    /**
+     * @notice Return a pending tokenisation proposal (if any).
+     * @param bookingId Identifier of the booking.
+     */
+    function pendingTokenisation(uint256 bookingId) external view returns (TokenisationView memory viewData) {
+        TokenisationProposal storage proposal = _tokenisationProposals[bookingId];
+        viewData = TokenisationView({
+            exists: proposal.exists,
+            proposer: proposal.proposer,
+            totalShares: proposal.totalShares,
+            pricePerShare: proposal.pricePerShare,
+            feeBps: proposal.feeBps,
+            period: proposal.period
+        });
+    }
+
+    /**
+     * @notice View helper returning landlord accrual for a booking.
+     * @param bookingId Identifier of the booking.
+     */
+    function landlordAccrued(uint256 bookingId) external view returns (uint256) {
+        return _landlordAccruals[bookingId];
+    }
+
+    /**
+     * @notice View helper returning gross rent paid for a booking.
+     * @param bookingId Identifier of the booking.
+     */
+    function grossRentPaid(uint256 bookingId) external view returns (uint256) {
+        return _grossRentPaid[bookingId];
+    }
+
+    /**
+     * @notice View helper returning expected net rent after landlord fees.
+     * @param bookingId Identifier of the booking.
+     */
+    function expectedNetRent(uint256 bookingId) external view returns (uint256) {
+        return _expectedNetRent[bookingId];
+    }
+
+    // -------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------
+
+    function _calculateRent(uint64 start, uint64 end) internal view returns (uint256 rent) {
+        uint256 duration = uint256(end) - uint256(start);
+        uint256 daysCount = (duration + SECONDS_PER_DAY - 1) / SECONDS_PER_DAY;
+        if (daysCount == 0) {
+            daysCount = 1;
+        }
+        if (baseDailyRate > 0) {
+            require(daysCount <= type(uint256).max / baseDailyRate, "rent overflow");
+        }
+        rent = baseDailyRate * daysCount;
+    }
+
+    function _releaseBookingRange(uint256 bookingId) internal {
+        if (_rangeReleased[bookingId]) {
+            return;
+        }
+        Booking storage booking = _bookings[bookingId];
+        _rangeReleased[bookingId] = true;
+        if (booking.start != 0 || booking.end != 0) {
+            IBookingRegistry(bookingRegistry).release(booking.start, booking.end);
+        }
+    }
+
+    function _handleLandlordIncome(uint256 bookingId, uint256 amount) internal {
+        if (amount == 0) {
+            return;
+        }
+
+        Booking storage booking = _bookings[bookingId];
+        if (booking.tokenised && booking.soldShares > 0) {
+            booking.accRentPerShare += (amount * RENT_PRECISION) / booking.soldShares;
+        } else {
+            _landlordAccruals[bookingId] += amount;
+        }
+    }
+}
