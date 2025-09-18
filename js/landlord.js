@@ -3,12 +3,11 @@ import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } 
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
 import {
-  R3NT_ADDRESS,
-  USDC_ADDRESS,
   PLATFORM_ADDRESS,
   PLATFORM_ABI,
   RPC_URL,
   REGISTRY_ADDRESS,
+  REGISTRY_ABI,
   APP_VERSION,
 } from './config.js';
 
@@ -17,34 +16,8 @@ const ARBITRUM_HEX = '0xa4b1';
 const USDC_DECIMALS = 6;
 const USDC_SCALAR = 1_000_000n;
 
-// 2-of-2 cosigners (landlord + platform)
-const PLATFORM_SIGNER = PLATFORM_ADDRESS;
-const encodeErc7913Ecdsa = (addr) => '0x00' + getAddress(addr).slice(2);
-
-// Minimal ERC-20 ABI surface
-const erc20Abi = [
-  {
-    type: 'function',
-    name: 'approve',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ type: 'bool' }],
-  },
-  {
-    type: 'function',
-    name: 'allowance',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'owner', type: 'address' },
-      { name: 'spender', type: 'address' },
-    ],
-    outputs: [{ type: 'uint256' }],
-  },
-];
-let r3ntAbi, bookingAbi, bookingAddr;
+const UINT64_MAX = (1n << 64n) - 1n;
+const utf8Encoder = new TextEncoder();
 let platformAbi = Array.isArray(PLATFORM_ABI) && PLATFORM_ABI.length ? PLATFORM_ABI : null;
 let listingPriceCache;
 let listingPriceLoading;
@@ -53,7 +26,6 @@ let listingPriceLoading;
 const els = {
   contextBar: document.getElementById('contextBar'),
   feeInfo: document.getElementById('feeInfo'),
-  signerMode: document.getElementById('signerMode'),
   connect: document.getElementById('connect'),
   create: document.getElementById('create'),
   status: document.getElementById('status'),
@@ -66,6 +38,9 @@ const els = {
   rateDaily: document.getElementById('rateDaily'),
   rateWeekly: document.getElementById('rateWeekly'),
   rateMonthly: document.getElementById('rateMonthly'),
+  minNotice: document.getElementById('minNotice'),
+  maxWindow: document.getElementById('maxWindow'),
+  metadataUrl: document.getElementById('metadataUrl'),
   availListing: document.getElementById('availListing'),
   availStart: document.getElementById('availStart'),
   availEnd: document.getElementById('availEnd'),
@@ -125,6 +100,95 @@ function parseAreaSqm(input) {
   if (value === 0n) throw new Error('Area must be greater than zero.');
   if (value > 4_294_967_295n) throw new Error('Area exceeds uint32 limit.');
   return value;
+}
+function geohashToBytes32(geohash) {
+  const value = String(geohash ?? '').trim();
+  if (!value) throw new Error('Geohash is required.');
+  const bytes = utf8Encoder.encode(value);
+  if (bytes.length > 32) throw new Error('Geohash exceeds 32 bytes.');
+  const out = new Uint8Array(32);
+  out.set(bytes);
+  return '0x' + Array.from(out, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+function parseHoursToSeconds(input) {
+  const raw = String(input ?? '').trim();
+  if (raw === '') return 0n;
+  if (!/^\d+$/.test(raw)) throw new Error('Minimum notice must be a whole number of hours.');
+  const hours = BigInt(raw);
+  const seconds = hours * 3_600n;
+  if (seconds > UINT64_MAX) throw new Error('Minimum notice exceeds uint64 range.');
+  return seconds;
+}
+function parseDaysToSeconds(input) {
+  const raw = String(input ?? '').trim();
+  if (raw === '') return 0n;
+  if (!/^\d+$/.test(raw)) throw new Error('Booking window must be a whole number of days.');
+  const days = BigInt(raw);
+  const seconds = days * 86_400n;
+  if (seconds > UINT64_MAX) throw new Error('Booking window exceeds uint64 range.');
+  return seconds;
+}
+function encodeJsonToDataUri(obj) {
+  const json = JSON.stringify(obj);
+  const bytes = utf8Encoder.encode(json);
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return `data:application/json;base64,${btoa(binary)}`;
+}
+function buildMetadataUri(params) {
+  const {
+    metadataUrl,
+    title,
+    shortDesc,
+    embedUrl,
+    geohash,
+    geolen,
+    areaSqm,
+    deposit,
+    rateDaily,
+    rateWeekly,
+    rateMonthly,
+    fid,
+    castHash,
+    minBookingNotice,
+    maxBookingWindow,
+    listingPrice,
+  } = params;
+  const trimmed = String(metadataUrl || '').trim();
+  if (trimmed) {
+    const lower = trimmed.toLowerCase();
+    if (!/^https?:\/\//.test(lower) && !lower.startsWith('ipfs://') && !lower.startsWith('data:')) {
+      throw new Error('Metadata URL must start with https://, ipfs:// or data:');
+    }
+    return trimmed;
+  }
+  const metadata = {
+    name: title,
+    description: shortDesc,
+    version: APP_VERSION,
+    geohash: { value: geohash, precision: geolen },
+    areaSqm: areaSqm.toString(),
+    deposit: deposit.toString(),
+    rates: {
+      daily: rateDaily.toString(),
+      weekly: rateWeekly.toString(),
+      monthly: rateMonthly.toString(),
+    },
+    bookingWindow: {
+      minNoticeSeconds: minBookingNotice.toString(),
+      maxWindowSeconds: maxBookingWindow.toString(),
+    },
+    cast: {
+      fid: fid.toString(),
+      hash: castHash,
+    },
+    embedUrl,
+    listingFee: listingPrice ? listingPrice.toString() : '0',
+    createdAt: new Date().toISOString(),
+  };
+  return encodeJsonToDataUri(metadata);
 }
 function normalizeCastHash(h) {
   if (typeof h !== 'string') return null;
@@ -202,15 +266,6 @@ async function refreshListingPriceDisplay() {
   } catch (err) {
     console.error('Failed to load listing price', err);
     els.feeInfo.textContent = 'Listing price: (unavailable)';
-  }
-}
-
-async function loadBooking() {
-  if (!bookingAbi) {
-    bookingAbi = await fetch('./js/abi/BookingRegistry.json')
-      .then((r) => r.json())
-      .then((j) => j.abi);
-    bookingAddr = REGISTRY_ADDRESS;
   }
 }
 
@@ -306,13 +361,14 @@ els.create.onclick = () =>
       const geohashStr = latLonToGeohash(lat, lon, 7);
       const geolen = geohashStr.length;
       const areaSqm = parseAreaSqm(els.areaSqm.value);
-
-      if (!r3ntAbi) {
-        r3ntAbi = await fetch('./js/abi/r3nt.json')
-          .then((r) => r.json())
-          .then((j) => j.abi);
-      }
+      const minBookingNotice = parseHoursToSeconds(els.minNotice.value);
+      const maxBookingWindow = parseDaysToSeconds(els.maxWindow.value);
+      const geohashBytes = geohashToBytes32(geohashStr);
       const listingPrice = await getListingPrice();
+      const abi = await loadPlatformAbi();
+      if (!Array.isArray(abi) || abi.length === 0) {
+        throw new Error('Platform ABI unavailable');
+      }
 
       // 1) Compose the landlord's canonical cast and capture the hash
       info('Open composer… Post your listing cast.');
@@ -342,51 +398,46 @@ els.create.onclick = () =>
       }
       info('Cast posted. Continuing on-chain…');
 
-      // 2) Prepare signers/threshold
-      const signersBytes = [encodeErc7913Ecdsa(landlordAddr), encodeErc7913Ecdsa(PLATFORM_SIGNER)];
-      const threshold = 2n;
-
-      // 3) Approve listing price if needed
-      const cur = await pub.readContract({
-        address: USDC_ADDRESS,
-        abi: erc20Abi,
-        functionName: 'allowance',
-        args: [landlordAddr, R3NT_ADDRESS],
+      const metadataUri = buildMetadataUri({
+        metadataUrl: els.metadataUrl.value,
+        title,
+        shortDesc,
+        embedUrl,
+        geohash: geohashStr,
+        geolen,
+        areaSqm,
+        deposit,
+        rateDaily,
+        rateWeekly,
+        rateMonthly,
+        fid: fidBig,
+        castHash,
+        minBookingNotice,
+        maxBookingWindow,
+        listingPrice,
       });
-      if (cur < listingPrice) {
-        info('Approving USDC listing price…');
-        const approveData = encodeFunctionData({
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [R3NT_ADDRESS, listingPrice],
-        });
-        await provider.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
-      }
 
-      // 4) Submit createListing with captured cast hash
-      info('Submitting createListing…');
+      // 2) Submit createListing to the platform
+      info(`Submitting createListing (fee ${formatUsdc(listingPrice)} USDC)…`);
       const data = encodeFunctionData({
-        abi: r3ntAbi,
+        abi,
         functionName: 'createListing',
         args: [
-          USDC_ADDRESS,
-          deposit,
-          rateDaily,
-          rateWeekly,
-          rateMonthly,
-          geohashStr,
-          geolen,
-          areaSqm,
+          landlordAddr,
           fidBig,
           castHash,
-          title,
-          shortDesc,
-          signersBytes,
-          threshold,
+          geohashBytes,
+          geolen,
+          areaSqm,
+          rateDaily,
+          deposit,
+          minBookingNotice,
+          maxBookingWindow,
+          metadataUri,
         ],
       });
 
-      const txHash = await provider.request({ method: 'eth_sendTransaction', params: [{ from, to: R3NT_ADDRESS, data }] });
+      const txHash = await provider.request({ method: 'eth_sendTransaction', params: [{ from, to: PLATFORM_ADDRESS, data }] });
       info(`Listing tx sent: ${txHash}`);
     } catch (e) {
       info(`Error: ${e?.message || e}`);
@@ -396,30 +447,30 @@ els.create.onclick = () =>
 els.checkAvail.onclick = () =>
   disableWhile(els.checkAvail, async () => {
     try {
-      await loadBooking();
-      const id = BigInt(els.availListing.value);
+      const abi = await loadPlatformAbi();
+      if (!Array.isArray(abi) || abi.length === 0) throw new Error('Platform ABI unavailable.');
+      const rawId = String(els.availListing.value || '').trim();
+      if (!/^\d+$/.test(rawId)) throw new Error('Listing ID must be a whole number.');
+      const id = BigInt(rawId);
+      if (id === 0n) throw new Error('Listing ID must be at least 1.');
       const start = els.availStart.value;
       const end = els.availEnd.value;
       if (!start || !end) throw new Error('Select dates.');
       const sTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
       const eTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
       if (eTs <= sTs) throw new Error('End before start');
-      if (!r3ntAbi) {
-        r3ntAbi = await fetch('./js/abi/r3nt.json')
-          .then((r) => r.json())
-          .then((j) => j.abi);
-      }
-      const listing = await pub.readContract({
-        address: R3NT_ADDRESS,
-        abi: r3ntAbi,
-        functionName: 'getListing',
+      const listingAddr = await pub.readContract({
+        address: PLATFORM_ADDRESS,
+        abi,
+        functionName: 'listingById',
         args: [id],
       });
+      if (typeof listingAddr !== 'string' || /^0x0+$/i.test(listingAddr)) throw new Error('Listing not found.');
       const free = await pub.readContract({
-        address: bookingAddr,
-        abi: bookingAbi,
-        functionName: 'isFree',
-        args: [listing.vault, sTs, eTs],
+        address: REGISTRY_ADDRESS,
+        abi: REGISTRY_ABI,
+        functionName: 'isAvailable',
+        args: [listingAddr, sTs, eTs],
       });
       els.availResult.textContent = free ? 'Available' : 'Booked';
     } catch (e) {

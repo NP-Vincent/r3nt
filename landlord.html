@@ -90,6 +90,16 @@
   </div>
 
   <div class="row">
+    <label>Min booking notice (hours)
+      <input id="minNotice" value="24" inputmode="numeric">
+    </label>
+    <label>Booking window (days, 0 = none)
+      <input id="maxWindow" value="90" inputmode="numeric">
+    </label>
+  </div>
+  <div class="muted"><small>Adjust how soon and how far ahead tenants can reserve.</small></div>
+
+  <div class="row">
     <label>Daily (USDC)
       <input id="rateDaily"  value="0" inputmode="decimal">
     </label>
@@ -101,14 +111,14 @@
     </label>
   </div>
 
+  <label>Metadata URL (optional)
+    <input id="metadataUrl" placeholder="https://example.com/listing.json">
+  </label>
+  <div class="muted"><small>Leave blank to auto-generate an inline JSON metadata payload.</small></div>
+
   <div class="divider"></div>
 
-  <div class="muted">
-    <small class="mono">
-      Signers are fixed: landlord + platform (hidden).
-      <span id="signerMode" class="pill">2-of-2 (landlord + platform)</span>
-    </small>
-  </div>
+  <div class="muted"><small class="mono">Listings deploy via the Platform contract. Your wallet address becomes the landlord.</small></div>
 
   <button id="create" disabled>Create Listing</button>
   <div id="status"></div>
