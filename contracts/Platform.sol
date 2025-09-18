@@ -24,6 +24,11 @@ interface IListingFactory {
     ) external returns (address listing);
 }
 
+/// @dev Minimal interface exposed by the booking registry.
+interface IBookingRegistry {
+    function registerListing(address listing) external;
+}
+
 /**
  * @title Platform
  * @notice Holds global configuration for the r3nt protocol and orchestrates listing creation.
@@ -234,6 +239,8 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         );
         require(listing != address(0), "listing=0");
         require(!isListing[listing], "already registered");
+
+        IBookingRegistry(bookingRegistry).registerListing(listing);
 
         uint256 listingId = ++listingCount;
         isListing[listing] = true;
