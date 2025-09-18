@@ -242,7 +242,3 @@ operations.
 - **Client utilities** – the Mini App uses `tools.js` helpers to encode/decode geohashes,
   estimate cell sizes, normalise Farcaster cast hashes/URLs and assemble the Farcaster deep-link
   that corresponds to each listing’s stored `(fid, castHash)` pair.
-
-For historical context, the legacy contracts (`r3nt-ignore-deprecated.sol`, `r3nt-SQMU-ignore-deprecated.sol`, `Listing-ignore-deprecated.sol`,
-`RentDistribution-ignore-deprecated.sol`) can be referenced in the upstream repository, but the Clean-Slate
-architecture replaces them with the modular suite described above.
