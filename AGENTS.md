@@ -137,8 +137,3 @@ Key events to retain/emit: `BookingCreated`, `DepositSplitProposed`, `DepositRel
   functions to encode/decode them or estimate cell sizes when mapping properties.
 - **Square metre area** – capture `areaSqm` during listing creation to support sq.m-driven
   tokenisation strategies on future upgrades.
-
-## Reference Materials
-For legacy background, consult the historical contracts referenced in the Clean-Slate plan
-(`r3nt-ignore-deprecated.sol`, `r3nt-SQMU-ignore-deprecated.sol`, `Listing-ignore-deprecated.sol`, `RentDistribution-ignore-deprecated.sol`, `BookingRegistry-ignore-deprecated.sol`). The
-Clean-Slate architecture supersedes them with the modular suite described above.
