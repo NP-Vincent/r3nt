@@ -70,8 +70,14 @@
   clearBtn.textContent = 'Clear';
   styleButton(clearBtn);
 
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.textContent = 'Copy';
+  styleButton(copyBtn);
+
   controls.appendChild(toggleBtn);
   controls.appendChild(clearBtn);
+  controls.appendChild(copyBtn);
 
   header.appendChild(titleWrap);
   header.appendChild(controls);
@@ -84,8 +90,10 @@
 
   let collapsed = false;
   let entryCount = 0;
+  const entries = [];
   const queue = [];
   let attached = false;
+  let copyResetTimer = null;
 
   function updateCounter() {
     counter.textContent = `(${entryCount})`;
@@ -105,7 +113,83 @@
   clearBtn.addEventListener('click', () => {
     entryCount = 0;
     logList.innerHTML = '';
+    entries.length = 0;
+    queue.length = 0;
+    if (copyResetTimer) {
+      clearTimeout(copyResetTimer);
+      copyResetTimer = null;
+    }
+    copyBtn.textContent = 'Copy';
     updateCounter();
+  });
+
+  function entryToText(entry) {
+    const timeLabel = entry.time.toLocaleTimeString();
+    const messageText = entry.args.map(formatValue).join(' ');
+    if (messageText) {
+      return `[${timeLabel}] ${entry.type}\n${messageText}`;
+    }
+    return `[${timeLabel}] ${entry.type}`;
+  }
+
+  function resetCopyButton(text) {
+    if (copyResetTimer) {
+      clearTimeout(copyResetTimer);
+    }
+    copyResetTimer = setTimeout(() => {
+      copyBtn.textContent = 'Copy';
+      copyResetTimer = null;
+    }, 1500);
+    copyBtn.textContent = text;
+  }
+
+  function legacyCopy(text) {
+    if (!document.body) {
+      return false;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.cssText = 'position:absolute;left:-9999px;top:auto;width:1px;height:1px;opacity:0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    if (typeof textarea.setSelectionRange === 'function') {
+      textarea.setSelectionRange(0, text.length);
+    }
+    let success = false;
+    try {
+      success = document.execCommand('copy');
+    } catch (err) {
+      success = false;
+    }
+    document.body.removeChild(textarea);
+    return success;
+  }
+
+  async function copyEntriesToClipboard() {
+    const text = entries.map(entryToText).join('\n\n');
+    if (!text) {
+      resetCopyButton('No logs');
+      return;
+    }
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+        resetCopyButton('Copied!');
+        return;
+      }
+    } catch (err) {
+      // fall through to legacy path on error
+    }
+    if (legacyCopy(text)) {
+      resetCopyButton('Copied!');
+      return;
+    }
+    resetCopyButton('Copy failed');
+  }
+
+  copyBtn.addEventListener('click', () => {
+    copyEntriesToClipboard();
   });
 
   function ensureAttached() {
@@ -190,6 +274,7 @@
   function addEntry(type, argsLike) {
     const args = Array.prototype.slice.call(argsLike ?? []);
     const payload = { type, args, time: new Date() };
+    entries.push(payload);
     entryCount += 1;
     updateCounter();
     if (!attached) {
