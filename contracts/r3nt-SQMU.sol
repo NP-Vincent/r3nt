@@ -45,14 +45,7 @@ contract R3ntSQMU is
     /// @dev Tracks whether transfers are locked for a given booking tokenId.
     mapping(uint256 => bool) private _transferLocked;
 
-    /// @notice Initialization arguments for the r3nt-SQMU token.
-    struct InitializeParams {
-        address owner; // Platform multi-sig controlling upgrades/configuration
-        address platform; // Platform contract allowed to manage listing minters
-        string baseURI; // Metadata URI template (expects {id} replacement)
-    }
-
-    event R3ntSQMUInitialized(address indexed owner, address indexed platform, string uri);
+    event R3ntSQMUInitialized(address indexed owner, address indexed platform, string baseURI);
     event PlatformUpdated(address indexed previousPlatform, address indexed newPlatform);
     event BaseURISet(string uri);
     event ListingMinterGranted(address indexed listing, address indexed caller);
@@ -66,15 +59,17 @@ contract R3ntSQMU is
 
     /**
      * @notice Initialize the r3nt-SQMU token with admin authority and metadata URI template.
-     * @param params Struct bundling initial configuration values.
+     * @param owner_ Platform multi-sig controlling upgrades/configuration.
+     * @param initialPlatform Platform contract allowed to manage listing minters (zero to disable).
+     * @param baseURI Metadata URI template using the standard ERC-1155 `{id}` replacement.
      */
-    function initialize(InitializeParams calldata params) external initializer {
-        require(params.owner != address(0), "owner=0");
+    function initialize(address owner_, address initialPlatform, string calldata baseURI) external initializer {
+        require(owner_ != address(0), "owner=0");
 
-        __ERC1155_init(params.baseURI);
+        __ERC1155_init(baseURI);
         __ERC1155Supply_init();
         __AccessControl_init();
-        __Ownable_init(params.owner);
+        __Ownable_init(owner_);
         __UUPSUpgradeable_init();
 
         name = _DEFAULT_NAME;
@@ -82,17 +77,16 @@ contract R3ntSQMU is
 
         _setRoleAdmin(MINTER_ROLE, MANAGER_ROLE);
 
-        _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
-        _grantRole(MANAGER_ROLE, params.owner);
+        _grantRole(DEFAULT_ADMIN_ROLE, owner_);
+        _grantRole(MANAGER_ROLE, owner_);
 
-        address initialPlatform = params.platform;
         if (initialPlatform != address(0)) {
             platform = initialPlatform;
             _grantRole(MANAGER_ROLE, initialPlatform);
             emit PlatformUpdated(address(0), initialPlatform);
         }
 
-        emit R3ntSQMUInitialized(params.owner, initialPlatform, params.baseURI);
+        emit R3ntSQMUInitialized(owner_, initialPlatform, baseURI);
     }
 
     // -------------------------------------------------
