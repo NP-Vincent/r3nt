@@ -5,6 +5,23 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
+/// @dev Minimal interface exposed by the listing factory.
+interface IListingFactory {
+    function createListing(
+        address landlord,
+        uint256 fid,
+        bytes32 castHash,
+        bytes32 geohash,
+        uint8 geohashPrecision,
+        uint32 areaSqm,
+        uint256 baseDailyRate,
+        uint256 depositAmount,
+        uint64 minBookingNotice,
+        uint64 maxBookingWindow,
+        string calldata metadataURI
+    ) external returns (address listing);
+}
+
 /**
  * @title Platform
  * @notice Holds global configuration for the r3nt protocol and orchestrates listing creation.
@@ -17,23 +34,6 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     /// @dev Number of decimals expected from the USDC token (informational helper).
     uint8 public constant USDC_DECIMALS = 6;
-
-    /// @dev Minimal interface exposed by the listing factory.
-    interface IListingFactory {
-        function createListing(
-            address landlord,
-            uint256 fid,
-            bytes32 castHash,
-            bytes32 geohash,
-            uint8 geohashPrecision,
-            uint32 areaSqm,
-            uint256 baseDailyRate,
-            uint256 depositAmount,
-            uint64 minBookingNotice,
-            uint64 maxBookingWindow,
-            string calldata metadataURI
-        ) external returns (address listing);
-    }
 
     // -------------------------------------------------
     // Storage
