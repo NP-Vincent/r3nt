@@ -1,0 +1,500 @@
+import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
+import { arbitrum } from 'https://esm.sh/viem/chains';
+import { bytes32ToCastHash, buildFarcasterCastUrl } from './tools.js';
+import {
+  RPC_URL,
+  REGISTRY_ADDRESS,
+  REGISTRY_ABI,
+  PLATFORM_ADDRESS,
+  PLATFORM_ABI,
+  LISTING_ABI,
+  USDC_ADDRESS,
+  APP_VERSION,
+} from './config.js';
+
+(async () => { try { await sdk.actions.ready(); } catch {} setTimeout(()=>{ try { sdk.actions.ready(); } catch {} }, 800); })();
+
+const els = {
+  connect: document.getElementById('connect'),
+  buy: document.getElementById('buy'),
+  addr: document.getElementById('address'),
+  status: document.getElementById('status'),
+  listings: document.getElementById('listings'),
+  start: document.getElementById('startDate'),
+  end: document.getElementById('endDate'),
+};
+
+const setVersionBadge = () => {
+  const badge = document.querySelector('[data-version]');
+  if (badge) badge.textContent = `Build ${APP_VERSION}`;
+};
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', setVersionBadge);
+} else {
+  setVersionBadge();
+}
+
+const ARBITRUM_HEX = '0xa4b1';           // 42161
+const USDC_SCALAR = 1_000_000n;
+const SECONDS_PER_DAY = 86_400n;
+
+const supportsViewPassPurchase = PLATFORM_ABI.some(
+  (item) => item?.type === 'function' && item?.name === 'buyViewPass'
+);
+
+function formatUsdc(amount) {
+  const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
+  const negative = value < 0n;
+  const abs = negative ? -value : value;
+  const units = abs / USDC_SCALAR;
+  const fraction = (abs % USDC_SCALAR).toString().padStart(6, '0').replace(/0+$/, '');
+  return `${negative ? '-' : ''}${units.toString()}${fraction ? '.' + fraction : ''}`;
+}
+
+function decodeBytes32ToString(value, precision) {
+  const hex = typeof value === 'string' ? value : '';
+  if (!hex || hex === '0x' || /^0x0+$/i.test(hex)) {
+    return '';
+  }
+  let out = '';
+  for (let i = 2; i < hex.length; i += 2) {
+    const code = parseInt(hex.slice(i, i + 2), 16);
+    if (!Number.isFinite(code) || code <= 0) break;
+    out += String.fromCharCode(code);
+  }
+  const limit = typeof precision === 'number' && Number.isFinite(precision) ? precision : undefined;
+  if (limit && limit > 0 && out.length > limit) {
+    return out.slice(0, limit);
+  }
+  return out;
+}
+
+function formatDuration(seconds) {
+  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
+  if (value <= 0n) return 'None';
+  const totalSeconds = Number(value);
+  if (!Number.isFinite(totalSeconds)) return `${value} sec`;
+  const days = Math.floor(totalSeconds / 86400);
+  const remainder = totalSeconds % 86400;
+  if (days > 0 && remainder === 0) {
+    return `${days} day${days === 1 ? '' : 's'}`;
+  }
+  if (days > 0) {
+    const hours = Math.round(remainder / 3600);
+    if (hours === 0) {
+      return `${days} day${days === 1 ? '' : 's'}`;
+    }
+    return `${days} day${days === 1 ? '' : 's'} ${hours} h`;
+  }
+  const hoursOnly = Math.max(1, Math.round(totalSeconds / 3600));
+  return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
+}
+
+function calculateRent(baseDailyRate, startTs, endTs) {
+  const rate = typeof baseDailyRate === 'bigint' ? baseDailyRate : BigInt(baseDailyRate || 0);
+  const start = typeof startTs === 'bigint' ? startTs : BigInt(startTs || 0);
+  const end = typeof endTs === 'bigint' ? endTs : BigInt(endTs || 0);
+  if (end <= start) return 0n;
+  let duration = end - start;
+  let days = (duration + SECONDS_PER_DAY - 1n) / SECONDS_PER_DAY;
+  if (days === 0n) days = 1n;
+  return rate * days;
+}
+
+let inHost = false; try { inHost = await sdk.isInMiniApp(); } catch {}
+els.status.textContent = inHost ? 'Tap Connect to continue.' : 'Viewing only. Open from a Farcaster Mini App embed.';
+
+async function hostSupportsWallet(){ try { const caps = await sdk.getCapabilities?.(); return !caps || caps.includes('wallet.getEthereumProvider'); } catch { return true; } }
+
+let provider; async function getProvider(){ if (!provider) provider = await sdk.wallet.getEthereumProvider(); return provider; }
+
+async function ensureArbitrum(p){ const id = await p.request({ method:'eth_chainId' }); if (id !== ARBITRUM_HEX) { try { await p.request({ method:'wallet_switchEthereumChain', params:[{ chainId: ARBITRUM_HEX }] }); } catch { try { await p.request({ method:'wallet_addEthereumChain', params:[{ chainId: ARBITRUM_HEX, chainName:'Arbitrum One', nativeCurrency:{ name:'Ether', symbol:'ETH', decimals:18 }, rpcUrls:['https://arb1.arbitrum.io/rpc'], blockExplorerUrls:['https://arbiscan.io'] }] }); } catch {} } } }
+
+function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
+
+let pub;
+let viewPassPrice;
+let configLoading;
+
+function updateBuyLabel() {
+  if (typeof viewPassPrice === 'bigint') {
+    els.buy.textContent = `Buy View Pass (${formatUsdc(viewPassPrice)} USDC)`;
+  } else {
+    els.buy.textContent = 'Buy View Pass';
+  }
+}
+
+async function loadConfig(){
+  if (configLoading) {
+    await configLoading;
+    return;
+  }
+  if (pub) {
+    if (typeof viewPassPrice !== 'bigint') {
+      try {
+        const price = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' });
+        if (typeof price === 'bigint') {
+          viewPassPrice = price;
+        }
+        updateBuyLabel();
+      } catch (err) {
+        console.error('Failed to load view pass price', err);
+      }
+    }
+    return;
+  }
+  configLoading = (async () => {
+    pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
+    try {
+      const price = await pub
+        .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' })
+        .catch((err) => {
+          console.error('Failed to load view pass price', err);
+          return undefined;
+        });
+      if (typeof price === 'bigint') {
+        viewPassPrice = price;
+      }
+    } catch (err) {
+      console.error('Configuration load failed', err);
+    }
+    updateBuyLabel();
+  })();
+  try {
+    await configLoading;
+  } finally {
+    configLoading = null;
+  }
+}
+
+async function openCast(fid, hash32, fallbackUrl){
+  const cast20 = bytes32ToCastHash(hash32);
+  try {
+    await sdk.actions.viewCast({ hash: cast20 });
+  } catch {
+    // fallback: open in Warpcast via the generated profile-aware URL
+    window.open(fallbackUrl, '_blank');
+  }
+}
+
+async function fetchListingInfo(listingAddr){
+  if (!pub) {
+    await loadConfig();
+  }
+  try {
+    const responses = await pub.multicall({
+      contracts: [
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'fid' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'castHash' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'baseDailyRate' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'depositAmount' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'areaSqm' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'metadataURI' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'minBookingNotice' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'maxBookingWindow' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'geohash' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'geohashPrecision' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'landlord' },
+      ],
+      allowFailure: true,
+    });
+    const getBig = (idx, fallback = 0n) => {
+      const entry = responses[idx];
+      if (!entry || entry.status !== 'success') return fallback;
+      const res = entry.result;
+      try { return typeof res === 'bigint' ? res : BigInt(res || 0); } catch { return fallback; }
+    };
+    const getString = (idx, fallback = '') => {
+      const entry = responses[idx];
+      if (!entry || entry.status !== 'success') return fallback;
+      return entry.result ?? fallback;
+    };
+    const fid = getBig(0);
+    const castHash = getString(1, '0x0000000000000000000000000000000000000000000000000000000000000000');
+    const baseDailyRate = getBig(2);
+    const depositAmount = getBig(3);
+    const areaSqm = Number(getBig(4));
+    const metadataURI = getString(5, '') || '';
+    const minBookingNotice = getBig(6);
+    const maxBookingWindow = getBig(7);
+    const geohashHex = getString(8, '0x');
+    const geohashPrecision = Number(getBig(9));
+    const landlord = getString(10, '0x0000000000000000000000000000000000000000');
+    const geohash = decodeBytes32ToString(geohashHex, Number.isFinite(geohashPrecision) ? geohashPrecision : undefined);
+    return {
+      address: listingAddr,
+      fid,
+      castHash,
+      baseDailyRate,
+      depositAmount,
+      areaSqm,
+      metadataURI,
+      minBookingNotice,
+      maxBookingWindow,
+      geohash,
+      geohashPrecision,
+      landlord,
+    };
+  } catch (err) {
+    console.error('Failed to load listing info', listingAddr, err);
+    return null;
+  }
+}
+
+function renderListingCard(info){
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const title = document.createElement('div');
+  title.textContent = `Listing ${short(info.address)}`;
+  card.appendChild(title);
+
+  const landlordLine = document.createElement('div');
+  landlordLine.textContent = `Landlord: ${short(info.landlord)}`;
+  card.appendChild(landlordLine);
+
+  const fidLine = document.createElement('div');
+  fidLine.textContent = info.fid > 0n ? `Landlord FID: ${info.fid.toString()}` : 'Landlord FID: —';
+  card.appendChild(fidLine);
+
+  const rateLine = document.createElement('div');
+  rateLine.textContent = `Base rate: ${formatUsdc(info.baseDailyRate)} USDC / day`;
+  card.appendChild(rateLine);
+
+  const depositLine = document.createElement('div');
+  depositLine.textContent = `Security deposit: ${formatUsdc(info.depositAmount)} USDC`;
+  card.appendChild(depositLine);
+
+  if (Number.isFinite(info.areaSqm) && info.areaSqm > 0) {
+    const areaLine = document.createElement('div');
+    areaLine.textContent = `Area: ${info.areaSqm} m²`;
+    card.appendChild(areaLine);
+  }
+
+  const noticeLine = document.createElement('div');
+  const minNoticeText = formatDuration(info.minBookingNotice);
+  const maxWindowText = info.maxBookingWindow > 0n ? formatDuration(info.maxBookingWindow) : 'Unlimited';
+  noticeLine.textContent = `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`;
+  card.appendChild(noticeLine);
+
+  if (info.geohash) {
+    const geoLine = document.createElement('div');
+    geoLine.textContent = `Geohash: ${info.geohash}`;
+    card.appendChild(geoLine);
+  }
+
+  if (info.metadataURI) {
+    const metaLink = document.createElement('a');
+    metaLink.href = info.metadataURI;
+    metaLink.target = '_blank';
+    metaLink.rel = 'noopener';
+    metaLink.textContent = 'Metadata';
+    metaLink.className = 'listing-link';
+    card.appendChild(metaLink);
+  }
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  const btnBook = document.createElement('button');
+  btnBook.textContent = 'Book';
+  btnBook.onclick = () => bookListing(info);
+  row.appendChild(btnBook);
+  card.appendChild(row);
+
+  const farcasterUrl = buildFarcasterCastUrl(info.fid, info.castHash);
+  const viewLink = document.createElement('a');
+  viewLink.href = farcasterUrl;
+  viewLink.target = '_blank';
+  viewLink.rel = 'noopener';
+  viewLink.textContent = 'View full details on Farcaster';
+  viewLink.className = 'listing-link';
+  viewLink.onclick = (ev) => {
+    ev.preventDefault();
+    openCast(info.fid, info.castHash, farcasterUrl);
+  };
+  card.appendChild(viewLink);
+
+  return card;
+}
+
+async function loadListings(){
+  await loadConfig();
+  els.listings.textContent = 'Loading listings…';
+  let addresses;
+  try {
+    const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allListings' });
+    addresses = Array.isArray(result) ? result : [];
+  } catch (err) {
+    console.error('Failed to load listing addresses', err);
+    els.listings.textContent = 'Unable to load listings.';
+    return;
+  }
+  const cleaned = addresses.filter((addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr) && !/^0x0+$/.test(addr));
+  if (!cleaned.length) {
+    els.listings.textContent = 'No active listings.';
+    return;
+  }
+  const infos = await Promise.all(cleaned.map((addr) => fetchListingInfo(addr)));
+  const valid = infos.filter(Boolean);
+  els.listings.innerHTML = '';
+  if (!valid.length) {
+    els.listings.textContent = 'No active listings.';
+    return;
+  }
+  for (const info of valid) {
+    els.listings.appendChild(renderListingCard(info));
+  }
+}
+
+async function bookListing(listing){
+  try {
+    const p = await getProvider();
+    const [from] = await p.request({ method: 'eth_accounts' }) || [];
+    if (!from) throw new Error('No wallet account connected.');
+    await ensureArbitrum(p);
+    await loadConfig();
+
+    const start = els.start.value;
+    const end = els.end.value;
+    if (!start || !end) throw new Error('Select start and end dates.');
+    const startTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
+    const endTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
+    if (endTs <= startTs) throw new Error('End date must be after start.');
+    const nowTs = BigInt(Math.floor(Date.now() / 1000));
+    if (listing.minBookingNotice > 0n && startTs < nowTs + listing.minBookingNotice) {
+      throw new Error(`Start must respect the ${formatDuration(listing.minBookingNotice)} minimum notice.`);
+    }
+    if (listing.maxBookingWindow > 0n && startTs > nowTs + listing.maxBookingWindow) {
+      throw new Error(`Start beyond allowed booking window (${formatDuration(listing.maxBookingWindow)}).`);
+    }
+
+    const available = await pub.readContract({
+      address: REGISTRY_ADDRESS,
+      abi: REGISTRY_ABI,
+      functionName: 'isAvailable',
+      args: [listing.address, startTs, endTs],
+    });
+    if (!available) {
+      els.status.textContent = 'Selected dates not available.';
+      return;
+    }
+
+    const rent = calculateRent(listing.baseDailyRate, startTs, endTs);
+    const deposit = typeof listing.depositAmount === 'bigint' ? listing.depositAmount : BigInt(listing.depositAmount || 0);
+
+    const calls = [];
+    let approveData;
+    if (deposit > 0n) {
+      approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [listing.address, deposit] });
+      calls.push({ to: USDC_ADDRESS, data: approveData });
+    }
+
+    const bookData = encodeFunctionData({ abi: LISTING_ABI, functionName: 'book', args: [startTs, endTs] });
+    calls.push({ to: listing.address, data: bookData });
+
+    const depositMsg = deposit > 0n ? `${formatUsdc(deposit)} USDC deposit` : 'no deposit';
+    const rentMsg = rent > 0n ? `${formatUsdc(rent)} USDC rent` : '0 USDC rent';
+    els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}).`;
+
+    try {
+      await p.request({ method:'wallet_sendCalls', params:[{ calls }] });
+    } catch {
+      try {
+        await p.request({ method:'wallet_sendCalls', params: calls });
+      } catch {
+        if (deposit > 0n && approveData) {
+          await p.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
+        }
+        await p.request({ method:'eth_sendTransaction', params:[{ from, to: listing.address, data: bookData }] });
+      }
+    }
+
+    els.status.textContent = 'Booking submitted.';
+    alert('Booking transaction sent!');
+  } catch (e) {
+    console.error(e);
+    els.status.textContent = `Error: ${e?.message || e}`;
+  }
+}
+
+async function checkViewPass(){
+  try {
+    await loadConfig();
+    if (typeof viewPassPrice === 'bigint' && viewPassPrice > 0n) {
+      els.status.textContent = `View pass price: ${formatUsdc(viewPassPrice)} USDC.`;
+    } else {
+      els.status.textContent = 'View pass not required.';
+    }
+    await loadListings();
+  } catch (e) {
+    console.error(e);
+    els.status.textContent = 'Unable to load listings.';
+  }
+}
+
+// ——— Connect ———
+els.connect.onclick = async () => {
+  try {
+    if (!inHost) { els.status.textContent = 'Open in Farcaster app to connect wallet.'; return; }
+    if (!(await hostSupportsWallet())) { els.status.textContent = 'This client does not support wallets for Mini Apps.'; return; }
+    const p = await getProvider();
+    await p.request({ method: 'eth_requestAccounts' });
+    const [addr] = await p.request({ method: 'eth_accounts' });
+    if (!addr) throw new Error('No account found.');
+    await ensureArbitrum(p);
+    els.addr.textContent = `Connected: ${short(addr)}`;
+    els.connect.textContent = `Connected ${short(addr)}`;
+    els.connect.style.background = '#10b981';
+    els.buy.disabled = !supportsViewPassPurchase;
+    els.status.textContent = 'Ready.';
+    await checkViewPass();
+  } catch (e) { console.error(e); els.status.textContent = e?.message || 'Wallet connection failed.'; }
+};
+
+// ——— Buy pass ———
+els.buy.onclick = async () => {
+  try {
+    if (!supportsViewPassPurchase) {
+      els.status.textContent = 'View pass purchase is not supported in this deployment.';
+      return;
+    }
+    const p = await getProvider();
+    const [from] = await p.request({ method: 'eth_accounts' }) || [];
+    if (!from) throw new Error('No wallet account connected.');
+    await ensureArbitrum(p);
+    await loadConfig();
+    const price = typeof viewPassPrice === 'bigint' ? viewPassPrice : 0n;
+    if (typeof viewPassPrice !== 'bigint') {
+      console.warn('View pass price unavailable, defaulting to 0.');
+    }
+    let approveData;
+    const calls = [];
+    if (price > 0n) {
+      approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [PLATFORM_ADDRESS, price] });
+      calls.push({ to: USDC_ADDRESS, data: approveData });
+    }
+    const buyData = encodeFunctionData({ abi: PLATFORM_ABI, functionName: 'buyViewPass', args: [] });
+    calls.push({ to: PLATFORM_ADDRESS, data: buyData });
+    els.status.textContent = price > 0n ? 'Approving & purchasing…' : 'Purchasing view pass…';
+    try {
+      await p.request({ method:'wallet_sendCalls', params:[{ calls }] });
+    } catch {
+      try {
+        await p.request({ method:'wallet_sendCalls', params: calls });
+      } catch {
+        if (price > 0n && approveData) {
+          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+        }
+        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: PLATFORM_ADDRESS, data: buyData }] });
+      }
+    }
+      els.status.textContent = 'Success. View pass purchased.';
+      alert('View pass purchased!');
+      await checkViewPass();
+  } catch (err) { console.error(err); els.status.textContent = `Error: ${err?.message || err}`; }
+};
+
+loadConfig().catch((err) => console.error('Initial config load failed', err));
+
