@@ -6,6 +6,7 @@ import {
   R3NT_ADDRESS,
   USDC_ADDRESS,
   PLATFORM_ADDRESS,
+  PLATFORM_ABI,
   RPC_URL,
   REGISTRY_ADDRESS,
   APP_VERSION,
@@ -14,6 +15,7 @@ import {
 // -------------------- Config --------------------
 const ARBITRUM_HEX = '0xa4b1';
 const USDC_DECIMALS = 6;
+const USDC_SCALAR = 1_000_000n;
 
 // 2-of-2 cosigners (landlord + platform)
 const PLATFORM_SIGNER = PLATFORM_ADDRESS;
@@ -43,6 +45,9 @@ const erc20Abi = [
   },
 ];
 let r3ntAbi, bookingAbi, bookingAddr;
+let platformAbi = Array.isArray(PLATFORM_ABI) && PLATFORM_ABI.length ? PLATFORM_ABI : null;
+let listingPriceCache;
+let listingPriceLoading;
 
 // -------------------- UI handles --------------------
 const els = {
@@ -68,6 +73,15 @@ const els = {
   availResult: document.getElementById('availResult'),
 };
 const info = (t) => (els.status.textContent = t);
+
+function formatUsdc(amount) {
+  const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
+  const negative = value < 0n;
+  const abs = negative ? -value : value;
+  const units = abs / USDC_SCALAR;
+  const fraction = (abs % USDC_SCALAR).toString().padStart(6, '0').replace(/0+$/, '');
+  return `${negative ? '-' : ''}${units.toString()}${fraction ? '.' + fraction : ''}`;
+}
 
 const setVersionBadge = () => {
   const badge = document.querySelector('[data-version]');
@@ -123,6 +137,68 @@ function disableWhile(el, fn) {
   })();
 }
 
+async function loadPlatformAbi() {
+  if (Array.isArray(platformAbi) && platformAbi.length > 0) {
+    return platformAbi;
+  }
+  try {
+    const response = await fetch('./js/abi/Platform.json');
+    if (response.ok) {
+      const json = await response.json();
+      if (Array.isArray(json?.abi) && json.abi.length > 0) {
+        platformAbi = json.abi;
+        return platformAbi;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load Platform ABI', err);
+  }
+  if (!Array.isArray(platformAbi) || platformAbi.length === 0) {
+    platformAbi = Array.isArray(PLATFORM_ABI) && PLATFORM_ABI.length ? PLATFORM_ABI : [];
+  }
+  return platformAbi;
+}
+
+async function getListingPrice() {
+  if (typeof listingPriceCache === 'bigint') {
+    return listingPriceCache;
+  }
+  if (listingPriceLoading) {
+    return listingPriceLoading;
+  }
+  listingPriceLoading = (async () => {
+    const abi = await loadPlatformAbi();
+    if (!Array.isArray(abi) || abi.length === 0) {
+      throw new Error('Platform ABI unavailable');
+    }
+    const price = await pub.readContract({
+      address: PLATFORM_ADDRESS,
+      abi,
+      functionName: 'listingCreationFee',
+    });
+    if (typeof price !== 'bigint') {
+      throw new Error('Unexpected listing price response');
+    }
+    listingPriceCache = price;
+    return price;
+  })();
+  try {
+    return await listingPriceLoading;
+  } finally {
+    listingPriceLoading = null;
+  }
+}
+
+async function refreshListingPriceDisplay() {
+  try {
+    const price = await getListingPrice();
+    els.feeInfo.textContent = `Listing price: ${formatUsdc(price)} USDC`;
+  } catch (err) {
+    console.error('Failed to load listing price', err);
+    els.feeInfo.textContent = 'Listing price: (unavailable)';
+  }
+}
+
 async function loadBooking() {
   if (!bookingAbi) {
     bookingAbi = await fetch('./js/abi/BookingRegistry.json')
@@ -141,6 +217,9 @@ const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'ht
   try {
     await sdk.actions.ready();
   } catch {}
+
+  await refreshListingPriceDisplay();
+
   try {
     const { token } = await sdk.quickAuth.getToken();
     const [, payloadB64] = token.split('.');
@@ -150,17 +229,6 @@ const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'ht
   } catch (e) {
     els.contextBar.textContent = 'QuickAuth failed. Open this inside a Farcaster client.';
     return;
-  }
-
-  try {
-    r3ntAbi = await fetch('./js/abi/r3nt.json')
-      .then((r) => r.json())
-      .then((j) => j.abi);
-    const fee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
-    const feeNum = Number(fee) / 1e6;
-    els.feeInfo.textContent = `List fee: ${feeNum % 1 === 0 ? feeNum.toFixed(0) : feeNum.toFixed(6)} USDC`;
-  } catch {
-    els.feeInfo.textContent = 'List fee: (unavailable)';
   }
 
   els.connect.disabled = false;
@@ -238,7 +306,7 @@ els.create.onclick = () =>
           .then((r) => r.json())
           .then((j) => j.abi);
       }
-      const listFee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
+      const listingPrice = await getListingPrice();
 
       // 1) Compose the landlord's canonical cast and capture the hash
       info('Open composer… Post your listing cast.');
@@ -272,16 +340,20 @@ els.create.onclick = () =>
       const signersBytes = [encodeErc7913Ecdsa(landlordAddr), encodeErc7913Ecdsa(PLATFORM_SIGNER)];
       const threshold = 2n;
 
-      // 3) Approve list fee if needed
+      // 3) Approve listing price if needed
       const cur = await pub.readContract({
         address: USDC_ADDRESS,
         abi: erc20Abi,
         functionName: 'allowance',
         args: [landlordAddr, R3NT_ADDRESS],
       });
-      if (cur < listFee) {
-        info('Approving USDC list fee…');
-        const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [R3NT_ADDRESS, listFee] });
+      if (cur < listingPrice) {
+        info('Approving USDC listing price…');
+        const approveData = encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [R3NT_ADDRESS, listingPrice],
+        });
         await provider.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
       }
 
