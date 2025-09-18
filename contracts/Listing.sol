@@ -373,9 +373,9 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         }
 
         uint256 grossRent = _calculateRent(start, end);
-        (uint16 tenantFeeBps, uint16 landlordFeeBps) = Platform(platform).fees();
+        (, uint16 landlordFeeBps) = Platform(platform).fees();
         uint256 landlordFeeAmount = (grossRent * landlordFeeBps) / BPS_DENOMINATOR;
-        uint256 expectedNetRent = grossRent - landlordFeeAmount;
+        uint256 expectedNetRentAmount = grossRent - landlordFeeAmount;
 
         bookingId = ++nextBookingId;
         Booking storage booking = _bookings[bookingId];
@@ -396,7 +396,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         booking.accRentPerSqmu = 0;
 
         _grossRentPaid[bookingId] = 0;
-        _expectedNetRent[bookingId] = expectedNetRent;
+        _expectedNetRent[bookingId] = expectedNetRentAmount;
 
         uint256 deposit = depositAmount;
         if (deposit > 0) {
@@ -405,7 +405,15 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
 
         IBookingRegistry(bookingRegistry).reserve(start, end);
 
-        emit BookingCreated(bookingId, msg.sender, start, end, grossRent, expectedNetRent, deposit);
+        emit BookingCreated(
+            bookingId,
+            msg.sender,
+            start,
+            end,
+            grossRent,
+            expectedNetRentAmount,
+            deposit
+        );
     }
 
     /**
