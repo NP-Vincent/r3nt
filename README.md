@@ -195,7 +195,7 @@ to the proxy constructor and should **not** be interacted with directly afterwar
 1. Expand the freshly deployed implementation in the **Deployed Contracts** list.
 2. Fill in the `initialize` arguments in the exact order expected by each module:
    - `Platform.initialize(owner, treasury, usdc, listingFactory, bookingRegistry, sqmuToken,
-     tenantFeeBps, landlordFeeBps, listingCreationFee, viewPassPrice)`
+     tenantFeeBps, landlordFeeBps, listingCreationFee, viewPassPrice, viewPassDuration)`
    - `ListingFactory.initialize(owner, temporaryPlatform, listingImplementation)`
    - `BookingRegistry.initialize(owner, temporaryPlatform)`
    - `R3ntSQMU.initialize(owner, temporaryPlatform, baseURI)`

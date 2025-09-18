@@ -92,6 +92,25 @@ function formatDuration(seconds) {
   return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
 }
 
+function formatTimestamp(seconds) {
+  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
+  if (value <= 0n) return '';
+  let asNumber;
+  try {
+    asNumber = Number(value);
+  } catch {
+    return `Unix ${value}`;
+  }
+  if (!Number.isFinite(asNumber) || Number.isNaN(asNumber)) {
+    return `Unix ${value}`;
+  }
+  const date = new Date(asNumber * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return `Unix ${value}`;
+  }
+  return date.toUTCString();
+}
+
 function calculateRent(baseDailyRate, startTs, endTs) {
   const rate = typeof baseDailyRate === 'bigint' ? baseDailyRate : BigInt(baseDailyRate || 0);
   const start = typeof startTs === 'bigint' ? startTs : BigInt(startTs || 0);
@@ -116,14 +135,18 @@ function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
 let pub;
 let viewPassPrice;
+let viewPassDuration;
 let configLoading;
 
 function updateBuyLabel() {
+  const parts = [];
   if (typeof viewPassPrice === 'bigint') {
-    els.buy.textContent = `Buy View Pass (${formatUsdc(viewPassPrice)} USDC)`;
-  } else {
-    els.buy.textContent = 'Buy View Pass';
+    parts.push(`${formatUsdc(viewPassPrice)} USDC`);
   }
+  if (typeof viewPassDuration === 'bigint' && viewPassDuration > 0n) {
+    parts.push(formatDuration(viewPassDuration));
+  }
+  els.buy.textContent = parts.length ? `Buy View Pass (${parts.join(' / ')})` : 'Buy View Pass';
 }
 
 async function loadConfig(){
@@ -131,31 +154,30 @@ async function loadConfig(){
     await configLoading;
     return;
   }
-  if (pub) {
-    if (typeof viewPassPrice !== 'bigint') {
-      try {
-        const price = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' });
-        if (typeof price === 'bigint') {
-          viewPassPrice = price;
-        }
-        updateBuyLabel();
-      } catch (err) {
-        console.error('Failed to load view pass price', err);
-      }
-    }
-    return;
-  }
   configLoading = (async () => {
-    pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
+    if (!pub) {
+      pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
+    }
     try {
-      const price = await pub
-        .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' })
-        .catch((err) => {
-          console.error('Failed to load view pass price', err);
-          return undefined;
-        });
+      const [price, duration] = await Promise.all([
+        pub
+          .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' })
+          .catch((err) => {
+            console.error('Failed to load view pass price', err);
+            return undefined;
+          }),
+        pub
+          .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassDuration' })
+          .catch((err) => {
+            console.error('Failed to load view pass duration', err);
+            return undefined;
+          }),
+      ]);
       if (typeof price === 'bigint') {
         viewPassPrice = price;
+      }
+      if (typeof duration === 'bigint') {
+        viewPassDuration = duration;
       }
     } catch (err) {
       console.error('Configuration load failed', err);
@@ -356,6 +378,20 @@ async function bookListing(listing){
     await ensureArbitrum(p);
     await loadConfig();
 
+    const duration = typeof viewPassDuration === 'bigint' ? viewPassDuration : 0n;
+    if (supportsViewPassPurchase && duration > 0n) {
+      const active = await pub
+        .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'hasActiveViewPass', args: [from] })
+        .catch((err) => {
+          console.error('Failed to verify view pass before booking', err);
+          return true;
+        });
+      if (!active) {
+        els.status.textContent = 'Purchase a view pass before booking.';
+        return;
+      }
+    }
+
     const start = els.start.value;
     const end = els.end.value;
     if (!start || !end) throw new Error('Select start and end dates.');
@@ -422,15 +458,67 @@ async function bookListing(listing){
 async function checkViewPass(){
   try {
     await loadConfig();
-    if (typeof viewPassPrice === 'bigint' && viewPassPrice > 0n) {
-      els.status.textContent = `View pass price: ${formatUsdc(viewPassPrice)} USDC.`;
-    } else {
-      els.status.textContent = 'View pass not required.';
+
+    if (!supportsViewPassPurchase) {
+      els.buy.disabled = true;
+      els.status.textContent = 'View pass purchase is not supported in this deployment.';
+      await loadListings();
+      return;
     }
+
+    const duration = typeof viewPassDuration === 'bigint' ? viewPassDuration : 0n;
+    if (duration === 0n) {
+      els.buy.disabled = true;
+      els.status.textContent = 'View pass not required.';
+      await loadListings();
+      return;
+    }
+
+    els.buy.disabled = false;
+
+    const p = await getProvider();
+    const [addr] = (await p.request({ method: 'eth_accounts' })) || [];
+    if (!addr) {
+      els.status.textContent = 'Connect wallet to verify your view pass status.';
+      await loadListings();
+      return;
+    }
+
+    const [expiryRaw, activeRaw] = await Promise.all([
+      pub
+        .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassExpiry', args: [addr] })
+        .catch((err) => {
+          console.error('Failed to load view pass expiry', err);
+          return 0n;
+        }),
+      pub
+        .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'hasActiveViewPass', args: [addr] })
+        .catch((err) => {
+          console.error('Failed to load view pass status', err);
+          return true;
+        }),
+    ]);
+
+    const expiry = typeof expiryRaw === 'bigint' ? expiryRaw : BigInt(expiryRaw || 0);
+    const active = Boolean(activeRaw);
+    const now = BigInt(Math.floor(Date.now() / 1000));
+
+    if (active) {
+      const remaining = expiry > now ? expiry - now : 0n;
+      const remainingLabel = remaining > 0n ? formatDuration(remaining) : 'Expiring soon';
+      const expiresAt = formatTimestamp(expiry);
+      els.status.textContent = `View pass active (${remainingLabel}${expiresAt ? `, expires ${expiresAt}` : ''}).`;
+    } else {
+      const expiredAt = expiry > 0n ? formatTimestamp(expiry) : '';
+      const priceLabel = typeof viewPassPrice === 'bigint' && viewPassPrice > 0n ? `${formatUsdc(viewPassPrice)} USDC` : '';
+      const requirement = priceLabel ? ` Purchase required (${priceLabel}).` : ' Purchase required.';
+      els.status.textContent = `No active view pass.${expiredAt ? ` Expired ${expiredAt}.` : ''}${requirement}`;
+    }
+
     await loadListings();
   } catch (e) {
     console.error(e);
-    els.status.textContent = 'Unable to load listings.';
+    els.status.textContent = 'Unable to verify view pass status.';
   }
 }
 
@@ -447,7 +535,7 @@ els.connect.onclick = async () => {
     els.addr.textContent = `Connected: ${short(addr)}`;
     els.connect.textContent = `Connected ${short(addr)}`;
     els.connect.style.background = '#10b981';
-    els.buy.disabled = !supportsViewPassPurchase;
+    els.buy.disabled = true;
     els.status.textContent = 'Ready.';
     await checkViewPass();
   } catch (e) { console.error(e); els.status.textContent = e?.message || 'Wallet connection failed.'; }
@@ -465,6 +553,11 @@ els.buy.onclick = async () => {
     if (!from) throw new Error('No wallet account connected.');
     await ensureArbitrum(p);
     await loadConfig();
+    const duration = typeof viewPassDuration === 'bigint' ? viewPassDuration : 0n;
+    if (duration === 0n) {
+      els.status.textContent = 'View pass not required right now.';
+      return;
+    }
     const price = typeof viewPassPrice === 'bigint' ? viewPassPrice : 0n;
     if (typeof viewPassPrice !== 'bigint') {
       console.warn('View pass price unavailable, defaulting to 0.');

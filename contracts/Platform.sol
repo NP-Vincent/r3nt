@@ -75,6 +75,12 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /// @notice Optional price for purchasing premium listing views (denominated in USDC 6 decimals).
     uint256 public viewPassPrice;
 
+    /// @notice Duration that each purchased view pass remains valid for (in seconds).
+    uint64 public viewPassDuration;
+
+    /// @notice Expiration timestamp for each address that has purchased a view pass.
+    mapping(address => uint256) public viewPassExpiry;
+
     /// @notice Total number of listings created through the platform.
     uint256 public listingCount;
 
@@ -99,8 +105,9 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
     event ModulesUpdated(address indexed listingFactory, address indexed bookingRegistry, address indexed sqmuToken);
     event FeesUpdated(uint16 tenantFeeBps, uint16 landlordFeeBps);
-    event ListingPricingUpdated(uint256 listingCreationFee, uint256 viewPassPrice);
+    event ListingPricingUpdated(uint256 listingCreationFee, uint256 viewPassPrice, uint64 viewPassDuration);
     event ListingRegistered(address indexed listing, address indexed landlord, uint256 indexed listingId);
+    event ViewPassBought(address indexed buyer, uint256 expiry);
 
     // -------------------------------------------------
     // Constructor / Initializer
@@ -123,6 +130,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
      * @param landlordFeeBps_ Platform fee applied to landlords in basis points.
      * @param listingCreationFee_ Fee charged for creating a listing (USDC, 6 decimals).
      * @param viewPassPrice_ Optional price for premium listing views (USDC, 6 decimals).
+     * @param viewPassDuration_ Duration that each purchased view pass remains valid (seconds).
      */
     function initialize(
         address owner_,
@@ -134,7 +142,8 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         uint16 tenantFeeBps_,
         uint16 landlordFeeBps_,
         uint256 listingCreationFee_,
-        uint256 viewPassPrice_
+        uint256 viewPassPrice_,
+        uint64 viewPassDuration_
     ) external initializer {
         require(owner_ != address(0), "owner=0");
         require(usdc_ != address(0), "usdc=0");
@@ -146,7 +155,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         _setTreasury(treasury_);
         _setModules(listingFactory_, bookingRegistry_, sqmuToken_);
         _setFees(tenantFeeBps_, landlordFeeBps_);
-        _setListingPricing(listingCreationFee_, viewPassPrice_);
+        _setListingPricing(listingCreationFee_, viewPassPrice_, viewPassDuration_);
 
         emit PlatformInitialized(owner_, usdc_, treasury_);
     }
@@ -176,8 +185,12 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         _setFees(newTenantFeeBps, newLandlordFeeBps);
     }
 
-    function setListingPricing(uint256 newListingCreationFee, uint256 newViewPassPrice) external onlyOwner {
-        _setListingPricing(newListingCreationFee, newViewPassPrice);
+    function setListingPricing(
+        uint256 newListingCreationFee,
+        uint256 newViewPassPrice,
+        uint64 newViewPassDuration
+    ) external onlyOwner {
+        _setListingPricing(newListingCreationFee, newViewPassPrice, newViewPassDuration);
     }
 
     // -------------------------------------------------
@@ -290,6 +303,10 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         return _listings;
     }
 
+    function hasActiveViewPass(address account) external view returns (bool) {
+        return _hasActiveViewPass(account);
+    }
+
     // -------------------------------------------------
     // Internal setters (no access control)
     // -------------------------------------------------
@@ -326,10 +343,47 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         emit FeesUpdated(newTenantFeeBps, newLandlordFeeBps);
     }
 
-    function _setListingPricing(uint256 newListingCreationFee, uint256 newViewPassPrice) internal {
+    function _setListingPricing(
+        uint256 newListingCreationFee,
+        uint256 newViewPassPrice,
+        uint64 newViewPassDuration
+    ) internal {
         listingCreationFee = newListingCreationFee;
         viewPassPrice = newViewPassPrice;
-        emit ListingPricingUpdated(newListingCreationFee, newViewPassPrice);
+        viewPassDuration = newViewPassDuration;
+        emit ListingPricingUpdated(newListingCreationFee, newViewPassPrice, newViewPassDuration);
+    }
+
+    function _hasActiveViewPass(address account) internal view returns (bool) {
+        if (viewPassDuration == 0) {
+            return true;
+        }
+        if (account == address(0)) {
+            return false;
+        }
+        return viewPassExpiry[account] >= block.timestamp;
+    }
+
+    function buyViewPass() external {
+        uint64 duration = viewPassDuration;
+        require(duration != 0, "view pass disabled");
+
+        address buyer = _msgSender();
+        uint256 price = viewPassPrice;
+        if (price > 0) {
+            address usdc_ = usdc;
+            address treasury_ = treasury;
+            require(usdc_ != address(0), "usdc=0");
+            require(treasury_ != address(0), "treasury=0");
+            IERC20Upgradeable(usdc_).safeTransferFrom(buyer, treasury_, price);
+        }
+
+        uint256 currentExpiry = viewPassExpiry[buyer];
+        uint256 startingPoint = currentExpiry > block.timestamp ? currentExpiry : block.timestamp;
+        uint256 newExpiry = startingPoint + uint256(duration);
+        viewPassExpiry[buyer] = newExpiry;
+
+        emit ViewPassBought(buyer, newExpiry);
     }
 
     // -------------------------------------------------
@@ -342,5 +396,5 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     // Storage gap for upgradeability
     // -------------------------------------------------
 
-    uint256[38] private __gap;
+    uint256[36] private __gap;
 }
