@@ -8,6 +8,26 @@ import {ClonesUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/Clone
 
 import {Platform} from "./Platform.sol";
 
+/// @dev Minimal interface for Listing clones.
+interface IListing {
+    function initialize(
+        address landlord,
+        address platform,
+        address bookingRegistry,
+        address sqmuToken,
+        uint256 fid,
+        bytes32 castHash,
+        bytes32 geohash,
+        uint8 geohashPrecision,
+        uint32 areaSqm,
+        uint256 baseDailyRate,
+        uint256 depositAmount,
+        uint64 minBookingNotice,
+        uint64 maxBookingWindow,
+        string calldata metadataURI
+    ) external;
+}
+
 /**
  * @title ListingFactory
  * @notice Deploys clone instances of the Listing contract and wires them to protocol modules.
@@ -16,26 +36,6 @@ import {Platform} from "./Platform.sol";
  */
 contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     using ClonesUpgradeable for address;
-
-    /// @dev Minimal interface for Listing clones.
-    interface IListing {
-        function initialize(
-            address landlord,
-            address platform,
-            address bookingRegistry,
-            address sqmuToken,
-            uint256 fid,
-            bytes32 castHash,
-            bytes32 geohash,
-            uint8 geohashPrecision,
-            uint32 areaSqm,
-            uint256 baseDailyRate,
-            uint256 depositAmount,
-            uint64 minBookingNotice,
-            uint64 maxBookingWindow,
-            string calldata metadataURI
-        ) external;
-    }
 
     // -------------------------------------------------
     // Storage
