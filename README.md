@@ -164,6 +164,64 @@ Key events emitted by `Listing.sol` include `BookingCreated`, `DepositSplitPropo
    listings.
 7. Update the front-end/subgraph to target the unified booking and tokenisation flows.
 
+## Deploying from Remix IDE
+The contracts in this repository are written for the OpenZeppelin UUPS upgradeability pattern, so
+deploying them directly (without a proxy) causes every `initialize` call to revert. When using
+Remix you must deploy the upgradeable modules behind an `ERC1967Proxy` and pass the initializer
+payload during proxy construction. The outline below mirrors what a Hardhat/Foundry script would
+perform on your behalf.
+
+### 1. Prepare the workspace
+1. Import the repository into Remix (for example via **File > Clone a Git repository**).
+2. Open the **Solidity Compiler** tab, select compiler version **0.8.26** and enable the same
+   optimizer settings you intend to use on-chain.
+3. Compile the contracts you plan to deploy: `Listing.sol` (implementation), `ListingFactory.sol`,
+   `BookingRegistry.sol`, `r3nt-SQMU.sol`, `Platform.sol` and the OpenZeppelin
+   `ERC1967Proxy.sol` located at `@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol`.
+
+### 2. Deploy logic contracts (implementations)
+For every upgradeable contract (factory, registry, SQMU token, platform) click **Deploy** in Remix
+to create the implementation contract. Take note of each implementation address — they are passed
+to the proxy constructor and should **not** be interacted with directly afterwards.
+
+### 3. Encode initializer calldata
+1. Expand the freshly deployed implementation in the **Deployed Contracts** list.
+2. Fill in the `initialize` parameters as tuples. For example, `Platform.InitializeParams` expects
+   `[owner, treasury, usdc, listingFactory, bookingRegistry, sqmuToken, tenantFeeBps,
+   landlordFeeBps, listingCreationFee, viewPassPrice]`.
+3. Click the clipboard icon next to the `transact` button to copy the ABI-encoded calldata. Do not
+   send the transaction — it will revert because the implementation was locked by
+   `_disableInitializers()`.
+
+Repeat this for `ListingFactory.InitializeParams` (`[owner, temporaryPlatform, listingImplementation]`),
+`BookingRegistry.InitializeParams` (`[owner, temporaryPlatform]`) and `R3ntSQMU.InitializeParams`
+(` [owner, temporaryPlatform, baseURI]`). The `temporaryPlatform` value can be your deployer address
+and will be updated after the platform proxy goes live.
+
+### 4. Deploy the proxies
+For each module create an `ERC1967Proxy` instance by supplying the implementation address and the
+encoded initializer bytes copied in the previous step. The recommended order is:
+
+1. Deploy `Listing.sol` (implementation only, no proxy required — clones call `initialize` later).
+2. Deploy `ListingFactory`, `BookingRegistry` and `r3nt-SQMU` proxies.
+3. Deploy the `Platform` proxy, passing the addresses of the previously deployed proxies inside the
+   `InitializeParams` struct.
+
+After every proxy is created, interact with it using the relevant ABI by selecting the contract in
+Remix and clicking **At Address**, then pasting the proxy address.
+
+### 5. Wire the modules to the platform
+Because the factory, registry and SQMU token were initialised with a temporary platform address, use
+your owner account to point them to the platform proxy once it exists:
+
+1. Call `updatePlatform(platformProxy)` on the `ListingFactory` proxy.
+2. Call `setPlatform(platformProxy)` on the `BookingRegistry` proxy.
+3. Call `setPlatform(platformProxy)` on the `r3nt-SQMU` proxy.
+
+Finally, double-check that `Platform.modules()` returns the proxy addresses you expect. At this
+point you can call `Platform.createListing` to start cloning listings and proceed with normal
+operations.
+
 ## Design Notes & Best Practices
 - **USDC decimals** – all monetary values use 6 decimals to match the stablecoin.
 - **UUPS upgradeability** – every upgradeable module must implement `_authorizeUpgrade`
