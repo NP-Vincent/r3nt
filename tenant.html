@@ -64,11 +64,11 @@
     import { bytes32ToCastHash, buildFarcasterCastUrl } from './js/tools.js';
     import {
       RPC_URL,
-      R3NT_ADDRESS,
       REGISTRY_ADDRESS,
       REGISTRY_ABI,
       PLATFORM_ADDRESS,
       PLATFORM_ABI,
+      LISTING_ABI,
       USDC_ADDRESS,
     } from './js/config.js';
 
@@ -84,6 +84,11 @@
 
     const ARBITRUM_HEX = '0xa4b1';           // 42161
     const USDC_SCALAR = 1_000_000n;
+    const SECONDS_PER_DAY = 86_400n;
+
+    const supportsViewPassPurchase = PLATFORM_ABI.some(
+      (item) => item?.type === 'function' && item?.name === 'buyViewPass'
+    );
 
     function formatUsdc(amount) {
       const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
@@ -92,6 +97,56 @@
       const units = abs / USDC_SCALAR;
       const fraction = (abs % USDC_SCALAR).toString().padStart(6, '0').replace(/0+$/, '');
       return `${negative ? '-' : ''}${units.toString()}${fraction ? '.' + fraction : ''}`;
+    }
+
+    function decodeBytes32ToString(value, precision) {
+      const hex = typeof value === 'string' ? value : '';
+      if (!hex || hex === '0x' || /^0x0+$/i.test(hex)) {
+        return '';
+      }
+      let out = '';
+      for (let i = 2; i < hex.length; i += 2) {
+        const code = parseInt(hex.slice(i, i + 2), 16);
+        if (!Number.isFinite(code) || code <= 0) break;
+        out += String.fromCharCode(code);
+      }
+      const limit = typeof precision === 'number' && Number.isFinite(precision) ? precision : undefined;
+      if (limit && limit > 0 && out.length > limit) {
+        return out.slice(0, limit);
+      }
+      return out;
+    }
+
+    function formatDuration(seconds) {
+      const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
+      if (value <= 0n) return 'None';
+      const totalSeconds = Number(value);
+      if (!Number.isFinite(totalSeconds)) return `${value} sec`;
+      const days = Math.floor(totalSeconds / 86400);
+      const remainder = totalSeconds % 86400;
+      if (days > 0 && remainder === 0) {
+        return `${days} day${days === 1 ? '' : 's'}`;
+      }
+      if (days > 0) {
+        const hours = Math.round(remainder / 3600);
+        if (hours === 0) {
+          return `${days} day${days === 1 ? '' : 's'}`;
+        }
+        return `${days} day${days === 1 ? '' : 's'} ${hours} h`;
+      }
+      const hoursOnly = Math.max(1, Math.round(totalSeconds / 3600));
+      return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
+    }
+
+    function calculateRent(baseDailyRate, startTs, endTs) {
+      const rate = typeof baseDailyRate === 'bigint' ? baseDailyRate : BigInt(baseDailyRate || 0);
+      const start = typeof startTs === 'bigint' ? startTs : BigInt(startTs || 0);
+      const end = typeof endTs === 'bigint' ? endTs : BigInt(endTs || 0);
+      if (end <= start) return 0n;
+      let duration = end - start;
+      let days = (duration + SECONDS_PER_DAY - 1n) / SECONDS_PER_DAY;
+      if (days === 0n) days = 1n;
+      return rate * days;
     }
 
     let inHost = false; try { inHost = await sdk.isInMiniApp(); } catch {}
@@ -105,7 +160,7 @@
 
     function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
-    let r3ntAbi, pub, feeBps, bookingAbi, bookingAddr;
+    let pub;
     let viewPassPrice;
     let configLoading;
 
@@ -122,7 +177,7 @@
         await configLoading;
         return;
       }
-      if (pub && r3ntAbi && bookingAbi) {
+      if (pub) {
         if (typeof viewPassPrice !== 'bigint') {
           try {
             const price = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' });
@@ -137,24 +192,19 @@
         return;
       }
       configLoading = (async () => {
-        if (!r3ntAbi) {
-          r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
-        }
-        bookingAbi = REGISTRY_ABI;
-        bookingAddr = REGISTRY_ADDRESS;
         pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
-        const [fee, price] = await Promise.all([
-          pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'feeBps' }),
-          pub
+        try {
+          const price = await pub
             .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' })
             .catch((err) => {
               console.error('Failed to load view pass price', err);
               return undefined;
-            }),
-        ]);
-        feeBps = fee;
-        if (typeof price === 'bigint') {
-          viewPassPrice = price;
+            });
+          if (typeof price === 'bigint') {
+            viewPassPrice = price;
+          }
+        } catch (err) {
+          console.error('Configuration load failed', err);
         }
         updateBuyLabel();
       })();
@@ -175,89 +225,176 @@
       }
     }
 
+    async function fetchListingInfo(listingAddr){
+      if (!pub) {
+        await loadConfig();
+      }
+      try {
+        const responses = await pub.multicall({
+          contracts: [
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'fid' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'castHash' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'baseDailyRate' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'depositAmount' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'areaSqm' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'metadataURI' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'minBookingNotice' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'maxBookingWindow' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'geohash' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'geohashPrecision' },
+            { address: listingAddr, abi: LISTING_ABI, functionName: 'landlord' },
+          ],
+          allowFailure: true,
+        });
+        const getBig = (idx, fallback = 0n) => {
+          const entry = responses[idx];
+          if (!entry || entry.status !== 'success') return fallback;
+          const res = entry.result;
+          try { return typeof res === 'bigint' ? res : BigInt(res || 0); } catch { return fallback; }
+        };
+        const getString = (idx, fallback = '') => {
+          const entry = responses[idx];
+          if (!entry || entry.status !== 'success') return fallback;
+          return entry.result ?? fallback;
+        };
+        const fid = getBig(0);
+        const castHash = getString(1, '0x0000000000000000000000000000000000000000000000000000000000000000');
+        const baseDailyRate = getBig(2);
+        const depositAmount = getBig(3);
+        const areaSqm = Number(getBig(4));
+        const metadataURI = getString(5, '') || '';
+        const minBookingNotice = getBig(6);
+        const maxBookingWindow = getBig(7);
+        const geohashHex = getString(8, '0x');
+        const geohashPrecision = Number(getBig(9));
+        const landlord = getString(10, '0x0000000000000000000000000000000000000000');
+        const geohash = decodeBytes32ToString(geohashHex, Number.isFinite(geohashPrecision) ? geohashPrecision : undefined);
+        return {
+          address: listingAddr,
+          fid,
+          castHash,
+          baseDailyRate,
+          depositAmount,
+          areaSqm,
+          metadataURI,
+          minBookingNotice,
+          maxBookingWindow,
+          geohash,
+          geohashPrecision,
+          landlord,
+        };
+      } catch (err) {
+        console.error('Failed to load listing info', listingAddr, err);
+        return null;
+      }
+    }
+
+    function renderListingCard(info){
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const title = document.createElement('div');
+      title.textContent = `Listing ${short(info.address)}`;
+      card.appendChild(title);
+
+      const landlordLine = document.createElement('div');
+      landlordLine.textContent = `Landlord: ${short(info.landlord)}`;
+      card.appendChild(landlordLine);
+
+      const fidLine = document.createElement('div');
+      fidLine.textContent = info.fid > 0n ? `Landlord FID: ${info.fid.toString()}` : 'Landlord FID: —';
+      card.appendChild(fidLine);
+
+      const rateLine = document.createElement('div');
+      rateLine.textContent = `Base rate: ${formatUsdc(info.baseDailyRate)} USDC / day`;
+      card.appendChild(rateLine);
+
+      const depositLine = document.createElement('div');
+      depositLine.textContent = `Security deposit: ${formatUsdc(info.depositAmount)} USDC`;
+      card.appendChild(depositLine);
+
+      if (Number.isFinite(info.areaSqm) && info.areaSqm > 0) {
+        const areaLine = document.createElement('div');
+        areaLine.textContent = `Area: ${info.areaSqm} m²`;
+        card.appendChild(areaLine);
+      }
+
+      const noticeLine = document.createElement('div');
+      const minNoticeText = formatDuration(info.minBookingNotice);
+      const maxWindowText = info.maxBookingWindow > 0n ? formatDuration(info.maxBookingWindow) : 'Unlimited';
+      noticeLine.textContent = `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`;
+      card.appendChild(noticeLine);
+
+      if (info.geohash) {
+        const geoLine = document.createElement('div');
+        geoLine.textContent = `Geohash: ${info.geohash}`;
+        card.appendChild(geoLine);
+      }
+
+      if (info.metadataURI) {
+        const metaLink = document.createElement('a');
+        metaLink.href = info.metadataURI;
+        metaLink.target = '_blank';
+        metaLink.rel = 'noopener';
+        metaLink.textContent = 'Metadata';
+        metaLink.className = 'listing-link';
+        card.appendChild(metaLink);
+      }
+
+      const row = document.createElement('div');
+      row.className = 'row';
+      const btnBook = document.createElement('button');
+      btnBook.textContent = 'Book';
+      btnBook.onclick = () => bookListing(info);
+      row.appendChild(btnBook);
+      card.appendChild(row);
+
+      const farcasterUrl = buildFarcasterCastUrl(info.fid, info.castHash);
+      const viewLink = document.createElement('a');
+      viewLink.href = farcasterUrl;
+      viewLink.target = '_blank';
+      viewLink.rel = 'noopener';
+      viewLink.textContent = 'View full details on Farcaster';
+      viewLink.className = 'listing-link';
+      viewLink.onclick = (ev) => {
+        ev.preventDefault();
+        openCast(info.fid, info.castHash, farcasterUrl);
+      };
+      card.appendChild(viewLink);
+
+      return card;
+    }
+
     async function loadListings(){
       await loadConfig();
       els.listings.textContent = 'Loading listings…';
-      const count = Number(await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listingsCount' }));
-      const items = await Promise.all(
-        Array.from({length: count}, (_,i)=> pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'getListing', args:[ BigInt(i) ] }).then(L=>({i, L})))
-      );
-      els.listings.innerHTML = '';
-      let shown = 0;
-      for (const {i, L} of items) {
-        if (!L.active) continue;
-        shown++;
-        const card = document.createElement('div');
-        card.className = 'card';
-        const title = document.createElement('div');
-        title.textContent = L.title || `Listing ${i}`;
-        const rateLabel = document.createElement('label');
-        rateLabel.textContent = 'Rent: ';
-        const sel = document.createElement('select');
-        if (Number(L.rateDaily) > 0) {
-          const o = document.createElement('option');
-          o.value = L.rateDaily;
-          o.dataset.rtype = '0';
-          o.textContent = `Daily - ${Number(L.rateDaily)/1e6} USDC`;
-          sel.appendChild(o);
-        }
-        if (Number(L.rateWeekly) > 0) {
-          const o = document.createElement('option');
-          o.value = L.rateWeekly;
-          o.dataset.rtype = '1';
-          o.textContent = `Weekly - ${Number(L.rateWeekly)/1e6} USDC`;
-          sel.appendChild(o);
-        }
-        if (Number(L.rateMonthly) > 0) {
-          const o = document.createElement('option');
-          o.value = L.rateMonthly;
-          o.dataset.rtype = '2';
-          o.textContent = `Monthly - ${Number(L.rateMonthly)/1e6} USDC`;
-          sel.appendChild(o);
-        }
-        rateLabel.appendChild(sel);
-        const dep = document.createElement('div');
-        dep.textContent = `Deposit: ${Number(L.deposit)/1e6} USDC`;
-        const areaVal = typeof L.areaSqm === 'bigint' ? Number(L.areaSqm) : Number(L.areaSqm || 0);
-        const area = areaVal > 0 ? document.createElement('div') : null;
-        if (area) {
-          area.textContent = `Area: ${areaVal} m²`;
-        }
-
-        const row = document.createElement('div');
-        row.className = 'row';
-        const btnBook = document.createElement('button');
-        btnBook.textContent = 'Book';
-        btnBook.onclick = () => {
-          const opt = sel.options[sel.selectedIndex];
-          bookListing(i, BigInt(opt.dataset.rtype), opt.value, L.deposit);
-        };
-        row.appendChild(btnBook);
-
-        const farcasterUrl = buildFarcasterCastUrl(L.fid, L.castHash);
-        const viewLink = document.createElement('a');
-        viewLink.href = farcasterUrl;
-        viewLink.target = '_blank';
-        viewLink.rel = 'noopener';
-        viewLink.textContent = 'View full details on Farcaster';
-        viewLink.className = 'listing-link';
-        viewLink.onclick = (ev) => {
-          ev.preventDefault();
-          openCast(L.fid, L.castHash, farcasterUrl);
-        };
-
-        card.appendChild(title);
-        card.appendChild(rateLabel);
-        card.appendChild(dep);
-        if (area) card.appendChild(area);
-        card.appendChild(row);
-        card.appendChild(viewLink);
-        els.listings.appendChild(card);
+      let addresses;
+      try {
+        const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allListings' });
+        addresses = Array.isArray(result) ? result : [];
+      } catch (err) {
+        console.error('Failed to load listing addresses', err);
+        els.listings.textContent = 'Unable to load listings.';
+        return;
       }
-      if (!shown) els.listings.textContent = 'No active listings.';
+      const cleaned = addresses.filter((addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr) && !/^0x0+$/.test(addr));
+      if (!cleaned.length) {
+        els.listings.textContent = 'No active listings.';
+        return;
+      }
+      const infos = await Promise.all(cleaned.map((addr) => fetchListingInfo(addr)));
+      const valid = infos.filter(Boolean);
+      els.listings.innerHTML = '';
+      if (!valid.length) {
+        els.listings.textContent = 'No active listings.';
+        return;
+      }
+      for (const info of valid) {
+        els.listings.appendChild(renderListingCard(info));
+      }
     }
 
-    async function bookListing(listingId, rtype, rate, deposit){
+    async function bookListing(listing){
       try {
         const p = await getProvider();
         const [from] = await p.request({ method: 'eth_accounts' }) || [];
@@ -271,33 +408,52 @@
         const startTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
         const endTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
         if (endTs <= startTs) throw new Error('End date must be after start.');
-        const dur = rtype === 1n ? 7n * 86400n : rtype === 2n ? 30n * 86400n : 86400n;
-        const diff = endTs - startTs;
-        if (diff % dur !== 0n) throw new Error('Date range misaligned with rate type.');
-        const units = diff / dur;
+        const nowTs = BigInt(Math.floor(Date.now() / 1000));
+        if (listing.minBookingNotice > 0n && startTs < nowTs + listing.minBookingNotice) {
+          throw new Error(`Start must respect the ${formatDuration(listing.minBookingNotice)} minimum notice.`);
+        }
+        if (listing.maxBookingWindow > 0n && startTs > nowTs + listing.maxBookingWindow) {
+          throw new Error(`Start beyond allowed booking window (${formatDuration(listing.maxBookingWindow)}).`);
+        }
 
-        const listing = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName:'getListing', args:[BigInt(listingId)] });
-        const free = await pub.readContract({ address: bookingAddr, abi: bookingAbi, functionName:'isFree', args:[listing.vault, startTs, endTs] });
-        if (!free) { els.status.textContent = 'Selected dates not available.'; return; }
+        const available = await pub.readContract({
+          address: REGISTRY_ADDRESS,
+          abi: REGISTRY_ABI,
+          functionName: 'isAvailable',
+          args: [listing.address, startTs, endTs],
+        });
+        if (!available) {
+          els.status.textContent = 'Selected dates not available.';
+          return;
+        }
 
-        const rent = BigInt(rate) * units;
-        const dep = BigInt(deposit);
-        const fee = rent * BigInt(feeBps) / 10000n;
-        const total = rent + fee + dep;
+        const rent = calculateRent(listing.baseDailyRate, startTs, endTs);
+        const deposit = typeof listing.depositAmount === 'bigint' ? listing.depositAmount : BigInt(listing.depositAmount || 0);
 
-        const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [R3NT_ADDRESS, total] });
-        const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), rtype, units, startTs, endTs] });
+        const calls = [];
+        let approveData;
+        if (deposit > 0n) {
+          approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [listing.address, deposit] });
+          calls.push({ to: USDC_ADDRESS, data: approveData });
+        }
 
-        els.status.textContent = 'Submitting booking…';
+        const bookData = encodeFunctionData({ abi: LISTING_ABI, functionName: 'book', args: [startTs, endTs] });
+        calls.push({ to: listing.address, data: bookData });
+
+        const depositMsg = deposit > 0n ? `${formatUsdc(deposit)} USDC deposit` : 'no deposit';
+        const rentMsg = rent > 0n ? `${formatUsdc(rent)} USDC rent` : '0 USDC rent';
+        els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}).`;
 
         try {
-          await p.request({ method:'wallet_sendCalls', params:[{ calls: [ { to: USDC_ADDRESS, data: approveData }, { to: R3NT_ADDRESS, data: bookData } ] }] });
+          await p.request({ method:'wallet_sendCalls', params:[{ calls }] });
         } catch {
           try {
-            await p.request({ method:'wallet_sendCalls', params:[ { to: USDC_ADDRESS, data: approveData }, { to: R3NT_ADDRESS, data: bookData } ] });
+            await p.request({ method:'wallet_sendCalls', params: calls });
           } catch {
-            await p.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
-            await p.request({ method:'eth_sendTransaction', params:[{ from, to: R3NT_ADDRESS, data: bookData }] });
+            if (deposit > 0n && approveData) {
+              await p.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
+            }
+            await p.request({ method:'eth_sendTransaction', params:[{ from, to: listing.address, data: bookData }] });
           }
         }
 
@@ -309,19 +465,19 @@
       }
     }
 
-    async function checkViewPass(addr){
+    async function checkViewPass(){
       try {
         await loadConfig();
-        const expiry = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'viewPassExpiry', args: [addr] });
-        const active = expiry > BigInt(Math.floor(Date.now()/1000));
-        if (active) {
-          const ts = Number(expiry) * 1000; const d = new Date(ts).toISOString().replace('T',' ').slice(0,16);
-          els.status.textContent = `View pass active. Expires: ${d} UTC.`;
-          await loadListings();
+        if (typeof viewPassPrice === 'bigint' && viewPassPrice > 0n) {
+          els.status.textContent = `View pass price: ${formatUsdc(viewPassPrice)} USDC.`;
         } else {
-          els.status.textContent = 'No active view pass. Buy to see listings.';
+          els.status.textContent = 'View pass not required.';
         }
-      } catch (e) { console.error(e); els.status.textContent = 'Unable to verify view pass.'; }
+        await loadListings();
+      } catch (e) {
+        console.error(e);
+        els.status.textContent = 'Unable to load listings.';
+      }
     }
 
     // ——— Connect ———
@@ -337,15 +493,19 @@
         els.addr.textContent = `Connected: ${short(addr)}`;
         els.connect.textContent = `Connected ${short(addr)}`;
         els.connect.style.background = '#10b981';
-        els.buy.disabled = false;
+        els.buy.disabled = !supportsViewPassPurchase;
         els.status.textContent = 'Ready.';
-        await checkViewPass(addr);
+        await checkViewPass();
       } catch (e) { console.error(e); els.status.textContent = e?.message || 'Wallet connection failed.'; }
     };
 
     // ——— Buy pass ———
     els.buy.onclick = async () => {
       try {
+        if (!supportsViewPassPurchase) {
+          els.status.textContent = 'View pass purchase is not supported in this deployment.';
+          return;
+        }
         const p = await getProvider();
         const [from] = await p.request({ method: 'eth_accounts' }) || [];
         if (!from) throw new Error('No wallet account connected.');
@@ -376,9 +536,9 @@
             await p.request({ method: 'eth_sendTransaction', params: [{ from, to: PLATFORM_ADDRESS, data: buyData }] });
           }
         }
-        els.status.textContent = 'Success. View pass purchased.';
-        alert('View pass purchased!');
-        await checkViewPass(from);
+          els.status.textContent = 'Success. View pass purchased.';
+          alert('View pass purchased!');
+          await checkViewPass();
       } catch (err) { console.error(err); els.status.textContent = `Error: ${err?.message || err}`; }
     };
 
