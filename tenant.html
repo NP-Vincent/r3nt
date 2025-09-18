@@ -69,6 +69,7 @@
     } from './js/config.js';
 
     const CHAIN_ID_HEX = '0x' + CHAIN_ID.toString(16);
+    const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
     const SECONDS_PER_DAY = 86_400n;
 
     const els = {
@@ -82,6 +83,9 @@
     };
 
     const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
+
+    let bookingRegistryAddress = REGISTRY_ADDRESS;
+    let usdcAddress = USDC_ADDRESS;
 
     function formatUsdc(amount) {
       const n = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
@@ -155,8 +159,22 @@
 
     async function loadPlatformMeta() {
       try {
-        const [tenantBps, landlordBps] = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'fees' });
-        const creationFee = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'listingCreationFee' });
+        const [fees, creationFee, modules, usdcAddr] = await Promise.all([
+          pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'fees' }),
+          pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'listingCreationFee' }),
+          pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'modules' }),
+          pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'usdc' })
+        ]);
+        const feeTuple = Array.isArray(fees) ? fees : [0n, 0n];
+        const tenantBps = feeTuple[0] ?? 0n;
+        const landlordBps = feeTuple[1] ?? 0n;
+        const registryAddr = Array.isArray(modules) ? modules[1] : undefined;
+        if (registryAddr && registryAddr !== ZERO_ADDRESS) {
+          bookingRegistryAddress = registryAddr;
+        }
+        if (usdcAddr && usdcAddr !== ZERO_ADDRESS) {
+          usdcAddress = usdcAddr;
+        }
         const tenantPct = (Number(tenantBps || 0n) / 100).toFixed(2);
         const landlordPct = (Number(landlordBps || 0n) / 100).toFixed(2);
         els.feeInfo.textContent = `Platform fees (tenant/landlord): ${tenantPct}% / ${landlordPct}% · Listing creation fee: ${formatUsdc(creationFee || 0n)} USDC`;
@@ -171,7 +189,7 @@
       const addresses = [];
       for (let i = 1; i <= total; i++) {
         const addr = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'listingById', args:[BigInt(i)] });
-        if (addr && addr !== '0x0000000000000000000000000000000000000000') {
+        if (addr && addr !== ZERO_ADDRESS) {
           addresses.push({ id: i, address: addr });
         }
       }
@@ -328,7 +346,10 @@
           throw new Error('Start date exceeds booking window.');
         }
 
-        const available = await pub.readContract({ address: REGISTRY_ADDRESS, abi: REGISTRY_ABI, functionName:'isAvailable', args:[listing.address, startTs, endTs] });
+        if (!bookingRegistryAddress || bookingRegistryAddress === ZERO_ADDRESS) {
+          throw new Error('Booking registry not configured on platform.');
+        }
+        const available = await pub.readContract({ address: bookingRegistryAddress, abi: REGISTRY_ABI, functionName:'isAvailable', args:[listing.address, startTs, endTs] });
         if (!available) {
           throw new Error('Selected range is not available.');
         }
@@ -344,6 +365,9 @@
         const [from] = await p.request({ method:'eth_accounts' }) || [];
         if (!from) throw new Error('No wallet account connected.');
 
+        if (!usdcAddress || usdcAddress === ZERO_ADDRESS) {
+          throw new Error('USDC address not configured on platform.');
+        }
         const approveData = deposit > 0n ? encodeFunctionData({ abi: erc20Abi, functionName:'approve', args:[listing.address, deposit] }) : null;
         const bookData = encodeFunctionData({ abi: LISTING_ABI, functionName:'book', args:[startTs, endTs] });
 
@@ -351,7 +375,7 @@
 
         const calls = [];
         if (approveData) {
-          calls.push({ to: USDC_ADDRESS, data: approveData });
+          calls.push({ to: usdcAddress, data: approveData });
         }
         calls.push({ to: listing.address, data: bookData });
 
@@ -359,7 +383,7 @@
           await p.request({ method:'wallet_sendCalls', params:[{ calls }] });
         } catch {
           if (approveData) {
-            await p.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
+            await p.request({ method:'eth_sendTransaction', params:[{ from, to: usdcAddress, data: approveData }] });
           }
           await p.request({ method:'eth_sendTransaction', params:[{ from, to: listing.address, data: bookData }] });
         }
@@ -400,7 +424,7 @@
 
     (async () => {
       try { await sdk.actions.ready(); } catch {}
-      loadPlatformMeta();
+      await loadPlatformMeta();
       await loadListings();
     })();
   </script>
