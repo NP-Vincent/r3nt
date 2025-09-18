@@ -45,6 +45,7 @@
     .btn.secondary{background:#eef2ff;color:#3730a3;border-color:transparent}
     nav{margin-bottom:16px}
     nav a{margin-right:10px;color:var(--primary);font-weight:600;text-decoration:none}
+    .version-badge{display:inline-block;margin-left:8px;padding:2px 6px;border-radius:8px;font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;background:#e2e8f0;color:#475569}
     section{margin-top:28px;padding-top:8px}
     h2{font-size:1.15rem;margin:0 0 8px}
     .grid{display:grid;grid-template-columns:1fr;gap:12px}
@@ -69,9 +70,10 @@
 
     <nav>
       <a href="./index.html">Home</a>
-      <a href="./tenant.html">Tenant</a>
-      <a href="./landlord.html">Landlord</a>
-    </nav>
+    <a href="./tenant.html">Tenant</a>
+    <a href="./landlord.html">Landlord</a>
+    <span class="version-badge" data-version></span>
+  </nav>
 
     <div class="hero">
       <div>
@@ -137,6 +139,19 @@
 
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+    import { APP_VERSION } from './js/config.js';
+
+    const applyVersionBadge = () => {
+      const badge = document.querySelector('[data-version]');
+      if (badge) badge.textContent = `Build ${APP_VERSION}`;
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', applyVersionBadge);
+    } else {
+      applyVersionBadge();
+    }
+
     (async () => {
       try { await sdk.actions.ready(); } catch {}
       setTimeout(() => { try { sdk.actions.ready(); } catch {} }, 800);

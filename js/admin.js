@@ -1,7 +1,7 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
-import { CHAIN_ID, RPC_URL, PLATFORM_ADDRESS, PLATFORM_ABI, LISTING_ABI } from './config.js';
+import { CHAIN_ID, RPC_URL, PLATFORM_ADDRESS, PLATFORM_ABI, LISTING_ABI, APP_VERSION } from './config.js';
 
 const CHAIN_ID_HEX = '0x' + CHAIN_ID.toString(16);
 const STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
@@ -20,6 +20,17 @@ const els = {
 };
 
 const info = (t) => { els.status.textContent = t; };
+
+const applyVersionBadge = () => {
+  const badge = document.querySelector('[data-version]');
+  if (badge) badge.textContent = `Build ${APP_VERSION}`;
+};
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', applyVersionBadge);
+} else {
+  applyVersionBadge();
+}
 
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 let provider;
