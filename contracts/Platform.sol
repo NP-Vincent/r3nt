@@ -4,6 +4,8 @@ pragma solidity ^0.8.26;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 /// @dev Minimal interface exposed by the listing factory.
 interface IListingFactory {
@@ -29,6 +31,8 @@ interface IListingFactory {
  *      multi-sig which controls configuration updates and authorises upgrades.
  */
 contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
+    using SafeERC20Upgradeable for IERC20Upgradeable;
+
     /// @dev Basis points denominator used for fee calculations.
     uint16 public constant BPS_DENOMINATOR = 10_000;
 
@@ -202,11 +206,18 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         uint64 minBookingNotice,
         uint64 maxBookingWindow,
         string calldata metadataURI
-    ) external onlyOwner returns (address listing) {
+    ) external returns (address listing) {
         require(landlord != address(0), "landlord=0");
         require(listingFactory != address(0), "factory=0");
         require(bookingRegistry != address(0), "registry=0");
         require(sqmuToken != address(0), "sqmuToken=0");
+
+        address caller = _msgSender();
+        if (caller != owner()) {
+            require(caller == landlord, "caller not landlord");
+        }
+
+        _collectListingFee(caller);
 
         listing = IListingFactory(listingFactory).createListing(
             landlord,
@@ -231,6 +242,21 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         _listings.push(listing);
 
         emit ListingRegistered(listing, landlord, listingId);
+    }
+
+    function _collectListingFee(address payer) internal {
+        uint256 fee = listingCreationFee;
+        if (fee == 0) {
+            return;
+        }
+
+        address usdc_ = usdc;
+        address treasury_ = treasury;
+        require(usdc_ != address(0), "usdc=0");
+        require(treasury_ != address(0), "treasury=0");
+        require(payer != address(0), "payer=0");
+
+        IERC20Upgradeable(usdc_).safeTransferFrom(payer, treasury_, fee);
     }
 
     // -------------------------------------------------
