@@ -111,6 +111,12 @@ function parseDec6(s) {
   if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
   return parseUnits(v, USDC_DECIMALS);
 }
+function parseOptionalDec6(s) {
+  const v = String(s ?? '').trim();
+  if (v === '') return 0n;
+  if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
+  return parseUnits(v, USDC_DECIMALS);
+}
 function parseAreaSqm(input) {
   const v = String(input ?? '').trim();
   if (v === '') throw new Error('Square metre area is required.');
@@ -292,9 +298,9 @@ els.create.onclick = () =>
       if (utf8BytesLen(shortDesc) > 140) throw new Error('Short description exceeds 140 bytes.');
 
       const deposit = parseDec6(els.deposit.value);
-      const rateDaily = parseUnits(String(els.rateDaily.value || '0'), USDC_DECIMALS);
-      const rateWeekly = parseUnits(String(els.rateWeekly.value || '0'), USDC_DECIMALS);
-      const rateMonthly = parseUnits(String(els.rateMonthly.value || '0'), USDC_DECIMALS);
+      const rateDaily = parseOptionalDec6(els.rateDaily.value);
+      const rateWeekly = parseOptionalDec6(els.rateWeekly.value);
+      const rateMonthly = parseOptionalDec6(els.rateMonthly.value);
 
       const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
       const geohashStr = latLonToGeohash(lat, lon, 7);
