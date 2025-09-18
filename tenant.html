@@ -36,7 +36,7 @@
   <h1>r3nt View Pass</h1>
   <button id="connect">Connect Wallet</button>
   <div id="address">Not connected</div>
-  <button id="buy" disabled>Buy View Pass (0.25 USDC)</button>
+  <button id="buy" disabled>Buy View Pass</button>
   <div id="status">Loading…</div>
   <h2>Select Dates</h2>
   <div class="row">
@@ -59,9 +59,18 @@
   <!-- 2) APP LOGIC -->
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-    import { encodeFunctionData, parseUnits, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
+    import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
     import { bytes32ToCastHash, buildFarcasterCastUrl } from './js/tools.js';
+    import {
+      RPC_URL,
+      R3NT_ADDRESS,
+      REGISTRY_ADDRESS,
+      REGISTRY_ABI,
+      PLATFORM_ADDRESS,
+      PLATFORM_ABI,
+      USDC_ADDRESS,
+    } from './js/config.js';
 
     const els = {
       connect: document.getElementById('connect'),
@@ -74,8 +83,16 @@
     };
 
     const ARBITRUM_HEX = '0xa4b1';           // 42161
-    const PASS_PRICE_USDC = '0.25';          // 0.25 USDC
-    const USDC_DECIMALS = 6;
+    const USDC_SCALAR = 1_000_000n;
+
+    function formatUsdc(amount) {
+      const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
+      const negative = value < 0n;
+      const abs = negative ? -value : value;
+      const units = abs / USDC_SCALAR;
+      const fraction = (abs % USDC_SCALAR).toString().padStart(6, '0').replace(/0+$/, '');
+      return `${negative ? '-' : ''}${units.toString()}${fraction ? '.' + fraction : ''}`;
+    }
 
     let inHost = false; try { inHost = await sdk.isInMiniApp(); } catch {}
     els.status.textContent = inHost ? 'Tap Connect to continue.' : 'Viewing only. Open from a Farcaster Mini App embed.';
@@ -88,17 +105,63 @@
 
     function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
-    let r3ntAbi, cfg, pub, feeBps, bookingAbi, bookingAddr;
+    let r3ntAbi, pub, feeBps, bookingAbi, bookingAddr;
+    let viewPassPrice;
+    let configLoading;
+
+    function updateBuyLabel() {
+      if (typeof viewPassPrice === 'bigint') {
+        els.buy.textContent = `Buy View Pass (${formatUsdc(viewPassPrice)} USDC)`;
+      } else {
+        els.buy.textContent = 'Buy View Pass';
+      }
+    }
+
     async function loadConfig(){
-      if (!r3ntAbi) {
-        [r3ntAbi, cfg, bookingAbi] = await Promise.all([
-          fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
-          import('./js/config.js'),
-          fetch('./js/abi/BookingRegistry.json').then(r => r.json()).then(j => j.abi),
+      if (configLoading) {
+        await configLoading;
+        return;
+      }
+      if (pub && r3ntAbi && bookingAbi) {
+        if (typeof viewPassPrice !== 'bigint') {
+          try {
+            const price = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' });
+            if (typeof price === 'bigint') {
+              viewPassPrice = price;
+            }
+            updateBuyLabel();
+          } catch (err) {
+            console.error('Failed to load view pass price', err);
+          }
+        }
+        return;
+      }
+      configLoading = (async () => {
+        if (!r3ntAbi) {
+          r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
+        }
+        bookingAbi = REGISTRY_ABI;
+        bookingAddr = REGISTRY_ADDRESS;
+        pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
+        const [fee, price] = await Promise.all([
+          pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'feeBps' }),
+          pub
+            .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' })
+            .catch((err) => {
+              console.error('Failed to load view pass price', err);
+              return undefined;
+            }),
         ]);
-        pub = createPublicClient({ chain: arbitrum, transport: http(cfg.RPC_URL || 'https://arb1.arbitrum.io/rpc') });
-        feeBps = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'feeBps' });
-        bookingAddr = cfg.REGISTRY_ADDRESS;
+        feeBps = fee;
+        if (typeof price === 'bigint') {
+          viewPassPrice = price;
+        }
+        updateBuyLabel();
+      })();
+      try {
+        await configLoading;
+      } finally {
+        configLoading = null;
       }
     }
 
@@ -115,9 +178,9 @@
     async function loadListings(){
       await loadConfig();
       els.listings.textContent = 'Loading listings…';
-      const count = Number(await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listingsCount' }));
+      const count = Number(await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listingsCount' }));
       const items = await Promise.all(
-        Array.from({length: count}, (_,i)=> pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'getListing', args:[ BigInt(i) ] }).then(L=>({i, L})))
+        Array.from({length: count}, (_,i)=> pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'getListing', args:[ BigInt(i) ] }).then(L=>({i, L})))
       );
       els.listings.innerHTML = '';
       let shown = 0;
@@ -213,7 +276,7 @@
         if (diff % dur !== 0n) throw new Error('Date range misaligned with rate type.');
         const units = diff / dur;
 
-        const listing = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName:'getListing', args:[BigInt(listingId)] });
+        const listing = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName:'getListing', args:[BigInt(listingId)] });
         const free = await pub.readContract({ address: bookingAddr, abi: bookingAbi, functionName:'isFree', args:[listing.vault, startTs, endTs] });
         if (!free) { els.status.textContent = 'Selected dates not available.'; return; }
 
@@ -222,19 +285,19 @@
         const fee = rent * BigInt(feeBps) / 10000n;
         const total = rent + fee + dep;
 
-        const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [cfg.R3NT_ADDRESS, total] });
+        const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [R3NT_ADDRESS, total] });
         const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), rtype, units, startTs, endTs] });
 
         els.status.textContent = 'Submitting booking…';
 
         try {
-          await p.request({ method:'wallet_sendCalls', params:[{ calls: [ { to: cfg.USDC_ADDRESS, data: approveData }, { to: cfg.R3NT_ADDRESS, data: bookData } ] }] });
+          await p.request({ method:'wallet_sendCalls', params:[{ calls: [ { to: USDC_ADDRESS, data: approveData }, { to: R3NT_ADDRESS, data: bookData } ] }] });
         } catch {
           try {
-            await p.request({ method:'wallet_sendCalls', params:[ { to: cfg.USDC_ADDRESS, data: approveData }, { to: cfg.R3NT_ADDRESS, data: bookData } ] });
+            await p.request({ method:'wallet_sendCalls', params:[ { to: USDC_ADDRESS, data: approveData }, { to: R3NT_ADDRESS, data: bookData } ] });
           } catch {
-            await p.request({ method:'eth_sendTransaction', params:[{ from, to: cfg.USDC_ADDRESS, data: approveData }] });
-            await p.request({ method:'eth_sendTransaction', params:[{ from, to: cfg.R3NT_ADDRESS, data: bookData }] });
+            await p.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
+            await p.request({ method:'eth_sendTransaction', params:[{ from, to: R3NT_ADDRESS, data: bookData }] });
           }
         }
 
@@ -249,7 +312,7 @@
     async function checkViewPass(addr){
       try {
         await loadConfig();
-        const expiry = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'viewPassExpiry', args: [addr] });
+        const expiry = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'viewPassExpiry', args: [addr] });
         const active = expiry > BigInt(Math.floor(Date.now()/1000));
         if (active) {
           const ts = Number(expiry) * 1000; const d = new Date(ts).toISOString().replace('T',' ').slice(0,16);
@@ -287,22 +350,30 @@
         const [from] = await p.request({ method: 'eth_accounts' }) || [];
         if (!from) throw new Error('No wallet account connected.');
         await ensureArbitrum(p);
-        const [r3ntAbiLocal, { R3NT_ADDRESS, USDC_ADDRESS }] = await Promise.all([
-          fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
-          import('./js/config.js'),
-        ]);
-        const amount = parseUnits(PASS_PRICE_USDC, USDC_DECIMALS);
-        const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [R3NT_ADDRESS, amount] });
-        const buyData = encodeFunctionData({ abi: r3ntAbiLocal, functionName: 'buyViewPass', args: [] });
-        els.status.textContent = 'Approving & purchasing…';
+        await loadConfig();
+        const price = typeof viewPassPrice === 'bigint' ? viewPassPrice : 0n;
+        if (typeof viewPassPrice !== 'bigint') {
+          console.warn('View pass price unavailable, defaulting to 0.');
+        }
+        let approveData;
+        const calls = [];
+        if (price > 0n) {
+          approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [PLATFORM_ADDRESS, price] });
+          calls.push({ to: USDC_ADDRESS, data: approveData });
+        }
+        const buyData = encodeFunctionData({ abi: PLATFORM_ABI, functionName: 'buyViewPass', args: [] });
+        calls.push({ to: PLATFORM_ADDRESS, data: buyData });
+        els.status.textContent = price > 0n ? 'Approving & purchasing…' : 'Purchasing view pass…';
         try {
-          await p.request({ method:'wallet_sendCalls', params:[{ calls: [ { to: USDC_ADDRESS, data: approveData }, { to: R3NT_ADDRESS, data: buyData } ] }] });
+          await p.request({ method:'wallet_sendCalls', params:[{ calls }] });
         } catch {
           try {
-            await p.request({ method:'wallet_sendCalls', params:[ { to: USDC_ADDRESS, data: approveData }, { to: R3NT_ADDRESS, data: buyData } ] });
+            await p.request({ method:'wallet_sendCalls', params: calls });
           } catch {
-            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
-            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: R3NT_ADDRESS, data: buyData }] });
+            if (price > 0n && approveData) {
+              await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+            }
+            await p.request({ method: 'eth_sendTransaction', params: [{ from, to: PLATFORM_ADDRESS, data: buyData }] });
           }
         }
         els.status.textContent = 'Success. View pass purchased.';
@@ -310,6 +381,8 @@
         await checkViewPass(from);
       } catch (err) { console.error(err); els.status.textContent = `Error: ${err?.message || err}`; }
     };
+
+    loadConfig().catch((err) => console.error('Initial config load failed', err));
   </script>
 </body>
 </html>
