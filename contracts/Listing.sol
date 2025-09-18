@@ -372,6 +372,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             require(start <= block.timestamp + maxBookingWindow, "beyond window");
         }
 
+        require(Platform(platform).hasActiveViewPass(msg.sender), "view pass required");
+
         uint256 grossRent = _calculateRent(start, end);
         (, uint16 landlordFeeBps) = Platform(platform).fees();
         uint256 landlordFeeAmount = (grossRent * landlordFeeBps) / BPS_DENOMINATOR;

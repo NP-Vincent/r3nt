@@ -159,6 +159,11 @@
           "internalType": "uint256",
           "name": "viewPassPrice_",
           "type": "uint256"
+        },
+        {
+          "internalType": "uint64",
+          "name": "viewPassDuration_",
+          "type": "uint64"
         }
       ],
       "name": "initialize",
@@ -260,6 +265,12 @@
           "internalType": "uint256",
           "name": "viewPassPrice",
           "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint64",
+          "name": "viewPassDuration",
+          "type": "uint64"
         }
       ],
       "name": "ListingPricingUpdated",
@@ -288,6 +299,25 @@
         }
       ],
       "name": "ListingRegistered",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "buyer",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "expiry",
+          "type": "uint256"
+        }
+      ],
+      "name": "ViewPassBought",
       "type": "event"
     },
     {
@@ -395,6 +425,11 @@
           "internalType": "uint256",
           "name": "newViewPassPrice",
           "type": "uint256"
+        },
+        {
+          "internalType": "uint64",
+          "name": "newViewPassDuration",
+          "type": "uint64"
         }
       ],
       "name": "setListingPricing",
@@ -829,6 +864,64 @@
     {
       "inputs": [],
       "name": "viewPassPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "account",
+          "type": "address"
+        }
+      ],
+      "name": "hasActiveViewPass",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "buyViewPass",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "viewPassDuration",
+      "outputs": [
+        {
+          "internalType": "uint64",
+          "name": "",
+          "type": "uint64"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "viewPassExpiry",
       "outputs": [
         {
           "internalType": "uint256",
