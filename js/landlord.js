@@ -1,5 +1,5 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
+import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
 import {
@@ -9,6 +9,7 @@ import {
   REGISTRY_ADDRESS,
   REGISTRY_ABI,
   APP_VERSION,
+  USDC_ADDRESS,
 } from './config.js';
 
 // -------------------- Config --------------------
@@ -419,7 +420,7 @@ els.create.onclick = () =>
 
       // 2) Submit createListing to the platform
       info(`Submitting createListing (fee ${formatUsdc(listingPrice)} USDC)…`);
-      const data = encodeFunctionData({
+      const createData = encodeFunctionData({
         abi,
         functionName: 'createListing',
         args: [
@@ -437,8 +438,75 @@ els.create.onclick = () =>
         ],
       });
 
-      const txHash = await provider.request({ method: 'eth_sendTransaction', params: [{ from, to: PLATFORM_ADDRESS, data }] });
-      info(`Listing tx sent: ${txHash}`);
+      const calls = [];
+      let approveData;
+      if (listingPrice > 0n) {
+        approveData = encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [PLATFORM_ADDRESS, listingPrice],
+        });
+        calls.push({ to: USDC_ADDRESS, data: approveData });
+      }
+
+      calls.push({ to: PLATFORM_ADDRESS, data: createData });
+
+      if (listingPrice > 0n) {
+        info(`Approving ${formatUsdc(listingPrice)} USDC listing fee…`);
+      } else {
+        info('Submitting createListing…');
+      }
+
+      let txHash;
+      const recordTxHash = (result) => {
+        if (!result) return;
+        const entries = Array.isArray(result?.results)
+          ? result.results
+          : Array.isArray(result)
+            ? result
+            : null;
+        if (!Array.isArray(entries) || entries.length === 0) return;
+        const last = entries[entries.length - 1];
+        const hash =
+          (typeof last?.hash === 'string' && last.hash.startsWith('0x'))
+            ? last.hash
+            : typeof last?.transactionHash === 'string' && last.transactionHash.startsWith('0x')
+              ? last.transactionHash
+              : null;
+        if (hash) {
+          txHash = hash;
+        }
+      };
+      try {
+        const result = await provider.request({ method: 'wallet_sendCalls', params: [{ calls }] });
+        recordTxHash(result);
+      } catch (err) {
+        try {
+          const result = await provider.request({ method: 'wallet_sendCalls', params: calls });
+          recordTxHash(result);
+        } catch (fallbackErr) {
+          try {
+            if (listingPrice > 0n && approveData) {
+              await provider.request({
+                method: 'eth_sendTransaction',
+                params: [{ from, to: USDC_ADDRESS, data: approveData }],
+              });
+            }
+            txHash = await provider.request({
+              method: 'eth_sendTransaction',
+              params: [{ from, to: PLATFORM_ADDRESS, data: createData }],
+            });
+          } catch (finalErr) {
+            throw finalErr;
+          }
+        }
+      }
+
+      if (txHash) {
+        info(`Listing tx sent: ${txHash}`);
+      } else {
+        info('Listing transaction submitted.');
+      }
     } catch (e) {
       info(`Error: ${e?.message || e}`);
     }
