@@ -159,9 +159,28 @@
 
     async function loadPlatformMeta() {
       try {
-        const [fees, creationFee, modules, usdcAddr] = await Promise.all([
+        const listingPricingPromise = (async () => {
+          try {
+            const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'listingPricing' });
+            if (result && typeof result === 'object') {
+              if ('listingCreationFee' in result || 'viewPassPrice' in result) {
+                return result;
+              }
+              if (Array.isArray(result)) {
+                const [listingCreationFee, viewPassPrice] = result;
+                return { listingCreationFee, viewPassPrice };
+              }
+            }
+          } catch {}
+          const [listingCreationFee, viewPassPrice] = await Promise.all([
+            pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'listingCreationFee' }),
+            pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'viewPassPrice' })
+          ]);
+          return { listingCreationFee, viewPassPrice };
+        })();
+        const [fees, pricingResult, modules, usdcAddr] = await Promise.all([
           pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'fees' }),
-          pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'listingCreationFee' }),
+          listingPricingPromise,
           pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'modules' }),
           pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'usdc' })
         ]);
@@ -170,6 +189,7 @@
           tenantFeeBps = feeResult.tenantBps ?? feeResult[0] ?? 0n,
           landlordFeeBps = feeResult.landlordBps ?? feeResult[1] ?? 0n,
         } = feeResult;
+        const { listingCreationFee = 0n, viewPassPrice = 0n } = pricingResult ?? {};
         const registryAddr = Array.isArray(modules) ? modules[1] : undefined;
         if (registryAddr && registryAddr !== ZERO_ADDRESS) {
           bookingRegistryAddress = registryAddr;
@@ -179,7 +199,9 @@
         }
         const tenantPct = (Number(tenantFeeBps || 0n) / 100).toFixed(2);
         const landlordPct = (Number(landlordFeeBps || 0n) / 100).toFixed(2);
-        els.feeInfo.textContent = `Platform fees (tenant/landlord): ${tenantPct}% / ${landlordPct}% · Listing creation fee: ${formatUsdc(creationFee || 0n)} USDC`;
+        const creationFeeFormatted = formatUsdc(listingCreationFee);
+        const viewPassFormatted = formatUsdc(viewPassPrice);
+        els.feeInfo.textContent = `Platform fees (tenant/landlord): ${tenantPct}% / ${landlordPct}% · Listing creation: ${creationFeeFormatted} USDC · View pass: ${viewPassFormatted} USDC`;
       } catch {
         els.feeInfo.textContent = 'Unable to load platform fee information.';
       }
