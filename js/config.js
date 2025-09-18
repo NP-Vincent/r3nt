@@ -9,19 +9,19 @@ export const RPC_URL = 'https://arb1.arbitrum.io/rpc';
 
 export const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
 
-export const R3NT_ADDRESS = '0xYourR3ntSQMUAddressHere'; // r3nt-SQMU (SQMU-R token)
+export const R3NT_ADDRESS = '0xCb9aBFeF8d3c63848C0676a2B8F9d4FAf96B396B'; // r3nt-SQMU (SQMU-R token)
 export const R3NT_ABI = R3NTSQMUArtifact.abi;
 
-export const REGISTRY_ADDRESS = '0xYourBookingRegistryAddressHere'; // BookingRegistry
+export const REGISTRY_ADDRESS = '0xa863B419d947e77888C25329011fDEF1d355d24D'; // BookingRegistry
 export const REGISTRY_ABI = BookingRegistryArtifact.abi;
 
-export const LISTING_ADDRESS = '0xYourListingImplementationAddressHere'; // Listing implementation
+export const LISTING_ADDRESS = '0xa9Bb7d69f672C7e4644f398e9235fAf714F8CA2B'; // Listing implementation
 export const LISTING_ABI = ListingArtifact.abi;
 
-export const FACTORY_ADDRESS = '0xYourListingFactoryAddressHere'; // ListingFactory
+export const FACTORY_ADDRESS = '0x4CC6c3B30DAf5473919a943B67B83a23B87bAe87'; // ListingFactory
 export const FACTORY_ABI = ListingFactoryArtifact.abi;
 
-export const PLATFORM_ADDRESS = '0xYourPlatformAddressHere'; // Platform
+export const PLATFORM_ADDRESS = '0x572891eB77CFe11bB61e970a64604fED524d7792'; // Platform
 export const PLATFORM_ABI = PlatformArtifact.abi;
 
 export const APP_NAME = 'r3nt';
