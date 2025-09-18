@@ -39,8 +39,6 @@
     .divider { height:1px; background:#eee; margin:14px 0; }
     nav { margin-bottom:16px; }
     nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
-    input[type="number"]::-webkit-outer-spin-button,
-    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   </style>
 </head>
 <body>
@@ -53,9 +51,11 @@
   <h1>r3nt — Create Listing</h1>
 
   <div id="contextBar" class="muted">Starting…</div>
-  <div id="feeInfo" class="muted">Platform info loading…</div>
+  <div id="feeInfo" class="muted">List fee: — USDC</div>
 
   <button id="connect" disabled>Connect Wallet</button>
+
+  <!-- Removed manual Cast URL/Hash field. We will compose and capture the hash automatically. -->
 
   <div class="row">
     <label>Latitude
@@ -86,29 +86,33 @@
     </label>
   </div>
 
-  <label>Base daily rate (USDC)
-    <input id="rateDaily" value="0" inputmode="decimal">
-  </label>
-
   <div class="row">
-    <label>Minimum notice (days)
-      <input id="minNotice" value="1" inputmode="numeric">
+    <label>Daily (USDC)
+      <input id="rateDaily"  value="0" inputmode="decimal">
     </label>
-    <label>Booking window (days, 0 = unlimited)
-      <input id="maxWindow" value="90" inputmode="numeric">
+    <label>Weekly (USDC)
+      <input id="rateWeekly" value="0" inputmode="decimal">
+    </label>
+    <label>Monthly (USDC)
+      <input id="rateMonthly" value="0" inputmode="decimal">
     </label>
   </div>
 
-  <label>Metadata URI (optional)
-    <input id="metadataUri" placeholder="https://...">
-  </label>
+  <div class="divider"></div>
+
+  <div class="muted">
+    <small class="mono">
+      Signers are fixed: landlord + platform (hidden).
+      <span id="signerMode" class="pill">2-of-2 (landlord + platform)</span>
+    </small>
+  </div>
 
   <button id="create" disabled>Create Listing</button>
   <div id="status"></div>
 
   <div class="divider"></div>
   <h2>Check Availability</h2>
-  <label>Listing ID (starts at 1)
+  <label>Listing ID
     <input id="availListing" inputmode="numeric" />
   </label>
   <div class="row">
@@ -124,24 +128,35 @@
 
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-    import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, stringToHex } from 'https://esm.sh/viem@2.9.32';
+    import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
     import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './js/tools.js';
-    import {
-      CHAIN_ID,
-      RPC_URL,
-      PLATFORM_ADDRESS,
-      PLATFORM_ABI,
-      REGISTRY_ADDRESS,
-      REGISTRY_ABI
-    } from './js/config.js';
+    import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS, RPC_URL, REGISTRY_ADDRESS } from './js/config.js';
 
-    const CHAIN_ID_HEX = '0x' + CHAIN_ID.toString(16);
-    const USDC_DECIMALS = 6;
+    // -------------------- Config --------------------
+    const ARBITRUM_HEX   = '0xa4b1';
+    const USDC_DECIMALS  = 6;
 
+    // 2-of-2 cosigners (landlord + platform)
+    const PLATFORM_SIGNER = PLATFORM_ADDRESS;
+    const encodeErc7913Ecdsa = (addr) => '0x00' + getAddress(addr).slice(2);
+
+    // Minimal ERC-20 ABI surface
+    const erc20Abi = [
+      { type:'function', name:'approve',   stateMutability:'nonpayable',
+        inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}],
+        outputs:[{type:'bool'}] },
+      { type:'function', name:'allowance', stateMutability:'view',
+        inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}],
+        outputs:[{type:'uint256'}] },
+    ];
+    let r3ntAbi, bookingAbi, bookingAddr;
+
+    // -------------------- UI handles --------------------
     const els = {
       contextBar:  document.getElementById('contextBar'),
       feeInfo:     document.getElementById('feeInfo'),
+      signerMode:  document.getElementById('signerMode'),
       connect:     document.getElementById('connect'),
       create:      document.getElementById('create'),
       status:      document.getElementById('status'),
@@ -152,27 +167,17 @@
       deposit:     document.getElementById('deposit'),
       areaSqm:     document.getElementById('areaSqm'),
       rateDaily:   document.getElementById('rateDaily'),
-      minNotice:   document.getElementById('minNotice'),
-      maxWindow:   document.getElementById('maxWindow'),
-      metadataUri: document.getElementById('metadataUri'),
+      rateWeekly:  document.getElementById('rateWeekly'),
+      rateMonthly: document.getElementById('rateMonthly'),
       availListing:document.getElementById('availListing'),
       availStart:  document.getElementById('availStart'),
       availEnd:    document.getElementById('availEnd'),
       checkAvail:  document.getElementById('checkAvail'),
       availResult: document.getElementById('availResult'),
     };
-    const info = (t) => { els.status.textContent = t; };
+    const info = (t) => els.status.textContent = t;
 
-    function formatUsdc(amount) {
-      const n = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
-      const negative = n < 0n;
-      const abs = negative ? -n : n;
-      const units = abs / 1_000_000n;
-      const fraction = abs % 1_000_000n;
-      const fractionStr = fraction.toString().padStart(6, '0').replace(/0+$/, '');
-      return `${negative ? '-' : ''}${units.toString()}${fractionStr ? '.' + fractionStr : ''}`;
-    }
-
+    // helpers
     function utf8BytesLen(str){ return new TextEncoder().encode(str).length; }
     function parseLatLon(latStr, lonStr) {
       const lat = Number(latStr), lon = Number(lonStr);
@@ -186,7 +191,7 @@
       if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
       return parseUnits(v, USDC_DECIMALS);
     }
-    function parseAreaSqmInput(input) {
+    function parseAreaSqm(input) {
       const v = String(input ?? '').trim();
       if (v === '') throw new Error('Square metre area is required.');
       if (!/^\d+$/.test(v)) throw new Error('Area must be a whole number.');
@@ -195,53 +200,25 @@
       if (value > 4_294_967_295n) throw new Error('Area exceeds uint32 limit.');
       return value;
     }
-    function parseDaysToSeconds(input, allowZero = false) {
-      const raw = String(input ?? '').trim();
-      if (raw === '') throw new Error('Enter number of days.');
-      if (!/^\d+$/.test(raw)) throw new Error('Use whole number of days.');
-      const days = BigInt(raw);
-      if (!allowZero && days === 0n) throw new Error('Value must be greater than zero.');
-      const secondsPerDay = 86_400n;
-      return days * secondsPerDay;
-    }
     function normalizeCastHash(h) {
       if (typeof h !== 'string') return null;
       const hex = h.startsWith('0x') ? h : ('0x' + h);
       if (!isHex20or32(hex)) return null;
       return toBytes32FromCastHash(hex);
     }
-    function disableWhile(el, fn){
-      return (async()=>{
-        el.disabled = true;
-        try { return await fn(); }
-        finally { el.disabled = false; }
-      })();
-    }
+    function disableWhile(el, fn){ return (async()=>{ el.disabled = true; try { return await fn(); } finally { el.disabled = false; } })(); }
 
-    const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
-
-    async function ensureArbitrum(p) {
-      const id = await p.request({ method: 'eth_chainId' });
-      if (id !== CHAIN_ID_HEX) {
-        try {
-          await p.request({ method:'wallet_switchEthereumChain', params:[{ chainId: CHAIN_ID_HEX }] });
-        } catch {
-          await p.request({
-            method:'wallet_addEthereumChain',
-            params:[{
-              chainId: CHAIN_ID_HEX,
-              chainName:'Arbitrum One',
-              nativeCurrency:{ name:'Ether', symbol:'ETH', decimals:18 },
-              rpcUrls:[RPC_URL || 'https://arb1.arbitrum.io/rpc'],
-              blockExplorerUrls:['https://arbiscan.io']
-            }]
-          });
-        }
+    async function loadBooking(){
+      if (!bookingAbi) {
+        bookingAbi = await fetch('./js/abi/BookingRegistry.json').then(r => r.json()).then(j => j.abi);
+        bookingAddr = REGISTRY_ADDRESS;
       }
     }
 
-    let fidBig;
-    let provider;
+    // -------------------- Boot --------------------
+    let fidBig;      // bigint from QuickAuth
+    let provider;    // EIP-1193
+    const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 
     (async () => {
       try { await sdk.actions.ready(); } catch {}
@@ -259,18 +236,35 @@
       }
 
       try {
-        const creationFee = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'listingCreationFee' });
-        const [tenantFeeBps, landlordFeeBps] = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'fees' });
-        const creationStr = formatUsdc(creationFee || 0n);
-        const tenantPct = (Number(tenantFeeBps || 0n) / 100).toFixed(2);
-        const landlordPct = (Number(landlordFeeBps || 0n) / 100).toFixed(2);
-        els.feeInfo.textContent = `Creation fee: ${creationStr} USDC · Platform fees (tenant/landlord): ${tenantPct}% / ${landlordPct}%`;
+        r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
+        const fee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
+        const feeNum = Number(fee)/1e6;
+        els.feeInfo.textContent = `List fee: ${feeNum % 1 === 0 ? feeNum.toFixed(0) : feeNum.toFixed(6)} USDC`;
       } catch {
-        els.feeInfo.textContent = 'Unable to load platform fees.';
+        els.feeInfo.textContent = 'List fee: (unavailable)';
       }
 
       els.connect.disabled = false;
     })();
+
+    // -------------------- Wallet connect --------------------
+    async function ensureArbitrum(p) {
+      const id = await p.request({ method: 'eth_chainId' });
+      if (id !== ARBITRUM_HEX) {
+        try {
+          await p.request({ method:'wallet_switchEthereumChain', params:[{ chainId: ARBITRUM_HEX }] });
+        } catch {
+          await p.request({
+            method:'wallet_addEthereumChain',
+            params:[{
+              chainId: ARBITRUM_HEX, chainName:'Arbitrum One',
+              nativeCurrency:{ name:'Ether', symbol:'ETH', decimals:18 },
+              rpcUrls:['https://arb1.arbitrum.io/rpc'], blockExplorerUrls:['https://arbiscan.io']
+            }]
+          });
+        }
+      }
+    }
 
     els.connect.onclick = async () => {
       try {
@@ -281,11 +275,10 @@
         els.connect.style.background = '#10b981';
         els.create.disabled = false;
         info('Wallet ready.');
-      } catch (e) {
-        info(e?.message || 'Wallet connection failed.');
-      }
+      } catch (e) { info(e?.message || 'Wallet connection failed.'); }
     };
 
+    // -------------------- Create listing (compose cast → on-chain) --------------------
     els.create.onclick = () => disableWhile(els.create, async () => {
       try {
         if (fidBig === undefined) throw new Error('QuickAuth did not provide FID.');
@@ -296,6 +289,7 @@
         await ensureArbitrum(provider);
         const landlordAddr = getAddress(from);
 
+        // Inputs + guards
         const title = els.title.value.trim();
         const shortDesc = els.shortDesc.value.trim();
         if (!title) throw new Error('Title is required.');
@@ -304,16 +298,21 @@
         if (utf8BytesLen(shortDesc) > 140) throw new Error('Short description exceeds 140 bytes.');
 
         const deposit    = parseDec6(els.deposit.value);
-        const baseRate   = parseDec6(els.rateDaily.value || '0');
+        const rateDaily  = parseUnits(String(els.rateDaily.value||'0'),  USDC_DECIMALS);
+        const rateWeekly = parseUnits(String(els.rateWeekly.value||'0'), USDC_DECIMALS);
+        const rateMonthly= parseUnits(String(els.rateMonthly.value||'0'),USDC_DECIMALS);
+
         const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
         const geohashStr = latLonToGeohash(lat, lon, 7);
-        const geohashBytes = stringToHex(geohashStr, { size: 32 });
         const geolen = geohashStr.length;
-        const areaSqm = parseAreaSqmInput(els.areaSqm.value);
-        const minNoticeSec = parseDaysToSeconds(els.minNotice.value, false);
-        const maxWindowSec = parseDaysToSeconds(els.maxWindow.value, true);
-        const metadataUri = els.metadataUri.value.trim();
+        const areaSqm = parseAreaSqm(els.areaSqm.value);
 
+        if (!r3ntAbi) {
+          r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
+        }
+        const listFee = await pub.readContract({ address: R3NT_ADDRESS, abi: r3ntAbi, functionName: 'listFee' });
+
+        // 1) Compose the landlord's canonical cast and capture the hash
         info('Open composer… Post your listing cast.');
         const qs = [
           'draft=1',
@@ -337,28 +336,45 @@
         }
         const castHash = normalizeCastHash(res.cast.hash);
         if (!castHash) {
+          // console.debug('composeCast raw:', res);
           throw new Error('Host returned an unexpected cast.hash format.');
         }
+        info('Cast posted. Continuing on-chain…');
 
-        info('Cast posted. Submitting on-chain…');
+        // 2) Prepare signers/threshold
+        const signersBytes = [
+          encodeErc7913Ecdsa(landlordAddr),
+          encodeErc7913Ecdsa(PLATFORM_SIGNER),
+        ];
+        const threshold = 2n;
+
+        // 3) Approve list fee if needed
+        const cur = await pub.readContract({ address: USDC_ADDRESS, abi: erc20Abi, functionName:'allowance', args:[landlordAddr, R3NT_ADDRESS] });
+        if (cur < listFee) {
+          info('Approving USDC list fee…');
+          const approveData = encodeFunctionData({ abi: erc20Abi, functionName:'approve', args:[R3NT_ADDRESS, listFee] });
+          await provider.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
+        }
+
+        // 4) Submit createListing with captured cast hash
+        info('Submitting createListing…');
         const data = encodeFunctionData({
-          abi: PLATFORM_ABI,
-          functionName:'createListing',
+          abi: r3ntAbi, functionName:'createListing',
           args: [
-            landlordAddr,
-            fidBig,
-            castHash,
-            geohashBytes,
-            geolen,
-            areaSqm,
-            baseRate,
+            USDC_ADDRESS,
             deposit,
-            minNoticeSec,
-            maxWindowSec,
-            metadataUri
+            rateDaily, rateWeekly, rateMonthly,
+            geohashStr, geolen,
+            areaSqm,
+            fidBig,
+            castHash,             // bytes32 on-chain
+            title, shortDesc,
+            signersBytes,
+            threshold
           ]
         });
-        const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to: PLATFORM_ADDRESS, data }] });
+
+        const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to:R3NT_ADDRESS, data }] });
         info(`Listing tx sent: ${txHash}`);
       } catch (e) {
         info(`Error: ${e?.message || e}`);
@@ -367,21 +383,17 @@
 
     els.checkAvail.onclick = () => disableWhile(els.checkAvail, async () => {
       try {
-        const idStr = els.availListing.value.trim();
-        if (!/^\d+$/.test(idStr)) throw new Error('Enter listing id.');
-        const listingId = BigInt(idStr);
+        await loadBooking();
+        const id = BigInt(els.availListing.value);
         const start = els.availStart.value;
         const end = els.availEnd.value;
         if (!start || !end) throw new Error('Select dates.');
         const sTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
         const eTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
         if (eTs <= sTs) throw new Error('End before start');
-
-        const listingAddr = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'listingById', args:[listingId] });
-        if (!listingAddr || listingAddr === '0x0000000000000000000000000000000000000000') {
-          throw new Error('Listing not found.');
-        }
-        const free = await pub.readContract({ address: REGISTRY_ADDRESS, abi: REGISTRY_ABI, functionName:'isAvailable', args:[listingAddr, sTs, eTs] });
+        if (!r3ntAbi) { r3ntAbi = await fetch('./js/abi/r3nt.json').then(r=>r.json()).then(j=>j.abi); }
+        const listing = await pub.readContract({ address:R3NT_ADDRESS, abi:r3ntAbi, functionName:'getListing', args:[id] });
+        const free = await pub.readContract({ address:bookingAddr, abi:bookingAbi, functionName:'isFree', args:[listing.vault, sTs, eTs] });
         els.availResult.textContent = free ? 'Available' : 'Booked';
       } catch (e) {
         els.availResult.textContent = e?.message || 'Error';
