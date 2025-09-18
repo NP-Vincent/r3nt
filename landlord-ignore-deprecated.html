@@ -46,6 +46,7 @@
     <a href="./index.html">Home</a>
     <a href="./tenant.html">Tenant</a>
     <a href="./landlord.html">Landlord</a>
+    <a href="./admin.html">Admin</a>
   </nav>
   <h1>r3nt — Create Listing</h1>
 
@@ -80,6 +81,9 @@
     <label>Deposit (USDC)
       <input id="deposit" placeholder="100.00" inputmode="decimal">
     </label>
+    <label>Property size (m²)
+      <input id="areaSqm" placeholder="85" inputmode="numeric">
+    </label>
   </div>
 
   <div class="row">
@@ -106,12 +110,28 @@
   <button id="create" disabled>Create Listing</button>
   <div id="status"></div>
 
+  <div class="divider"></div>
+  <h2>Check Availability</h2>
+  <label>Listing ID
+    <input id="availListing" inputmode="numeric" />
+  </label>
+  <div class="row">
+    <label>Start
+      <input type="date" id="availStart" />
+    </label>
+    <label>End
+      <input type="date" id="availEnd" />
+    </label>
+  </div>
+  <button id="checkAvail">Check</button>
+  <div id="availResult" class="muted"></div>
+
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
     import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './js/tools.js';
-    import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS, RPC_URL } from './js/config.js';
+    import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS, RPC_URL, REGISTRY_ADDRESS } from './js/config.js';
 
     // -------------------- Config --------------------
     const ARBITRUM_HEX   = '0xa4b1';
@@ -130,7 +150,7 @@
         inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}],
         outputs:[{type:'uint256'}] },
     ];
-    let r3ntAbi;
+    let r3ntAbi, bookingAbi, bookingAddr;
 
     // -------------------- UI handles --------------------
     const els = {
@@ -145,9 +165,15 @@
       title:       document.getElementById('title'),
       shortDesc:   document.getElementById('shortDesc'),
       deposit:     document.getElementById('deposit'),
+      areaSqm:     document.getElementById('areaSqm'),
       rateDaily:   document.getElementById('rateDaily'),
       rateWeekly:  document.getElementById('rateWeekly'),
       rateMonthly: document.getElementById('rateMonthly'),
+      availListing:document.getElementById('availListing'),
+      availStart:  document.getElementById('availStart'),
+      availEnd:    document.getElementById('availEnd'),
+      checkAvail:  document.getElementById('checkAvail'),
+      availResult: document.getElementById('availResult'),
     };
     const info = (t) => els.status.textContent = t;
 
@@ -165,6 +191,15 @@
       if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
       return parseUnits(v, USDC_DECIMALS);
     }
+    function parseAreaSqm(input) {
+      const v = String(input ?? '').trim();
+      if (v === '') throw new Error('Square metre area is required.');
+      if (!/^\d+$/.test(v)) throw new Error('Area must be a whole number.');
+      const value = BigInt(v);
+      if (value === 0n) throw new Error('Area must be greater than zero.');
+      if (value > 4_294_967_295n) throw new Error('Area exceeds uint32 limit.');
+      return value;
+    }
     function normalizeCastHash(h) {
       if (typeof h !== 'string') return null;
       const hex = h.startsWith('0x') ? h : ('0x' + h);
@@ -172,6 +207,13 @@
       return toBytes32FromCastHash(hex);
     }
     function disableWhile(el, fn){ return (async()=>{ el.disabled = true; try { return await fn(); } finally { el.disabled = false; } })(); }
+
+    async function loadBooking(){
+      if (!bookingAbi) {
+        bookingAbi = await fetch('./js/abi/BookingRegistry.json').then(r => r.json()).then(j => j.abi);
+        bookingAddr = REGISTRY_ADDRESS;
+      }
+    }
 
     // -------------------- Boot --------------------
     let fidBig;      // bigint from QuickAuth
@@ -263,6 +305,7 @@
         const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
         const geohashStr = latLonToGeohash(lat, lon, 7);
         const geolen = geohashStr.length;
+        const areaSqm = parseAreaSqm(els.areaSqm.value);
 
         if (!r3ntAbi) {
           r3ntAbi = await fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi);
@@ -276,7 +319,8 @@
           `title=${encodeURIComponent(title)}`,
           `shortDesc=${encodeURIComponent(shortDesc)}`,
           `lat=${encodeURIComponent(String(lat))}`,
-          `lon=${encodeURIComponent(String(lon))}`
+          `lon=${encodeURIComponent(String(lon))}`,
+          `areaSqm=${encodeURIComponent(areaSqm.toString())}`
         ].join('&');
         const embedUrl = `https://r3nt.sqmu.net/index.html?${qs}`;
         const res = await sdk.actions.composeCast({
@@ -321,6 +365,7 @@
             deposit,
             rateDaily, rateWeekly, rateMonthly,
             geohashStr, geolen,
+            areaSqm,
             fidBig,
             castHash,             // bytes32 on-chain
             title, shortDesc,
@@ -333,6 +378,25 @@
         info(`Listing tx sent: ${txHash}`);
       } catch (e) {
         info(`Error: ${e?.message || e}`);
+      }
+    });
+
+    els.checkAvail.onclick = () => disableWhile(els.checkAvail, async () => {
+      try {
+        await loadBooking();
+        const id = BigInt(els.availListing.value);
+        const start = els.availStart.value;
+        const end = els.availEnd.value;
+        if (!start || !end) throw new Error('Select dates.');
+        const sTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
+        const eTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
+        if (eTs <= sTs) throw new Error('End before start');
+        if (!r3ntAbi) { r3ntAbi = await fetch('./js/abi/r3nt.json').then(r=>r.json()).then(j=>j.abi); }
+        const listing = await pub.readContract({ address:R3NT_ADDRESS, abi:r3ntAbi, functionName:'getListing', args:[id] });
+        const free = await pub.readContract({ address:bookingAddr, abi:bookingAbi, functionName:'isFree', args:[listing.vault, sTs, eTs] });
+        els.availResult.textContent = free ? 'Available' : 'Booked';
+      } catch (e) {
+        els.availResult.textContent = e?.message || 'Error';
       }
     });
   </script>
