@@ -293,14 +293,32 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
      * @param platform_ Address of the platform contract orchestrating bookings.
      * @param bookingRegistry_ Booking registry handling availability.
      * @param sqmuToken_ r3nt-SQMU token used for investor SQMU-R issuance.
-     * @param params Listing parameters forwarded from the platform.
+     * @param fid_ Landlord Farcaster identifier stored for deep links.
+     * @param castHash_ Canonical Farcaster cast hash (32-byte normalized form).
+     * @param geohash_ Geospatial hash encoded as bytes32 (left aligned, zero padded).
+     * @param geohashPrecision_ Number of significant characters in the geohash.
+     * @param areaSqm_ Property area in whole square metres.
+     * @param baseDailyRate_ Base price per day denominated in USDC (6 decimals).
+     * @param depositAmount_ Security deposit denominated in USDC (6 decimals).
+     * @param minBookingNotice_ Minimum notice required before booking start (seconds).
+     * @param maxBookingWindow_ Maximum look-ahead window tenants can book (seconds).
+     * @param metadataURI_ Off-chain metadata pointer (IPFS/HTTPS).
      */
     function initialize(
         address landlord_,
         address platform_,
         address bookingRegistry_,
         address sqmuToken_,
-        Platform.ListingParams calldata params
+        uint256 fid_,
+        bytes32 castHash_,
+        bytes32 geohash_,
+        uint8 geohashPrecision_,
+        uint32 areaSqm_,
+        uint256 baseDailyRate_,
+        uint256 depositAmount_,
+        uint64 minBookingNotice_,
+        uint64 maxBookingWindow_,
+        string calldata metadataURI_
     ) external initializer {
         require(landlord_ != address(0), "landlord=0");
         require(platform_ != address(0), "platform=0");
@@ -322,18 +340,18 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         require(registryFromPlatform == bookingRegistry_, "registry mismatch");
         require(sqmuTokenFromPlatform == sqmuToken_, "sqmu token mismatch");
 
-        fid = params.fid;
-        castHash = params.castHash;
-        geohash = params.geohash;
-        geohashPrecision = params.geohashPrecision;
-        areaSqm = params.areaSqm;
-        baseDailyRate = params.baseDailyRate;
-        depositAmount = params.depositAmount;
-        minBookingNotice = params.minBookingNotice;
-        maxBookingWindow = params.maxBookingWindow;
-        metadataURI = params.metadataURI;
+        fid = fid_;
+        castHash = castHash_;
+        geohash = geohash_;
+        geohashPrecision = geohashPrecision_;
+        areaSqm = areaSqm_;
+        baseDailyRate = baseDailyRate_;
+        depositAmount = depositAmount_;
+        minBookingNotice = minBookingNotice_;
+        maxBookingWindow = maxBookingWindow_;
+        metadataURI = metadataURI_;
 
-        emit ListingInitialized(landlord_, platform_, params.fid);
+        emit ListingInitialized(landlord_, platform_, fid_);
     }
 
     // -------------------------------------------------

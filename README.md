@@ -34,14 +34,19 @@ The platform contract owns global configuration and orchestrates listing creatio
   `setTreasury`, `setFees`, `setListingPricing` and `setModules`.
 - Read helpers like `modules()` and `fees()` surface the active configuration to off-chain
   consumers.
-- `createListing(address landlord, ListingParams params)` requests the factory to clone a new
-  listing and emits `ListingCreated(listing, landlord)`.
+- `createListing(address landlord, uint256 fid, bytes32 castHash, bytes32 geohash, uint8 geohashPrecision,
+  uint32 areaSqm, uint256 baseDailyRate, uint256 depositAmount, uint64 minBookingNotice,
+  uint64 maxBookingWindow, string metadataURI)` requests the factory to clone a new listing and emits
+  `ListingCreated(listing, landlord)`.
 
 ### ListingFactory (`ListingFactory.sol`)
 A minimal proxy factory that deploys listing clones on demand.
 - Tracks the address of the current `Listing` implementation.
-- `createListing(address landlord, ListingParams params)` deploys a clone, then calls
-  `initialize(landlord, platform, bookingRegistry, sqmuToken, params)` on it.
+- `createListing(address landlord, uint256 fid, bytes32 castHash, bytes32 geohash, uint8 geohashPrecision,
+  uint32 areaSqm, uint256 baseDailyRate, uint256 depositAmount, uint64 minBookingNotice,
+  uint64 maxBookingWindow, string metadataURI)` deploys a clone, then calls
+  `initialize(landlord, platform, bookingRegistry, sqmuToken, fid, castHash, geohash, geohashPrecision,
+  areaSqm, baseDailyRate, depositAmount, minBookingNotice, maxBookingWindow, metadataURI)` on it.
 - Emits `ListingCreated(listing, landlord)` for indexing.
 - `updateImplementation(address newImpl)` (owner-only) swaps the template used for future
   clones.
@@ -67,8 +72,9 @@ each booking.
 
 ### Listing (`Listing.sol`)
 The per-property clone that handles bookings, deposit escrow, tokenisation and rent streaming.
-- Initialised via `initialize(landlord, platform, bookingRegistry, sqmuToken, params)` which pulls
-  USDC, module and metadata configuration from the platform.
+- Initialised via `initialize(landlord, platform, bookingRegistry, sqmuToken, fid, castHash, geohash,
+  geohashPrecision, areaSqm, baseDailyRate, depositAmount, minBookingNotice, maxBookingWindow,
+  metadataURI)` which pulls USDC, module and metadata configuration from the platform.
 - Stores references to the platform, booking registry, r3nt-SQMU token and USDC token alongside the
   landlord, deposit amount and base daily rate that drives rent calculations.
 - Implements the full booking lifecycle, deposit split approvals, optional tokenisation,
@@ -160,8 +166,9 @@ Key events emitted by `Listing.sol` include `BookingCreated`, `DepositSplitPropo
 3. Deploy the `Listing` implementation without initialising it.
 4. Deploy `ListingFactory`, pointing it at the `Listing` implementation.
 5. Deploy `Platform`, configuring the USDC address, fees and module addresses.
-6. Have the platform call `createListing(landlord, params)` to clone and initialise new
-   listings.
+6. Have the platform call `createListing(landlord, fid, castHash, geohash, geohashPrecision,
+   areaSqm, baseDailyRate, depositAmount, minBookingNotice, maxBookingWindow, metadataURI)` to
+   clone and initialise new listings.
 7. Update the front-end/subgraph to target the unified booking and tokenisation flows.
 
 ## Deploying from Remix IDE
@@ -186,17 +193,17 @@ to the proxy constructor and should **not** be interacted with directly afterwar
 
 ### 3. Encode initializer calldata
 1. Expand the freshly deployed implementation in the **Deployed Contracts** list.
-2. Fill in the `initialize` parameters as tuples. For example, `Platform.InitializeParams` expects
-   `[owner, treasury, usdc, listingFactory, bookingRegistry, sqmuToken, tenantFeeBps,
-   landlordFeeBps, listingCreationFee, viewPassPrice]`.
+2. Fill in the `initialize` arguments in the exact order expected by each module:
+   - `Platform.initialize(owner, treasury, usdc, listingFactory, bookingRegistry, sqmuToken,
+     tenantFeeBps, landlordFeeBps, listingCreationFee, viewPassPrice)`
+   - `ListingFactory.initialize(owner, temporaryPlatform, listingImplementation)`
+   - `BookingRegistry.initialize(owner, temporaryPlatform)`
+   - `R3ntSQMU.initialize(owner, temporaryPlatform, baseURI)`
+   The `temporaryPlatform` value can be your deployer address and will be updated once the platform
+   proxy goes live.
 3. Click the clipboard icon next to the `transact` button to copy the ABI-encoded calldata. Do not
    send the transaction — it will revert because the implementation was locked by
    `_disableInitializers()`.
-
-Repeat this for `ListingFactory.InitializeParams` (`[owner, temporaryPlatform, listingImplementation]`),
-`BookingRegistry.InitializeParams` (`[owner, temporaryPlatform]`) and `R3ntSQMU.InitializeParams`
-(` [owner, temporaryPlatform, baseURI]`). The `temporaryPlatform` value can be your deployer address
-and will be updated after the platform proxy goes live.
 
 ### 4. Deploy the proxies
 For each module create an `ERC1967Proxy` instance by supplying the implementation address and the
@@ -204,8 +211,8 @@ encoded initializer bytes copied in the previous step. The recommended order is:
 
 1. Deploy `Listing.sol` (implementation only, no proxy required — clones call `initialize` later).
 2. Deploy `ListingFactory`, `BookingRegistry` and `r3nt-SQMU` proxies.
-3. Deploy the `Platform` proxy, passing the addresses of the previously deployed proxies inside the
-   `InitializeParams` struct.
+3. Deploy the `Platform` proxy, passing the configuration and module addresses in the order listed
+   above for `Platform.initialize`.
 
 After every proxy is created, interact with it using the relevant ABI by selecting the contract in
 Remix and clicking **At Address**, then pasting the proxy address.

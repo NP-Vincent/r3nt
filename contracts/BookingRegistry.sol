@@ -16,12 +16,6 @@ contract BookingRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /// @notice Number of seconds that compose a single booking day.
     uint64 public constant SECONDS_PER_DAY = 86_400;
 
-    /// @notice Initialization arguments for the booking registry.
-    struct InitializeParams {
-        address owner; // Platform multi-sig controlling upgrades/configuration
-        address platform; // Platform contract authorised for overrides
-    }
-
     // -------------------------------------------------
     // Storage
     // -------------------------------------------------
@@ -69,21 +63,22 @@ contract BookingRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     /**
      * @notice Initialize the booking registry with the owning multi-sig and platform contract.
-     * @param params Struct bundling the initial configuration values.
+     * @param owner_ Platform multi-sig controlling upgrades/configuration.
+     * @param platform_ Platform contract authorised for overrides.
      */
-    function initialize(InitializeParams calldata params) external initializer {
-        require(params.owner != address(0), "owner=0");
+    function initialize(address owner_, address platform_) external initializer {
+        require(owner_ != address(0), "owner=0");
 
-        __Ownable_init(params.owner);
+        __Ownable_init(owner_);
         __UUPSUpgradeable_init();
 
-        address initialPlatform = params.platform;
+        address initialPlatform = platform_;
         platform = initialPlatform;
         if (initialPlatform != address(0)) {
             emit PlatformUpdated(address(0), initialPlatform);
         }
 
-        emit BookingRegistryInitialized(params.owner, initialPlatform);
+        emit BookingRegistryInitialized(owner_, initialPlatform);
     }
 
     // -------------------------------------------------

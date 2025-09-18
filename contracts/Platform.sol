@@ -18,39 +18,21 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /// @dev Number of decimals expected from the USDC token (informational helper).
     uint8 public constant USDC_DECIMALS = 6;
 
-    /// @notice Parameters forwarded to listing clones during initialization.
-    struct ListingParams {
-        uint256 fid; // Landlord Farcaster identifier (stored for deep-links)
-        bytes32 castHash; // Canonical Farcaster cast hash (32-byte normalized form)
-        bytes32 geohash; // Geospatial hash encoded as bytes32 (left-aligned, 0 padded)
-        uint8 geohashPrecision; // Number of significant characters in the geohash
-        uint32 areaSqm; // Property area in whole square metres
-        uint256 baseDailyRate; // Base price per day denominated in USDC (6 decimals)
-        uint256 depositAmount; // Security deposit denominated in USDC (6 decimals)
-        uint64 minBookingNotice; // Minimum notice required before booking start (seconds)
-        uint64 maxBookingWindow; // Maximum look-ahead window tenants can book (seconds)
-        string metadataURI; // Off-chain metadata pointer (IPFS/HTTPS)
-    }
-
-    /// @notice Initialization arguments for the platform contract.
-    struct InitializeParams {
-        address owner; // Platform multi-sig that controls upgrades/configuration
-        address treasury; // Fee sink receiving protocol fees
-        address usdc; // Canonical USDC token address used for settlements
-        address listingFactory; // Listing factory responsible for cloning listings
-        address bookingRegistry; // Shared registry maintaining booking availability
-        address sqmuToken; // ERC-1155 token contract handling investor SQMU-R positions
-        uint16 tenantFeeBps; // Platform fee applied to tenants in basis points
-        uint16 landlordFeeBps; // Platform fee applied to landlords in basis points
-        uint256 listingCreationFee; // Fee charged for creating a listing (USDC, 6 decimals)
-        uint256 viewPassPrice; // Optional price for premium listing views (USDC, 6 decimals)
-    }
-
     /// @dev Minimal interface exposed by the listing factory.
     interface IListingFactory {
-        function createListing(address landlord, ListingParams calldata params)
-            external
-            returns (address listing);
+        function createListing(
+            address landlord,
+            uint256 fid,
+            bytes32 castHash,
+            bytes32 geohash,
+            uint8 geohashPrecision,
+            uint32 areaSqm,
+            uint256 baseDailyRate,
+            uint256 depositAmount,
+            uint64 minBookingNotice,
+            uint64 maxBookingWindow,
+            string calldata metadataURI
+        ) external returns (address listing);
     }
 
     // -------------------------------------------------
@@ -122,22 +104,42 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     /**
      * @notice Initialize the platform configuration. Intended to be called exactly once through the proxy.
-     * @param params Struct bundling initial configuration values.
+     * @param owner_ Platform multi-sig that controls upgrades/configuration.
+     * @param treasury_ Fee sink receiving protocol fees.
+     * @param usdc_ Canonical USDC token address used for settlements.
+     * @param listingFactory_ Listing factory responsible for cloning listings.
+     * @param bookingRegistry_ Shared registry maintaining booking availability.
+     * @param sqmuToken_ ERC-1155 token contract handling investor SQMU-R positions.
+     * @param tenantFeeBps_ Platform fee applied to tenants in basis points.
+     * @param landlordFeeBps_ Platform fee applied to landlords in basis points.
+     * @param listingCreationFee_ Fee charged for creating a listing (USDC, 6 decimals).
+     * @param viewPassPrice_ Optional price for premium listing views (USDC, 6 decimals).
      */
-    function initialize(InitializeParams calldata params) external initializer {
-        require(params.owner != address(0), "owner=0");
-        require(params.usdc != address(0), "usdc=0");
+    function initialize(
+        address owner_,
+        address treasury_,
+        address usdc_,
+        address listingFactory_,
+        address bookingRegistry_,
+        address sqmuToken_,
+        uint16 tenantFeeBps_,
+        uint16 landlordFeeBps_,
+        uint256 listingCreationFee_,
+        uint256 viewPassPrice_
+    ) external initializer {
+        require(owner_ != address(0), "owner=0");
+        require(usdc_ != address(0), "usdc=0");
 
-        __Ownable_init(params.owner);
+        __Ownable_init(owner_);
         __UUPSUpgradeable_init();
 
-        _setUsdc(params.usdc);
-        _setTreasury(params.treasury);
-        _setModules(params.listingFactory, params.bookingRegistry, params.sqmuToken);
-        _setFees(params.tenantFeeBps, params.landlordFeeBps);
-        _setListingPricing(params.listingCreationFee, params.viewPassPrice);
+        _setUsdc(usdc_);
+        _setTreasury(treasury_);
+        _setModules(listingFactory_, bookingRegistry_, sqmuToken_);
+        _setFees(tenantFeeBps_, landlordFeeBps_);
+        _setListingPricing(listingCreationFee_, viewPassPrice_);
 
-        emit PlatformInitialized(params.owner, params.usdc, params.treasury);
+        emit PlatformInitialized(owner_, usdc_, treasury_);
     }
 
     // -------------------------------------------------
@@ -176,20 +178,49 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /**
      * @notice Create a new listing clone via the configured factory.
      * @param landlord Address of the landlord controlling the new listing.
-     * @param params Listing configuration parameters forwarded to the clone.
+     * @param fid Landlord Farcaster identifier stored for deep links.
+     * @param castHash Canonical Farcaster cast hash (32-byte normalized form).
+     * @param geohash Geospatial hash encoded as bytes32 (left-aligned, zero padded).
+     * @param geohashPrecision Number of significant characters in the geohash.
+     * @param areaSqm Property area in whole square metres.
+     * @param baseDailyRate Base price per day denominated in USDC (6 decimals).
+     * @param depositAmount Security deposit denominated in USDC (6 decimals).
+     * @param minBookingNotice Minimum notice required before booking start (seconds).
+     * @param maxBookingWindow Maximum look-ahead window tenants can book (seconds).
+     * @param metadataURI Off-chain metadata pointer (IPFS/HTTPS).
      * @return listing Address of the newly deployed listing clone.
      */
-    function createListing(address landlord, ListingParams calldata params)
-        external
-        onlyOwner
-        returns (address listing)
-    {
+    function createListing(
+        address landlord,
+        uint256 fid,
+        bytes32 castHash,
+        bytes32 geohash,
+        uint8 geohashPrecision,
+        uint32 areaSqm,
+        uint256 baseDailyRate,
+        uint256 depositAmount,
+        uint64 minBookingNotice,
+        uint64 maxBookingWindow,
+        string calldata metadataURI
+    ) external onlyOwner returns (address listing) {
         require(landlord != address(0), "landlord=0");
         require(listingFactory != address(0), "factory=0");
         require(bookingRegistry != address(0), "registry=0");
         require(sqmuToken != address(0), "sqmuToken=0");
 
-        listing = IListingFactory(listingFactory).createListing(landlord, params);
+        listing = IListingFactory(listingFactory).createListing(
+            landlord,
+            fid,
+            castHash,
+            geohash,
+            geohashPrecision,
+            areaSqm,
+            baseDailyRate,
+            depositAmount,
+            minBookingNotice,
+            maxBookingWindow,
+            metadataURI
+        );
         require(listing != address(0), "listing=0");
         require(!isListing[listing], "already registered");
 

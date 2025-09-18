@@ -24,15 +24,17 @@ contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             address platform,
             address bookingRegistry,
             address sqmuToken,
-            Platform.ListingParams calldata params
+            uint256 fid,
+            bytes32 castHash,
+            bytes32 geohash,
+            uint8 geohashPrecision,
+            uint32 areaSqm,
+            uint256 baseDailyRate,
+            uint256 depositAmount,
+            uint64 minBookingNotice,
+            uint64 maxBookingWindow,
+            string calldata metadataURI
         ) external;
-    }
-
-    /// @notice Initialization arguments for the factory.
-    struct InitializeParams {
-        address owner; // Platform multi-sig controlling upgrades and configuration
-        address platform; // Platform contract authorised to request new listings
-        address implementation; // Canonical Listing implementation to clone
     }
 
     // -------------------------------------------------
@@ -65,22 +67,24 @@ contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     /**
      * @notice Initialize the factory with the platform authority and Listing implementation.
-     * @param params Struct bundling the initial configuration values.
+     * @param owner_ Platform multi-sig controlling upgrades and configuration.
+     * @param platform_ Platform contract authorised to request new listings.
+     * @param implementation_ Canonical Listing implementation to clone.
      */
-    function initialize(InitializeParams calldata params) external initializer {
-        require(params.owner != address(0), "owner=0");
-        require(params.platform != address(0), "platform=0");
-        require(params.implementation != address(0), "impl=0");
+    function initialize(address owner_, address platform_, address implementation_) external initializer {
+        require(owner_ != address(0), "owner=0");
+        require(platform_ != address(0), "platform=0");
+        require(implementation_ != address(0), "impl=0");
 
-        __Ownable_init(params.owner);
+        __Ownable_init(owner_);
         __UUPSUpgradeable_init();
 
-        platform = params.platform;
-        listingImplementation = params.implementation;
+        platform = platform_;
+        listingImplementation = implementation_;
 
-        emit PlatformUpdated(address(0), params.platform);
-        emit ListingImplementationUpdated(address(0), params.implementation);
-        emit ListingFactoryInitialized(params.owner, params.platform, params.implementation);
+        emit PlatformUpdated(address(0), platform_);
+        emit ListingImplementationUpdated(address(0), implementation_);
+        emit ListingFactoryInitialized(owner_, platform_, implementation_);
     }
 
     // -------------------------------------------------
@@ -108,13 +112,31 @@ contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /**
      * @notice Deploy a new Listing clone for the provided landlord.
      * @param landlord Address that will control the newly created listing.
-     * @param params Listing configuration parameters forwarded to the clone.
+     * @param fid Landlord Farcaster identifier stored for deep links.
+     * @param castHash Canonical Farcaster cast hash (32-byte normalized form).
+     * @param geohash Geospatial hash encoded as bytes32 (left-aligned, zero padded).
+     * @param geohashPrecision Number of significant characters in the geohash.
+     * @param areaSqm Property area in whole square metres.
+     * @param baseDailyRate Base price per day denominated in USDC (6 decimals).
+     * @param depositAmount Security deposit denominated in USDC (6 decimals).
+     * @param minBookingNotice Minimum notice required before booking start (seconds).
+     * @param maxBookingWindow Maximum look-ahead window tenants can book (seconds).
+     * @param metadataURI Off-chain metadata pointer (IPFS/HTTPS).
      * @return listing Address of the freshly deployed listing clone.
      */
-    function createListing(address landlord, Platform.ListingParams calldata params)
-        external
-        returns (address listing)
-    {
+    function createListing(
+        address landlord,
+        uint256 fid,
+        bytes32 castHash,
+        bytes32 geohash,
+        uint8 geohashPrecision,
+        uint32 areaSqm,
+        uint256 baseDailyRate,
+        uint256 depositAmount,
+        uint64 minBookingNotice,
+        uint64 maxBookingWindow,
+        string calldata metadataURI
+    ) external returns (address listing) {
         require(msg.sender == platform, "only platform");
         require(landlord != address(0), "landlord=0");
 
@@ -128,7 +150,22 @@ contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         require(bookingRegistry != address(0), "registry=0");
         require(sqmuToken != address(0), "sqmuToken=0");
 
-        IListing(listing).initialize(landlord, platform, bookingRegistry, sqmuToken, params);
+        IListing(listing).initialize(
+            landlord,
+            platform,
+            bookingRegistry,
+            sqmuToken,
+            fid,
+            castHash,
+            geohash,
+            geohashPrecision,
+            areaSqm,
+            baseDailyRate,
+            depositAmount,
+            minBookingNotice,
+            maxBookingWindow,
+            metadataURI
+        );
 
         emit ListingCreated(listing, landlord);
     }
