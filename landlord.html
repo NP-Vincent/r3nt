@@ -39,6 +39,7 @@
     .divider { height:1px; background:#eee; margin:14px 0; }
     nav { margin-bottom:16px; }
     nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
+    .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
   </style>
   <script src="./js/dev-error-console.js"></script>
 </head>
@@ -48,6 +49,7 @@
     <a href="./tenant.html">Tenant</a>
     <a href="./landlord.html">Landlord</a>
     <a href="./admin.html">Admin</a>
+    <span class="version-badge" data-version></span>
   </nav>
   <h1>r3nt — Create Listing</h1>
 
@@ -132,7 +134,14 @@
     import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
     import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './js/tools.js';
-    import { R3NT_ADDRESS, USDC_ADDRESS, PLATFORM_ADDRESS, RPC_URL, REGISTRY_ADDRESS } from './js/config.js';
+    import {
+      R3NT_ADDRESS,
+      USDC_ADDRESS,
+      PLATFORM_ADDRESS,
+      RPC_URL,
+      REGISTRY_ADDRESS,
+      APP_VERSION,
+    } from './js/config.js';
 
     // -------------------- Config --------------------
     const ARBITRUM_HEX   = '0xa4b1';
@@ -177,6 +186,17 @@
       availResult: document.getElementById('availResult'),
     };
     const info = (t) => els.status.textContent = t;
+
+    const setVersionBadge = () => {
+      const badge = document.querySelector('[data-version]');
+      if (badge) badge.textContent = `Build ${APP_VERSION}`;
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setVersionBadge);
+    } else {
+      setVersionBadge();
+    }
 
     // helpers
     function utf8BytesLen(str){ return new TextEncoder().encode(str).length; }

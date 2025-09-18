@@ -22,12 +22,38 @@
   <!-- Recommended for QuickAuth -->
   <link rel="preconnect" href="https://auth.farcaster.xyz" />
   <script src="./js/dev-error-console.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 20px; color:#0f172a; background:#ffffff; }
+    nav { margin-bottom:16px; }
+    nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
+    .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
+    #status { font-size:0.95rem; }
+  </style>
 </head>
 <body>
+  <nav>
+    <a href="./index.html">Home</a>
+    <a href="./tenant.html">Tenant</a>
+    <a href="./landlord.html">Landlord</a>
+    <a href="./admin.html">Admin</a>
+    <span class="version-badge" data-version></span>
+  </nav>
   <div id="status">Loading…</div>
 
   <script type="module">
     import { sdk } from "https://esm.sh/@farcaster/miniapp-sdk";
+    import { APP_VERSION } from './js/config.js';
+
+    const applyVersionBadge = () => {
+      const badge = document.querySelector('[data-version]');
+      if (badge) badge.textContent = `Build ${APP_VERSION}`;
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', applyVersionBadge);
+    } else {
+      applyVersionBadge();
+    }
 
     const status = document.getElementById('status');
 
