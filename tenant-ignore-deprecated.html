@@ -10,7 +10,7 @@
   <style>
     :root { --fg:#0f172a; --bg:#ffffff; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 20px; background: var(--bg); color: var(--fg); }
-    button { width: 100%; padding: 12px 16px; border: 0; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    button { width: 100%; padding: 12px 16px; border: 0; border-radius: 10px; font-weight: 700; cursor: pointer; }
     button:disabled { opacity: .6; cursor: not-allowed; }
     #connect { background: #1f6feb; color: #fff; }
     #buy { background: #10b981; color: #fff; margin-top: 10px; }
@@ -22,6 +22,8 @@
     nav { margin-bottom:16px; }
     nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
     select { width:100%; padding:6px; margin:4px 0 8px; }
+    a.listing-link { display:inline-block; margin-top:8px; color:#1f6feb; font-weight:600; text-decoration:none; }
+    a.listing-link:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
@@ -29,12 +31,22 @@
     <a href="./index.html">Home</a>
     <a href="./tenant.html">Tenant</a>
     <a href="./landlord.html">Landlord</a>
+    <a href="./admin.html">Admin</a>
   </nav>
   <h1>r3nt View Pass</h1>
   <button id="connect">Connect Wallet</button>
   <div id="address">Not connected</div>
   <button id="buy" disabled>Buy View Pass (0.25 USDC)</button>
   <div id="status">Loading…</div>
+  <h2>Select Dates</h2>
+  <div class="row">
+    <label>Start
+      <input type="date" id="startDate">
+    </label>
+    <label>End
+      <input type="date" id="endDate">
+    </label>
+  </div>
   <h2>Listings</h2>
   <div id="listings"></div>
 
@@ -49,7 +61,7 @@
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { encodeFunctionData, parseUnits, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
     import { arbitrum } from 'https://esm.sh/viem/chains';
-    import { bytes32ToCastUrl, bytes32ToCastHash } from './js/tools.js';
+    import { bytes32ToCastHash, buildFarcasterCastUrl } from './js/tools.js';
 
     const els = {
       connect: document.getElementById('connect'),
@@ -57,6 +69,8 @@
       addr: document.getElementById('address'),
       status: document.getElementById('status'),
       listings: document.getElementById('listings'),
+      start: document.getElementById('startDate'),
+      end: document.getElementById('endDate'),
     };
 
     const ARBITRUM_HEX = '0xa4b1';           // 42161
@@ -74,25 +88,27 @@
 
     function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
-    let r3ntAbi, cfg, pub, feeBps;
+    let r3ntAbi, cfg, pub, feeBps, bookingAbi, bookingAddr;
     async function loadConfig(){
       if (!r3ntAbi) {
-        [r3ntAbi, cfg] = await Promise.all([
+        [r3ntAbi, cfg, bookingAbi] = await Promise.all([
           fetch('./js/abi/r3nt.json').then(r => r.json()).then(j => j.abi),
           import('./js/config.js'),
+          fetch('./js/abi/BookingRegistry.json').then(r => r.json()).then(j => j.abi),
         ]);
         pub = createPublicClient({ chain: arbitrum, transport: http(cfg.RPC_URL || 'https://arb1.arbitrum.io/rpc') });
         feeBps = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName: 'feeBps' });
+        bookingAddr = cfg.REGISTRY_ADDRESS;
       }
     }
 
-    async function openCast(hash32 /* bytes32 from contract */){
+    async function openCast(fid, hash32, fallbackUrl){
       const cast20 = bytes32ToCastHash(hash32);
       try {
         await sdk.actions.viewCast({ hash: cast20 });
       } catch {
-        // fallback: open in Warpcast
-        window.open(bytes32ToCastUrl(hash32), '_blank');
+        // fallback: open in Warpcast via the generated profile-aware URL
+        window.open(fallbackUrl, '_blank');
       }
     }
 
@@ -139,25 +155,40 @@
         rateLabel.appendChild(sel);
         const dep = document.createElement('div');
         dep.textContent = `Deposit: ${Number(L.deposit)/1e6} USDC`;
+        const areaVal = typeof L.areaSqm === 'bigint' ? Number(L.areaSqm) : Number(L.areaSqm || 0);
+        const area = areaVal > 0 ? document.createElement('div') : null;
+        if (area) {
+          area.textContent = `Area: ${areaVal} m²`;
+        }
 
         const row = document.createElement('div');
         row.className = 'row';
-        const btnCast = document.createElement('button');
-        btnCast.textContent = 'Open Cast';
-        btnCast.onclick = () => openCast(L.castHash);
         const btnBook = document.createElement('button');
         btnBook.textContent = 'Book';
         btnBook.onclick = () => {
           const opt = sel.options[sel.selectedIndex];
           bookListing(i, BigInt(opt.dataset.rtype), opt.value, L.deposit);
         };
-        row.appendChild(btnCast);
         row.appendChild(btnBook);
+
+        const farcasterUrl = buildFarcasterCastUrl(L.fid, L.castHash);
+        const viewLink = document.createElement('a');
+        viewLink.href = farcasterUrl;
+        viewLink.target = '_blank';
+        viewLink.rel = 'noopener';
+        viewLink.textContent = 'View full details on Farcaster';
+        viewLink.className = 'listing-link';
+        viewLink.onclick = (ev) => {
+          ev.preventDefault();
+          openCast(L.fid, L.castHash, farcasterUrl);
+        };
 
         card.appendChild(title);
         card.appendChild(rateLabel);
         card.appendChild(dep);
+        if (area) card.appendChild(area);
         card.appendChild(row);
+        card.appendChild(viewLink);
         els.listings.appendChild(card);
       }
       if (!shown) els.listings.textContent = 'No active listings.';
@@ -171,15 +202,28 @@
         await ensureArbitrum(p);
         await loadConfig();
 
-        const rent = BigInt(rate);
+        const start = els.start.value;
+        const end = els.end.value;
+        if (!start || !end) throw new Error('Select start and end dates.');
+        const startTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
+        const endTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
+        if (endTs <= startTs) throw new Error('End date must be after start.');
+        const dur = rtype === 1n ? 7n * 86400n : rtype === 2n ? 30n * 86400n : 86400n;
+        const diff = endTs - startTs;
+        if (diff % dur !== 0n) throw new Error('Date range misaligned with rate type.');
+        const units = diff / dur;
+
+        const listing = await pub.readContract({ address: cfg.R3NT_ADDRESS, abi: r3ntAbi, functionName:'getListing', args:[BigInt(listingId)] });
+        const free = await pub.readContract({ address: bookingAddr, abi: bookingAbi, functionName:'isFree', args:[listing.vault, startTs, endTs] });
+        if (!free) { els.status.textContent = 'Selected dates not available.'; return; }
+
+        const rent = BigInt(rate) * units;
         const dep = BigInt(deposit);
         const fee = rent * BigInt(feeBps) / 10000n;
         const total = rent + fee + dep;
 
         const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [cfg.R3NT_ADDRESS, total] });
-        const now = BigInt(Math.floor(Date.now()/1000));
-        const dur = rtype === 1n ? 7n * 86400n : rtype === 2n ? 30n * 86400n : 86400n;
-        const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), rtype, 1n, now, now + dur] });
+        const bookData = encodeFunctionData({ abi: r3ntAbi, functionName: 'book', args: [BigInt(listingId), rtype, units, startTs, endTs] });
 
         els.status.textContent = 'Submitting booking…';
 
