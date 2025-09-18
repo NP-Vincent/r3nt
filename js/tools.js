@@ -130,9 +130,24 @@ export function extractCastHexFromInput(input) {
 
   // (a) URL path match
   if (/^https?:\/\//i.test(s)) {
+    try {
+      const url = new URL(s);
+      const castHashParam = url.searchParams.get('castHash');
+      if (castHashParam) {
+        const param = castHashParam.trim();
+        if (/^0x[0-9a-fA-F]+$/.test(param)) {
+          return param;
+        }
+      }
+      const pathMatch = url.pathname.match(/\/0x[0-9a-fA-F]+/);
+      if (pathMatch) return pathMatch[0].slice(1);
+    } catch (err) {
+      // Fallback to raw regex match on the original string if URL parsing fails
+    }
+
     const m = s.match(/\/0x[0-9a-fA-F]+/);
-    if (!m) throw new Error('No cast hash found in URL.');
-    return m[0].slice(1); // remove leading '/'
+    if (m) return m[0].slice(1); // remove leading '/'
+    throw new Error('No cast hash found in URL.');
   }
 
   // (b) Raw hex
