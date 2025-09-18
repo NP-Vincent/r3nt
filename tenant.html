@@ -165,9 +165,11 @@
           pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'modules' }),
           pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName:'usdc' })
         ]);
-        const feeTuple = Array.isArray(fees) ? fees : [0n, 0n];
-        const tenantBps = feeTuple[0] ?? 0n;
-        const landlordBps = feeTuple[1] ?? 0n;
+        const feeResult = fees ?? {};
+        const {
+          tenantFeeBps = feeResult.tenantBps ?? feeResult[0] ?? 0n,
+          landlordFeeBps = feeResult.landlordBps ?? feeResult[1] ?? 0n,
+        } = feeResult;
         const registryAddr = Array.isArray(modules) ? modules[1] : undefined;
         if (registryAddr && registryAddr !== ZERO_ADDRESS) {
           bookingRegistryAddress = registryAddr;
@@ -175,8 +177,8 @@
         if (usdcAddr && usdcAddr !== ZERO_ADDRESS) {
           usdcAddress = usdcAddr;
         }
-        const tenantPct = (Number(tenantBps || 0n) / 100).toFixed(2);
-        const landlordPct = (Number(landlordBps || 0n) / 100).toFixed(2);
+        const tenantPct = (Number(tenantFeeBps || 0n) / 100).toFixed(2);
+        const landlordPct = (Number(landlordFeeBps || 0n) / 100).toFixed(2);
         els.feeInfo.textContent = `Platform fees (tenant/landlord): ${tenantPct}% / ${landlordPct}% · Listing creation fee: ${formatUsdc(creationFee || 0n)} USDC`;
       } catch {
         els.feeInfo.textContent = 'Unable to load platform fee information.';
