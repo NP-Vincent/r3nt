@@ -291,14 +291,6 @@ function renderListingCard(info){
   title.textContent = `Listing ${short(info.address)}`;
   card.appendChild(title);
 
-  const landlordLine = document.createElement('div');
-  landlordLine.textContent = `Landlord: ${short(info.landlord)}`;
-  card.appendChild(landlordLine);
-
-  const fidLine = document.createElement('div');
-  fidLine.textContent = info.fid > 0n ? `Landlord FID: ${info.fid.toString()}` : 'Landlord FID: —';
-  card.appendChild(fidLine);
-
   const rateLine = document.createElement('div');
   rateLine.textContent = `Base rate: ${formatUsdc(info.baseDailyRate)} USDC / day`;
   card.appendChild(rateLine);
