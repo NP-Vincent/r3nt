@@ -1,7 +1,7 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
-import { bytes32ToCastHash, buildFarcasterCastUrl } from './tools.js';
+import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './tools.js';
 import {
   RPC_URL,
   REGISTRY_ADDRESS,
@@ -244,7 +244,23 @@ async function fetchListingInfo(listingAddr){
     const geohashHex = getString(8, '0x');
     const geohashPrecision = Number(getBig(9));
     const landlord = getString(10, '0x0000000000000000000000000000000000000000');
-    const geohash = decodeBytes32ToString(geohashHex, Number.isFinite(geohashPrecision) ? geohashPrecision : undefined);
+    const geohash = decodeBytes32ToString(
+      geohashHex,
+      Number.isFinite(geohashPrecision) ? geohashPrecision : undefined
+    );
+    let lat = null;
+    let lon = null;
+    if (geohash) {
+      try {
+        const coords = geohashToLatLon(geohash);
+        if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
+          lat = coords.lat;
+          lon = coords.lon;
+        }
+      } catch (err) {
+        console.warn('Unable to decode geohash for listing', listingAddr, geohash, err);
+      }
+    }
     return {
       address: listingAddr,
       fid,
@@ -257,6 +273,8 @@ async function fetchListingInfo(listingAddr){
       maxBookingWindow,
       geohash,
       geohashPrecision,
+      lat,
+      lon,
       landlord,
     };
   } catch (err) {
@@ -303,7 +321,13 @@ function renderListingCard(info){
 
   if (info.geohash) {
     const geoLine = document.createElement('div');
-    geoLine.textContent = `Geohash: ${info.geohash}`;
+    if (Number.isFinite(info.lat) && Number.isFinite(info.lon)) {
+      const latText = info.lat.toFixed(5);
+      const lonText = info.lon.toFixed(5);
+      geoLine.textContent = `Location: ${latText}°, ${lonText}°`;
+    } else {
+      geoLine.textContent = 'Location: —';
+    }
     card.appendChild(geoLine);
   }
 
