@@ -22,6 +22,7 @@ interface IListingLike {
     /// @notice Supported rent payment cadences (mirrors `Listing.Period`).
     enum Period {
         NONE,
+        DAY,
         WEEK,
         MONTH
     }

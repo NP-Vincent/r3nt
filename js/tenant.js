@@ -23,7 +23,12 @@ const els = {
   listings: document.getElementById('listings'),
   start: document.getElementById('startDate'),
   end: document.getElementById('endDate'),
+  period: document.getElementById('paymentPeriod'),
 };
+
+if (els.period && !els.period.value) {
+  els.period.value = 'month';
+}
 
 const setVersionBadge = () => {
   const badge = document.querySelector('[data-version]');
@@ -39,6 +44,11 @@ if (document.readyState === 'loading') {
 const ARBITRUM_HEX = '0xa4b1';           // 42161
 const USDC_SCALAR = 1_000_000n;
 const SECONDS_PER_DAY = 86_400n;
+const PERIOD_OPTIONS = {
+  day: { label: 'Daily', value: 1n, days: 1n },
+  week: { label: 'Weekly', value: 2n, days: 7n },
+  month: { label: 'Monthly', value: 3n, days: 30n },
+};
 
 const supportsViewPassPurchase = PLATFORM_ABI.some(
   (item) => item?.type === 'function' && item?.name === 'buyViewPass'
@@ -120,6 +130,31 @@ function calculateRent(baseDailyRate, startTs, endTs) {
   let days = (duration + SECONDS_PER_DAY - 1n) / SECONDS_PER_DAY;
   if (days === 0n) days = 1n;
   return rate * days;
+}
+
+function calculateInstallmentCap(totalRent, startTs, endTs, periodDays) {
+  const rent = typeof totalRent === 'bigint' ? totalRent : BigInt(totalRent || 0);
+  const start = typeof startTs === 'bigint' ? startTs : BigInt(startTs || 0);
+  const end = typeof endTs === 'bigint' ? endTs : BigInt(endTs || 0);
+  const cadenceDays = typeof periodDays === 'bigint' ? periodDays : BigInt(periodDays || 0);
+  if (rent <= 0n) return 0n;
+  if (cadenceDays <= 0n) return rent;
+  if (end <= start) return rent;
+
+  let duration = end - start;
+  let days = (duration + SECONDS_PER_DAY - 1n) / SECONDS_PER_DAY;
+  if (days <= 0n) days = 1n;
+
+  let dailyRate = rent / days;
+  if (dailyRate * days < rent) {
+    dailyRate += 1n;
+  }
+
+  let installment = dailyRate * cadenceDays;
+  if (installment > rent) {
+    installment = rent;
+  }
+  return installment;
 }
 
 let inHost = false; try { inHost = await sdk.isInMiniApp(); } catch {}
@@ -503,6 +538,9 @@ async function bookListing(listing){
     const startTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
     const endTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
     if (endTs <= startTs) throw new Error('End date must be after start.');
+    const periodKey = els.period ? els.period.value : '';
+    const selectedPeriod = PERIOD_OPTIONS[periodKey];
+    if (!selectedPeriod) throw new Error('Select a rent payment cadence.');
     const nowTs = BigInt(Math.floor(Date.now() / 1000));
     if (listing.minBookingNotice > 0n && startTs < nowTs + listing.minBookingNotice) {
       throw new Error(`Start must respect the ${formatDuration(listing.minBookingNotice)} minimum notice.`);
@@ -524,6 +562,7 @@ async function bookListing(listing){
 
     const rent = calculateRent(listing.baseDailyRate, startTs, endTs);
     const deposit = typeof listing.depositAmount === 'bigint' ? listing.depositAmount : BigInt(listing.depositAmount || 0);
+    const installmentCap = calculateInstallmentCap(rent, startTs, endTs, selectedPeriod.days);
 
     const calls = [];
     let approveData;
@@ -532,12 +571,19 @@ async function bookListing(listing){
       calls.push({ to: USDC_ADDRESS, data: approveData });
     }
 
-    const bookData = encodeFunctionData({ abi: LISTING_ABI, functionName: 'book', args: [startTs, endTs] });
+    const bookData = encodeFunctionData({
+      abi: LISTING_ABI,
+      functionName: 'book',
+      args: [startTs, endTs, selectedPeriod.value],
+    });
     calls.push({ to: listing.address, data: bookData });
 
     const depositMsg = deposit > 0n ? `${formatUsdc(deposit)} USDC deposit` : 'no deposit';
     const rentMsg = rent > 0n ? `${formatUsdc(rent)} USDC rent` : '0 USDC rent';
-    els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}).`;
+    const cadenceMsg = installmentCap > 0n
+      ? `${selectedPeriod.label} payments up to ${formatUsdc(installmentCap)} USDC`
+      : `${selectedPeriod.label} payments`;
+    els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}; ${cadenceMsg}).`;
 
     try {
       await p.request({ method:'wallet_sendCalls', params:[{ calls }] });

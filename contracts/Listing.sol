@@ -48,6 +48,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     /// @notice Supported rent payment cadences.
     enum Period {
         NONE,
+        DAY,
         WEEK,
         MONTH
     }
@@ -132,6 +133,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     uint256 internal constant RENT_PRECISION = 1e18;
     uint16 internal constant BPS_DENOMINATOR = 10_000;
     uint64 internal constant SECONDS_PER_DAY = 86_400;
+    uint256 internal constant DAYS_PER_WEEK = 7;
+    uint256 internal constant DAYS_PER_MONTH = 30;
 
     /// @notice Address of the platform orchestrating this listing.
     address public platform;
@@ -363,14 +366,17 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
      *         platform fees for reference and escrows the security deposit.
      * @param start Booking start timestamp (seconds).
      * @param end Booking end timestamp (seconds).
+     * @param period Rent payment cadence selected by the tenant.
      * @return bookingId Identifier assigned to the new booking.
      */
-    function book(uint64 start, uint64 end) external nonReentrant returns (uint256 bookingId) {
+    function book(uint64 start, uint64 end, Period period) external nonReentrant returns (uint256 bookingId) {
         require(start < end, "invalid range");
         require(start >= block.timestamp + minBookingNotice, "notice too short");
         if (maxBookingWindow != 0) {
             require(start <= block.timestamp + maxBookingWindow, "beyond window");
         }
+
+        require(period != Period.NONE, "period none");
 
         require(Platform(platform).hasActiveViewPass(msg.sender), "view pass required");
 
@@ -393,7 +399,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         booking.soldSqmu = 0;
         booking.pricePerSqmu = 0;
         booking.feeBps = 0;
-        booking.period = Period.NONE;
+        booking.period = period;
         booking.proposer = address(0);
         booking.accRentPerSqmu = 0;
 
@@ -435,8 +441,19 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         require(booking.status == Status.ACTIVE, "inactive booking");
         require(msg.sender == booking.tenant, "not tenant");
 
-        uint256 totalGrossPaid = _grossRentPaid[bookingId] + grossAmount;
-        require(totalGrossPaid <= booking.rent, "exceeds rent");
+        uint256 totalGrossPaid = _grossRentPaid[bookingId];
+        require(totalGrossPaid < booking.rent, "rent settled");
+        uint256 remainingBeforePayment = booking.rent - totalGrossPaid;
+        require(grossAmount <= remainingBeforePayment, "exceeds rent");
+
+        if (booking.period != Period.NONE) {
+            uint256 maxInstallment = _maxInstallmentAmount(booking);
+            if (remainingBeforePayment > maxInstallment) {
+                require(grossAmount <= maxInstallment, "payment too large");
+            }
+        }
+
+        totalGrossPaid += grossAmount;
 
         (uint16 tenantFeeBps, uint16 landlordFeeBps) = Platform(platform).fees();
         uint256 tenantFee = (grossAmount * tenantFeeBps) / BPS_DENOMINATOR;
@@ -627,6 +644,10 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         require(!booking.tokenised, "already tokenised");
         require(msg.sender == landlord || msg.sender == booking.tenant, "unauthorised");
 
+        if (booking.period != Period.NONE) {
+            require(period == booking.period, "period mismatch");
+        }
+
         _tokenisationProposals[bookingId] = TokenisationProposal({
             exists: true,
             proposer: msg.sender,
@@ -657,7 +678,11 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         booking.totalSqmu = proposal.totalSqmu;
         booking.pricePerSqmu = proposal.pricePerSqmu;
         booking.feeBps = proposal.feeBps;
-        booking.period = proposal.period;
+        if (booking.period == Period.NONE) {
+            booking.period = proposal.period;
+        } else {
+            require(booking.period == proposal.period, "period mismatch");
+        }
         booking.proposer = proposal.proposer;
 
         delete _tokenisationProposals[bookingId];
@@ -908,6 +933,48 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             require(daysCount <= type(uint256).max / baseDailyRate, "rent overflow");
         }
         rent = baseDailyRate * daysCount;
+    }
+
+    function _maxInstallmentAmount(Booking storage booking) internal view returns (uint256) {
+        uint256 periodDays = _periodDays(booking.period);
+        if (periodDays == 0) {
+            return booking.rent;
+        }
+
+        if (booking.end <= booking.start) {
+            return booking.rent;
+        }
+
+        uint256 duration = uint256(booking.end) - uint256(booking.start);
+        uint256 daysCount = (duration + SECONDS_PER_DAY - 1) / SECONDS_PER_DAY;
+        if (daysCount == 0) {
+            daysCount = 1;
+        }
+
+        uint256 dailyRate = booking.rent / daysCount;
+        if (dailyRate * daysCount < booking.rent) {
+            dailyRate += 1;
+        }
+
+        uint256 installment = dailyRate * periodDays;
+        if (installment > booking.rent) {
+            installment = booking.rent;
+        }
+
+        return installment;
+    }
+
+    function _periodDays(Period period) internal pure returns (uint256) {
+        if (period == Period.DAY) {
+            return 1;
+        }
+        if (period == Period.WEEK) {
+            return DAYS_PER_WEEK;
+        }
+        if (period == Period.MONTH) {
+            return DAYS_PER_MONTH;
+        }
+        return 0;
     }
 
     function _releaseBookingRange(uint256 bookingId) internal {
