@@ -26,6 +26,11 @@
           "internalType": "uint64",
           "name": "end",
           "type": "uint64"
+        },
+        {
+          "internalType": "enum Listing.Period",
+          "name": "period",
+          "type": "uint8"
         }
       ],
       "name": "book",
