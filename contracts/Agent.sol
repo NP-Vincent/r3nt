@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 /// @notice Minimal interface for interacting with a listing clone.
 interface IListingLike {
@@ -94,9 +97,12 @@ interface IR3ntSQMU {
  * @notice Wrapper contract that represents an on-chain property manager for a long-term booking.
  *         The agent coordinates the initial fundraising to pre-pay the landlord, manages
  *         short-term subletting and streams rent to SQMU-R investors while skimming an agent fee.
+ * @dev Upgradeable through the UUPS proxy pattern. Upgrade authority is derived from the
+ *      underlying listing's platform contract to keep multi-sig control aligned with other
+ *      protocol modules.
  */
-contract Agent is ReentrancyGuard {
-    using SafeERC20 for IERC20;
+contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
+    using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @notice Precision used for rent accumulator calculations.
     uint256 private constant RENT_PRECISION = 1e18;
@@ -105,25 +111,25 @@ contract Agent is ReentrancyGuard {
     uint16 private constant BPS_DENOMINATOR = 10_000;
 
     /// @notice Address of the wrapped listing clone.
-    address public immutable listing;
+    address public listing;
 
     /// @notice Identifier of the long-term booking managed by this agent.
-    uint256 public immutable bookingId;
+    uint256 public bookingId;
 
     /// @notice Platform contract coordinating listings and treasury distribution.
-    address public immutable platform;
+    address public platform;
 
     /// @notice Landlord receiving the upfront rent payment.
-    address public immutable landlord;
+    address public landlord;
 
     /// @notice Booking registry responsible for calendar management.
-    address public immutable bookingRegistry;
+    address public bookingRegistry;
 
     /// @notice SQMU-R token contract used for investor receipts.
-    address public immutable sqmuToken;
+    address public sqmuToken;
 
     /// @notice USDC token used for all settlements.
-    address public immutable usdc;
+    address public usdc;
 
     /// @notice Wallet authorised to operate the agent.
     address public agent;
@@ -168,7 +174,7 @@ contract Agent is ReentrancyGuard {
     uint256 public agentFeesAccrued;
 
     /// @notice Incrementing identifier for short-term sub-bookings handled by the agent.
-    uint256 public nextSubBookingId = 1;
+    uint256 public nextSubBookingId;
 
     /// @notice Snapshot of a sub-booking managed by the agent.
     struct SubBooking {
@@ -224,25 +230,30 @@ contract Agent is ReentrancyGuard {
     event SubBookingCancelled(uint256 indexed subBookingId, uint256 paidRent, bool defaulted);
 
     modifier onlyAgent() {
-        require(msg.sender == agent, "not agent");
+        require(_msgSender() == agent, "not agent");
         _;
     }
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /**
-     * @notice Deploy an agent contract for a pre-existing long-term booking.
+     * @notice Initialize an agent contract for a pre-existing long-term booking.
      * @param listing_ Address of the landlord's listing clone.
      * @param bookingId_ Identifier of the long-term booking managed by this agent.
      * @param agent_ Wallet authorised to operate the agent contract.
      * @param agentFeeBps_ Fee retained by the agent on each rent payment (basis points).
      * @param agentFeeRecipient_ Recipient of accrued agent fees (defaults to agent when zero).
      */
-    constructor(
+    function initialize(
         address listing_,
         uint256 bookingId_,
         address agent_,
         uint16 agentFeeBps_,
         address agentFeeRecipient_
-    ) {
+    ) external initializer {
         require(listing_ != address(0), "listing=0");
         require(bookingId_ != 0, "booking=0");
         require(agent_ != address(0), "agent=0");
@@ -262,6 +273,10 @@ contract Agent is ReentrancyGuard {
         require(sqmuToken_ != address(0), "sqmu=0");
         require(usdc_ != address(0), "usdc=0");
 
+        __ReentrancyGuard_init();
+        __Ownable_init(platform_);
+        __UUPSUpgradeable_init();
+
         listing = listing_;
         bookingId = bookingId_;
         platform = platform_;
@@ -273,6 +288,7 @@ contract Agent is ReentrancyGuard {
         agent = agent_;
         agentFeeRecipient = agentFeeRecipient_ == address(0) ? agent_ : agentFeeRecipient_;
         agentFeeBps = agentFeeBps_;
+        nextSubBookingId = 1;
 
         emit AgentInitialized(listing_, bookingId_, agent_, agentFeeBps_);
     }
@@ -366,7 +382,7 @@ contract Agent is ReentrancyGuard {
         totalCost = pricePerSqmu * sqmuAmount;
         require(totalCost > 0, "cost=0");
 
-        IERC20 token = IERC20(usdc);
+        IERC20Upgradeable token = IERC20Upgradeable(usdc);
         token.safeTransferFrom(msg.sender, address(this), totalCost);
 
         uint256 platformFee = (totalCost * fundraisingFeeBps) / BPS_DENOMINATOR;
@@ -523,7 +539,7 @@ contract Agent is ReentrancyGuard {
         investorDebt[msg.sender] = accumulated;
 
         address to = recipient == address(0) ? msg.sender : recipient;
-        IERC20(usdc).safeTransfer(to, amount);
+        IERC20Upgradeable(usdc).safeTransfer(to, amount);
 
         emit Claimed(bookingId, msg.sender, to, amount);
     }
@@ -565,7 +581,7 @@ contract Agent is ReentrancyGuard {
         agentFeesAccrued = 0;
 
         address to = recipient == address(0) ? agentFeeRecipient : recipient;
-        IERC20(usdc).safeTransfer(to, amount);
+        IERC20Upgradeable(usdc).safeTransfer(to, amount);
 
         emit AgentFeesWithdrawn(to, amount);
     }
@@ -611,7 +627,7 @@ contract Agent is ReentrancyGuard {
         require(grossAmount > 0, "amount=0");
         require(soldSqmu > 0, "no investors");
 
-        IERC20 token = IERC20(usdc);
+        IERC20Upgradeable token = IERC20Upgradeable(usdc);
         token.safeTransferFrom(payer, address(this), grossAmount);
 
         uint256 agentFee = (grossAmount * agentFeeBps) / BPS_DENOMINATOR;
@@ -635,4 +651,16 @@ contract Agent is ReentrancyGuard {
     function _attemptLockTransfers() internal {
         try IR3ntSQMU(sqmuToken).lockTransfers(bookingId) {} catch {}
     }
+
+    // -------------------------------------------------
+    // UUPS authorization hook
+    // -------------------------------------------------
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    // -------------------------------------------------
+    // Storage gap for upgradeability
+    // -------------------------------------------------
+
+    uint256[45] private __gap;
 }
