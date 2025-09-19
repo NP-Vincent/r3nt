@@ -496,7 +496,7 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
 
         if (markComplete) {
             subBooking.active = false;
-            _releaseSubBookingCalendar(subBookingId, subBooking);
+            _releaseSubBookingCalendar(subBooking);
             emit SubBookingCompleted(subBookingId, subBooking.paidRent);
         }
 
@@ -513,7 +513,7 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
         require(subBooking.active, "inactive sub-booking");
 
         subBooking.active = false;
-        _releaseSubBookingCalendar(subBookingId, subBooking);
+        _releaseSubBookingCalendar(subBooking);
 
         emit SubBookingCancelled(subBookingId, subBooking.paidRent, defaulted);
     }
@@ -642,7 +642,7 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
         }
     }
 
-    function _releaseSubBookingCalendar(uint256 subBookingId, SubBooking storage subBooking) internal {
+    function _releaseSubBookingCalendar(SubBooking storage subBooking) internal {
         if (!subBooking.calendarReleased) {
             subBooking.calendarReleased = true;
             IBookingRegistry(bookingRegistry).release(subBooking.start, subBooking.end);
