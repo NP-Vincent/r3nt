@@ -8,6 +8,7 @@ import {
   RPC_URL,
   REGISTRY_ADDRESS,
   REGISTRY_ABI,
+  LISTING_ABI,
   APP_VERSION,
   USDC_ADDRESS,
 } from './config.js';
@@ -42,11 +43,7 @@ const els = {
   minNotice: document.getElementById('minNotice'),
   maxWindow: document.getElementById('maxWindow'),
   metadataUrl: document.getElementById('metadataUrl'),
-  availListing: document.getElementById('availListing'),
-  availStart: document.getElementById('availStart'),
-  availEnd: document.getElementById('availEnd'),
-  checkAvail: document.getElementById('checkAvail'),
-  availResult: document.getElementById('availResult'),
+  landlordListings: document.getElementById('landlordListings'),
 };
 const info = (t) => (els.status.textContent = t);
 
@@ -57,6 +54,33 @@ function formatUsdc(amount) {
   const units = abs / USDC_SCALAR;
   const fraction = (abs % USDC_SCALAR).toString().padStart(6, '0').replace(/0+$/, '');
   return `${negative ? '-' : ''}${units.toString()}${fraction ? '.' + fraction : ''}`;
+}
+
+function formatDuration(seconds) {
+  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
+  if (value <= 0n) return 'None';
+  const totalSeconds = Number(value);
+  if (!Number.isFinite(totalSeconds)) return `${value} sec`;
+  const days = Math.floor(totalSeconds / 86400);
+  const remainder = totalSeconds % 86400;
+  if (days > 0 && remainder === 0) {
+    return `${days} day${days === 1 ? '' : 's'}`;
+  }
+  if (days > 0) {
+    const hours = Math.round(remainder / 3600);
+    if (hours === 0) {
+      return `${days} day${days === 1 ? '' : 's'}`;
+    }
+    return `${days} day${days === 1 ? '' : 's'} ${hours} h`;
+  }
+  const hoursOnly = Math.max(1, Math.round(totalSeconds / 3600));
+  return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
+}
+
+function shortAddress(addr) {
+  if (typeof addr !== 'string') return '';
+  if (!addr.startsWith('0x') || addr.length < 10) return addr;
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
 const setVersionBadge = () => {
@@ -270,6 +294,254 @@ async function refreshListingPriceDisplay() {
   }
 }
 
+async function fetchListingInfo(listingAddr) {
+  try {
+    const responses = await pub.multicall({
+      contracts: [
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'baseDailyRate' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'depositAmount' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'metadataURI' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'minBookingNotice' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'maxBookingWindow' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'areaSqm' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'landlord' },
+      ],
+      allowFailure: true,
+    });
+    const getBig = (idx, fallback = 0n) => {
+      const entry = responses[idx];
+      if (!entry || entry.status !== 'success') return fallback;
+      const res = entry.result;
+      try {
+        return typeof res === 'bigint' ? res : BigInt(res || 0);
+      } catch {
+        return fallback;
+      }
+    };
+    const getString = (idx, fallback = '') => {
+      const entry = responses[idx];
+      if (!entry || entry.status !== 'success') return fallback;
+      return typeof entry.result === 'string' ? entry.result : fallback;
+    };
+    return {
+      address: listingAddr,
+      baseDailyRate: getBig(0),
+      depositAmount: getBig(1),
+      metadataURI: getString(2, ''),
+      minBookingNotice: getBig(3),
+      maxBookingWindow: getBig(4),
+      areaSqm: getBig(5),
+      landlord: getString(6, '0x0000000000000000000000000000000000000000'),
+    };
+  } catch (err) {
+    console.error('Failed to load listing info', listingAddr, err);
+    return null;
+  }
+}
+
+function renderLandlordListingCard(info) {
+  const card = document.createElement('div');
+  card.className = 'landlord-card';
+
+  const title = document.createElement('div');
+  title.className = 'landlord-card-title';
+  title.textContent = `Listing ${shortAddress(info.address)}`;
+  card.appendChild(title);
+
+  const rateLine = document.createElement('div');
+  rateLine.className = 'landlord-card-detail';
+  rateLine.textContent = `Base rate: ${formatUsdc(info.baseDailyRate)} USDC / day`;
+  card.appendChild(rateLine);
+
+  const depositLine = document.createElement('div');
+  depositLine.className = 'landlord-card-detail';
+  depositLine.textContent = `Deposit: ${formatUsdc(info.depositAmount)} USDC`;
+  card.appendChild(depositLine);
+
+  const areaValue = Number(info.areaSqm ?? 0n);
+  if (Number.isFinite(areaValue) && areaValue > 0) {
+    const areaLine = document.createElement('div');
+    areaLine.className = 'landlord-card-detail';
+    areaLine.textContent = `Area: ${areaValue} m²`;
+    card.appendChild(areaLine);
+  }
+
+  const minNoticeText = formatDuration(info.minBookingNotice);
+  const maxWindowText = info.maxBookingWindow > 0n ? formatDuration(info.maxBookingWindow) : 'Unlimited';
+  const windowLine = document.createElement('div');
+  windowLine.className = 'landlord-card-detail';
+  windowLine.textContent = `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`;
+  card.appendChild(windowLine);
+
+  if (info.metadataURI) {
+    const metaLink = document.createElement('a');
+    metaLink.href = info.metadataURI;
+    metaLink.target = '_blank';
+    metaLink.rel = 'noopener';
+    metaLink.textContent = 'Metadata';
+    metaLink.className = 'listing-link';
+    card.appendChild(metaLink);
+  }
+
+  const dateRow = document.createElement('div');
+  dateRow.className = 'row';
+
+  const startLabel = document.createElement('label');
+  startLabel.textContent = 'Start';
+  const startInput = document.createElement('input');
+  startInput.type = 'date';
+  startLabel.appendChild(startInput);
+  dateRow.appendChild(startLabel);
+
+  const endLabel = document.createElement('label');
+  endLabel.textContent = 'End';
+  const endInput = document.createElement('input');
+  endInput.type = 'date';
+  endLabel.appendChild(endInput);
+  dateRow.appendChild(endLabel);
+
+  card.appendChild(dateRow);
+
+  const checkBtn = document.createElement('button');
+  checkBtn.textContent = 'Check availability';
+  checkBtn.className = 'check-availability';
+  card.appendChild(checkBtn);
+
+  const result = document.createElement('div');
+  result.className = 'availability-result muted';
+  result.textContent = 'Select dates to check availability.';
+  card.appendChild(result);
+
+  checkBtn.onclick = () =>
+    disableWhile(checkBtn, async () => {
+      try {
+        const start = startInput.value;
+        const end = endInput.value;
+        if (!start || !end) throw new Error('Select dates.');
+        const startMs = Date.parse(`${start}T00:00:00Z`);
+        const endMs = Date.parse(`${end}T00:00:00Z`);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs)) throw new Error('Invalid dates.');
+        const startTs = BigInt(Math.floor(startMs / 1000));
+        const endTs = BigInt(Math.floor(endMs / 1000));
+        if (endTs <= startTs) throw new Error('End before start.');
+        result.className = 'availability-result';
+        result.textContent = 'Checking…';
+        info('Checking availability…');
+        const available = await pub.readContract({
+          address: REGISTRY_ADDRESS,
+          abi: REGISTRY_ABI,
+          functionName: 'isAvailable',
+          args: [info.address, startTs, endTs],
+        });
+        if (available) {
+          result.className = 'availability-result available';
+          result.textContent = 'Available';
+          info('Listing available for selected dates.');
+        } else {
+          result.className = 'availability-result unavailable';
+          result.textContent = 'Booked';
+          info('Listing is booked for those dates.');
+        }
+      } catch (err) {
+        result.className = 'availability-result error';
+        result.textContent = err?.message || 'Error';
+        info(`Error: ${err?.message || err}`);
+      }
+    });
+
+  return card;
+}
+
+let landlordListingsLoading;
+
+async function loadLandlordListings(landlordAddr) {
+  const container = els.landlordListings;
+  if (!container) return;
+  const normalized = typeof landlordAddr === 'string' ? landlordAddr.toLowerCase() : '';
+  if (!normalized) return;
+
+  if (landlordListingsLoading) {
+    try {
+      await landlordListingsLoading;
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
+  const setMessage = (msg) => {
+    container.classList.add('muted');
+    container.textContent = msg;
+  };
+
+  landlordListingsLoading = (async () => {
+    setMessage('Loading your listings…');
+
+    let abi;
+    try {
+      abi = await loadPlatformAbi();
+      if (!Array.isArray(abi) || abi.length === 0) {
+        throw new Error('Platform ABI unavailable.');
+      }
+    } catch (err) {
+      console.error('Failed to load Platform ABI for listings', err);
+      setMessage('Unable to load listings.');
+      info(err?.message ? `Error: ${err.message}` : 'Failed to load listings.');
+      throw err;
+    }
+
+    let addresses = [];
+    try {
+      const result = await pub.readContract({
+        address: PLATFORM_ADDRESS,
+        abi,
+        functionName: 'allListings',
+      });
+      addresses = Array.isArray(result) ? result : [];
+    } catch (err) {
+      console.error('Failed to load listing addresses', err);
+      setMessage('Unable to load listings.');
+      info(err?.message ? `Error: ${err.message}` : 'Unable to load listings.');
+      throw err;
+    }
+
+    const cleaned = addresses.filter(
+      (addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr) && !/^0x0+$/i.test(addr)
+    );
+
+    if (!cleaned.length) {
+      setMessage('No listings yet');
+      info('No listings yet.');
+      return;
+    }
+
+    const infos = await Promise.all(cleaned.map((addr) => fetchListingInfo(addr)));
+    const valid = infos.filter((entry) => entry && typeof entry.landlord === 'string');
+    const matches = valid.filter((entry) => entry.landlord.toLowerCase() === normalized);
+
+    if (!matches.length) {
+      setMessage('No listings yet');
+      info('No listings yet.');
+      return;
+    }
+
+    container.classList.remove('muted');
+    container.innerHTML = '';
+
+    for (const listing of matches) {
+      container.appendChild(renderLandlordListingCard(listing));
+    }
+
+    info(`Loaded ${matches.length} listing${matches.length === 1 ? '' : 's'}.`);
+  })();
+
+  try {
+    await landlordListingsLoading;
+  } finally {
+    landlordListingsLoading = null;
+  }
+}
+
 // -------------------- Boot --------------------
 let fidBig; // bigint from QuickAuth
 let provider; // EIP-1193
@@ -324,10 +596,18 @@ els.connect.onclick = async () => {
     provider = await sdk.wallet.getEthereumProvider();
     await provider.request({ method: 'eth_requestAccounts' });
     await ensureArbitrum(provider);
+    const [from] = (await provider.request({ method: 'eth_accounts' })) || [];
+    if (!from) throw new Error('No wallet account connected.');
+    const landlordAddr = getAddress(from);
     els.connect.textContent = 'Wallet Connected';
     els.connect.style.background = '#10b981';
     els.create.disabled = false;
-    info('Wallet ready.');
+    info('Wallet ready. Loading your listings…');
+    try {
+      await loadLandlordListings(landlordAddr);
+    } catch (err) {
+      console.error('Failed to refresh landlord listings after connect', err);
+    }
   } catch (e) {
     info(e?.message || 'Wallet connection failed.');
   }
@@ -509,40 +789,6 @@ els.create.onclick = () =>
       }
     } catch (e) {
       info(`Error: ${e?.message || e}`);
-    }
-  });
-
-els.checkAvail.onclick = () =>
-  disableWhile(els.checkAvail, async () => {
-    try {
-      const abi = await loadPlatformAbi();
-      if (!Array.isArray(abi) || abi.length === 0) throw new Error('Platform ABI unavailable.');
-      const rawId = String(els.availListing.value || '').trim();
-      if (!/^\d+$/.test(rawId)) throw new Error('Listing ID must be a whole number.');
-      const id = BigInt(rawId);
-      if (id === 0n) throw new Error('Listing ID must be at least 1.');
-      const start = els.availStart.value;
-      const end = els.availEnd.value;
-      if (!start || !end) throw new Error('Select dates.');
-      const sTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
-      const eTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
-      if (eTs <= sTs) throw new Error('End before start');
-      const listingAddr = await pub.readContract({
-        address: PLATFORM_ADDRESS,
-        abi,
-        functionName: 'listingById',
-        args: [id],
-      });
-      if (typeof listingAddr !== 'string' || /^0x0+$/i.test(listingAddr)) throw new Error('Listing not found.');
-      const free = await pub.readContract({
-        address: REGISTRY_ADDRESS,
-        abi: REGISTRY_ABI,
-        functionName: 'isAvailable',
-        args: [listingAddr, sTs, eTs],
-      });
-      els.availResult.textContent = free ? 'Available' : 'Booked';
-    } catch (e) {
-      els.availResult.textContent = e?.message || 'Error';
     }
   });
 
