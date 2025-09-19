@@ -339,26 +339,26 @@ async function fetchListingInfo(listingAddr) {
   }
 }
 
-function renderLandlordListingCard(info) {
+function renderLandlordListingCard(listing) {
   const card = document.createElement('div');
   card.className = 'landlord-card';
 
   const title = document.createElement('div');
   title.className = 'landlord-card-title';
-  title.textContent = `Listing ${shortAddress(info.address)}`;
+  title.textContent = `Listing ${shortAddress(listing.address)}`;
   card.appendChild(title);
 
   const rateLine = document.createElement('div');
   rateLine.className = 'landlord-card-detail';
-  rateLine.textContent = `Base rate: ${formatUsdc(info.baseDailyRate)} USDC / day`;
+  rateLine.textContent = `Base rate: ${formatUsdc(listing.baseDailyRate)} USDC / day`;
   card.appendChild(rateLine);
 
   const depositLine = document.createElement('div');
   depositLine.className = 'landlord-card-detail';
-  depositLine.textContent = `Deposit: ${formatUsdc(info.depositAmount)} USDC`;
+  depositLine.textContent = `Deposit: ${formatUsdc(listing.depositAmount)} USDC`;
   card.appendChild(depositLine);
 
-  const areaValue = Number(info.areaSqm ?? 0n);
+  const areaValue = Number(listing.areaSqm ?? 0n);
   if (Number.isFinite(areaValue) && areaValue > 0) {
     const areaLine = document.createElement('div');
     areaLine.className = 'landlord-card-detail';
@@ -366,16 +366,16 @@ function renderLandlordListingCard(info) {
     card.appendChild(areaLine);
   }
 
-  const minNoticeText = formatDuration(info.minBookingNotice);
-  const maxWindowText = info.maxBookingWindow > 0n ? formatDuration(info.maxBookingWindow) : 'Unlimited';
+  const minNoticeText = formatDuration(listing.minBookingNotice);
+  const maxWindowText = listing.maxBookingWindow > 0n ? formatDuration(listing.maxBookingWindow) : 'Unlimited';
   const windowLine = document.createElement('div');
   windowLine.className = 'landlord-card-detail';
   windowLine.textContent = `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`;
   card.appendChild(windowLine);
 
-  if (info.metadataURI) {
+  if (listing.metadataURI) {
     const metaLink = document.createElement('a');
-    metaLink.href = info.metadataURI;
+    metaLink.href = listing.metadataURI;
     metaLink.target = '_blank';
     metaLink.rel = 'noopener';
     metaLink.textContent = 'Metadata';
@@ -431,7 +431,7 @@ function renderLandlordListingCard(info) {
           address: REGISTRY_ADDRESS,
           abi: REGISTRY_ABI,
           functionName: 'isAvailable',
-          args: [info.address, startTs, endTs],
+          args: [listing.address, startTs, endTs],
         });
         if (available) {
           result.className = 'availability-result available';
