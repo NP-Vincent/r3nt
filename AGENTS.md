@@ -14,7 +14,8 @@ work remains consistent, upgradeable and easy to reason about.
 - Make ERC-1155 tokenisation optional for every booking through the r3nt-SQMU (SQMU-R) token.
 - Stream rent to investors using an accumulator so the system never loops over all holders.
 - Maintain a modular, upgradeable architecture built from `Platform`, `ListingFactory`,
-  `Listing` clones, `BookingRegistry` and `r3nt-SQMU`.
+  `Listing` clones, `BookingRegistry`, `r3nt-SQMU` and an agent wrapper that coordinates the
+  investor-facing flows for curated properties.
 
 ## Contract Modules & Responsibilities
 ### Platform (`Platform.sol`)
@@ -54,6 +55,18 @@ work remains consistent, upgradeable and easy to reason about.
 - Allows a listing to `lockTransfers(tokenId)` after fundraising to simplify downstream rent
   streaming.
 - Metadata is served from an off-chain URI template like `https://api.r3nt.xyz/booking/{id}.json`.
+
+### Agent (`Agent.sol`)
+- Wraps a specific `Listing` clone while holding immutable references to the `BookingRegistry` and
+  `r3nt-SQMU` modules so agents can coordinate calendars, fundraising and rent distribution without
+  bypassing core invariants.
+- Accepts investor capital, sets or enforces `agentFeeBps` and forwards deposits or guaranteed rent
+  obligations into the underlying listing before requesting SQMU-R mints.
+- Skims the configured agent fee from rent streamed through the listing accumulator, forwarding the
+  remaining proceeds to investors and landlords while surfacing events for off-chain accounting.
+- Restricts operator actions (metadata updates, off-chain agreements, investor onboarding) to
+  wallets approved by the platform multi-sig and exposes view helpers so the UI/subgraph can link
+  investor positions back to the canonical booking id.
 
 ### Listing (`Listing.sol`)
 - Cloneable per-property contract initialised with landlord, platform, registry and r3nt-SQMU
@@ -117,8 +130,11 @@ Key events to retain/emit: `BookingCreated`, `DepositSplitProposed`, `DepositRel
 3. Deploy the `Listing` implementation (uninitialised).
 4. Deploy `ListingFactory` pointing to the implementation.
 5. Deploy `Platform`, configure USDC and module addresses.
-6. Platform calls `createListing(landlord, params)` to initialise each property clone.
-7. Update front-end/subgraph integrations to the new module addresses.
+6. Deploy the agent implementation/factory, cap allowable `agentFeeBps`, register approved operator
+   wallets and link the module to the platform.
+7. Platform calls `createListing(landlord, params)` to initialise each property clone and registers
+   authorised agent wrappers against those listings as required.
+8. Update front-end/subgraph integrations to the new module addresses.
 
 ## Design Notes & Constraints
 - **Upgradeability** – every upgradeable module must inherit from `UUPSUpgradeable`, protect
@@ -126,6 +142,9 @@ Key events to retain/emit: `BookingCreated`, `DepositSplitProposed`, `DepositRel
 - **Deposits** – continue to use multi-sig/ERC-7913 signature verification when confirming splits.
 - **Roles** – enforce permissions for landlord, tenant, investor and platform flows as described
   above; never expose unrestricted reserve/release/tokenisation endpoints.
+- **Agent deployment & fees** – only the platform multi-sig may deploy or register agent proxies,
+  operators must be explicitly allow-listed and each agent stores `agentFeeBps` (capped globally)
+  and payout addresses so rent distribution stays deterministic.
 - **Data hygiene** – keep on-chain storage minimal and rely on events + off-chain metadata for rich
   detail. All monetary values stay in 6-decimal USDC.
 - **Testing** – there are no automated scripts in this repository. Run targeted Foundry/Hardhat

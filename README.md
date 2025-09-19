@@ -86,6 +86,58 @@ The per-property clone that handles bookings, deposit escrow, tokenisation and r
 - Emits events so the subgraph/front-end can reconstruct bookings, investor positions and rent
   flows without on-chain iteration.
 
+## Agent Module & Tokenisation Models
+### Agent Contract (`Agent.sol`)
+- Sits above a `Listing` clone to curate a property on behalf of an operator, caching references
+  to the canonical `BookingRegistry` and `r3nt-SQMU` token so it can coordinate calendars,
+  fundraising and rent distribution without duplicating the lower-level logic.
+- Receives investor USDC to cover upfront costs (deposits, refurbishments or guaranteed rent),
+  forwards funds into the listing, instructs the listing to mint SQMU-R and escrows any surplus
+  capital for later distribution.
+- Tracks `agentFeeBps` and a payout address; when `Listing.payRent` settles a tranche the agent
+  skims its configured basis points from the net rent stream before forwarding the balance to
+  investors and the landlord.
+- Exposes operator-only hooks for marketing and compliance (updating metadata, registering
+  off-chain agreements) while leaving bookings, deposit release and tokenisation approvals in the
+  platform’s control path.
+
+### Tokenisation Models
+1. **Model 1 – Deposit advance**: Investors fund the tenant deposit and any short-term make-ready
+   costs. The agent forwards the capital into the listing before a stay begins, SQMU-R tokens are
+   minted 1:1 with the funded amount and investors later recover the deposit (minus agreed tenant
+   deductions) plus their share of streamed rent.
+2. **Model 2 – Rent-share raise**: The tenant covers their own deposit while investors purchase
+   SQMU-R from the agent to secure a pro-rata share of future rent. The agent only releases the
+   raise once booking terms are finalised, then routes every rent payment through the accumulator,
+   deducting the agent fee before rent is streamed to token holders.
+3. **Model 3 – Full-service underwriting**: The agent underwrites the entire stay (deposit and
+   rent) up front, optionally guaranteeing a minimum payout to the landlord. Investors supply the
+   working capital, accept occupancy/default risk signalled in off-chain metadata, and receive rent
+   and residual deposit proceeds while the agent takes its basis-point fee for managing the lease.
+
+### Participant Interactions
+- **Investors** stake USDC with the agent under the selected model, receive SQMU-R that maps to the
+  booking id and accrue rent via the listing’s accumulator. They can redeem rent streams or deposit
+  refunds minus the configured agent fee and platform/landlord fees.
+- **Landlords** onboard properties through the platform, delegate marketing/tenant screening to a
+  trusted agent and continue to approve deposit splits. They receive rent net of platform and agent
+  fees but gain earlier access to capital through investor participation.
+- **Tenants** interact with the familiar `Listing` interface for booking, deposits and rent
+  payments. From their perspective the agent simply ensures availability, manages communication and
+  keeps the property compliant.
+- **Agents** operate an allow-listed contract that bridges off-chain operations with the on-chain
+  suite. They coordinate investor raises, trigger listing actions and collect the configured basis
+  points for curating and servicing the stay.
+
+### Permissioning & Configuration Parameters
+- The platform multi-sig deploys the canonical agent implementation, sets global safety rails
+  (maximum `agentFeeBps`, whitelisted operator wallets) and exposes a factory/registry so new agent
+  proxies can only be created through approved flows.
+- Individual agents register the listing they manage and must be explicitly authorised by the
+  platform before accepting investor capital or calling privileged hooks.
+- Agent configuration includes payout addresses, fee basis points and optional metadata URIs so
+  all downstream modules calculate net rent consistently.
+
 ### Farcaster linkage & property metadata
 - Listings keep the `(fid, castHash)` pair so the UI can build a "View full details on Farcaster"
   link using `buildFarcasterCastUrl(fid, castHash)`.
