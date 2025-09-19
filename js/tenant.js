@@ -201,6 +201,78 @@ async function openCast(fid, hash32, fallbackUrl){
   }
 }
 
+const IPFS_PREFIX = 'ipfs://';
+const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+
+function normaliseMetadataUrl(uri){
+  if (!uri || typeof uri !== 'string') return '';
+  if (uri.startsWith(IPFS_PREFIX)) {
+    const path = uri.slice(IPFS_PREFIX.length);
+    return `${IPFS_GATEWAY}${path.replace(/^\//, '')}`;
+  }
+  return uri;
+}
+
+function decodeDataUri(uri){
+  const match = /^data:([^;,]*)(;charset=[^;,]*)?(;base64)?,([\s\S]*)$/i.exec(uri || '');
+  if (!match) return null;
+  const isBase64 = Boolean(match[3]);
+  const payload = match[4] || '';
+  try {
+    if (isBase64) {
+      const cleaned = payload.replace(/\s/g, '');
+      return atob(cleaned);
+    }
+    return decodeURIComponent(payload);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchListingMetadataDetails(uri, fallbackAddress){
+  const fallbackText = typeof fallbackAddress === 'string' ? fallbackAddress : '';
+  const result = { title: fallbackText, description: fallbackText };
+  if (!uri || typeof uri !== 'string') {
+    return result;
+  }
+  let raw;
+  try {
+    if (uri.startsWith('data:')) {
+      raw = decodeDataUri(uri);
+    } else {
+      const normalised = normaliseMetadataUrl(uri);
+      if (!normalised) {
+        return result;
+      }
+      const response = await fetch(normalised, { method: 'GET' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      raw = await response.text();
+    }
+  } catch (err) {
+    console.warn('Failed to retrieve listing metadata', uri, err);
+    return result;
+  }
+  if (!raw) {
+    return result;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.name === 'string' && parsed.name.trim()) {
+        result.title = parsed.name.trim();
+      }
+      if (typeof parsed.description === 'string' && parsed.description.trim()) {
+        result.description = parsed.description.trim();
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to parse listing metadata JSON', uri, err);
+  }
+  return result;
+}
+
 async function fetchListingInfo(listingAddr){
   if (!pub) {
     await loadConfig();
@@ -244,6 +316,7 @@ async function fetchListingInfo(listingAddr){
     const geohashHex = getString(8, '0x');
     const geohashPrecision = Number(getBig(9));
     const landlord = getString(10, '0x0000000000000000000000000000000000000000');
+    const metadataDetails = await fetchListingMetadataDetails(metadataURI, listingAddr);
     const geohash = decodeBytes32ToString(
       geohashHex,
       Number.isFinite(geohashPrecision) ? geohashPrecision : undefined
@@ -269,6 +342,8 @@ async function fetchListingInfo(listingAddr){
       depositAmount,
       areaSqm,
       metadataURI,
+      title: metadataDetails.title,
+      description: metadataDetails.description,
       minBookingNotice,
       maxBookingWindow,
       geohash,
@@ -288,8 +363,22 @@ function renderListingCard(info){
   card.className = 'card';
 
   const title = document.createElement('div');
-  title.textContent = `Listing ${short(info.address)}`;
+  title.className = 'listing-title';
+  const displayTitle = (info && typeof info.title === 'string' && info.title.trim())
+    ? info.title.trim()
+    : `Listing ${short(info.address)}`;
+  title.textContent = displayTitle;
   card.appendChild(title);
+
+  if (info && typeof info.description === 'string') {
+    const trimmed = info.description.trim();
+    if (trimmed && trimmed !== displayTitle && trimmed !== info.address) {
+      const summary = document.createElement('div');
+      summary.className = 'listing-summary';
+      summary.textContent = trimmed;
+      card.appendChild(summary);
+    }
+  }
 
   const rateLine = document.createElement('div');
   rateLine.textContent = `Base rate: ${formatUsdc(info.baseDailyRate)} USDC / day`;
