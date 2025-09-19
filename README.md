@@ -91,7 +91,7 @@ The per-property clone that handles bookings, deposit escrow, tokenisation and r
 - Sits above a `Listing` clone to curate a property on behalf of an operator, caching references
   to the canonical `BookingRegistry` and `r3nt-SQMU` token so it can coordinate calendars,
   fundraising and rent distribution without duplicating the lower-level logic.
-- Receives investor USDC to cover upfront costs (deposits, refurbishments or guaranteed rent),
+- Receives investor USDC to cover upfront costs (deposits, refurbishments and/or guaranteed rent),
   forwards funds into the listing, instructs the listing to mint SQMU-R and escrows any surplus
   capital for later distribution.
 - Tracks `agentFeeBps` and a payout address; when `Listing.payRent` settles a tranche the agent
@@ -102,15 +102,11 @@ The per-property clone that handles bookings, deposit escrow, tokenisation and r
   platform’s control path.
 
 ### Tokenisation Models
-1. **Model 1 – Deposit advance**: Investors fund the tenant deposit and any short-term make-ready
-   costs. The agent forwards the capital into the listing before a stay begins, SQMU-R tokens are
-   minted 1:1 with the funded amount and investors later recover the deposit (minus agreed tenant
-   deductions) plus their share of streamed rent.
-2. **Model 2 – Rent-share raise**: The tenant covers their own deposit while investors purchase
+1. **Model 1 – Rent-share raise**: The tenant covers their own deposit while investors purchase
    SQMU-R from the agent to secure a pro-rata share of future rent. The agent only releases the
    raise once booking terms are finalised, then routes every rent payment through the accumulator,
    deducting the agent fee before rent is streamed to token holders.
-3. **Model 3 – Full-service underwriting**: The agent underwrites the entire stay (deposit and
+2. **Model 2 – Full-service underwriting**: The agent underwrites the entire stay (deposit and
    rent) up front, optionally guaranteeing a minimum payout to the landlord. Investors supply the
    working capital, accept occupancy/default risk signalled in off-chain metadata, and receive rent
    and residual deposit proceeds while the agent takes its basis-point fee for managing the lease.
