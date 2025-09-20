@@ -27,22 +27,162 @@ if (versionBadge) {
 }
 
 function setActionStatus(message, type = 'info') {
-  actionStatusEl.textContent = message;
-  actionStatusEl.classList.remove('status-ok', 'status-error');
+  actionStatusEl.textContent = message ?? '';
+  actionStatusEl.classList.remove('status-ok', 'status-error', 'status-warning');
   if (type === 'success') {
     actionStatusEl.classList.add('status-ok');
   } else if (type === 'error') {
     actionStatusEl.classList.add('status-error');
+  } else if (type === 'warning') {
+    actionStatusEl.classList.add('status-warning');
   }
 }
 
-function describeError(err) {
-  if (!err) return 'Unknown error';
-  if (err.error && err.error.message) return err.error.message;
-  if (err.data && err.data.message) return err.data.message;
-  if (err.reason) return err.reason;
-  if (err.message) return err.message;
-  return String(err);
+function cleanErrorMessage(message) {
+  if (typeof message !== 'string') return '';
+  let result = message.trim();
+  if (!result) return '';
+
+  const prefixPatterns = [
+    /^Error:\s*/i,
+    /^ProviderError:\s*/i,
+    /^CALL_EXCEPTION:\s*/i,
+  ];
+
+  for (const pattern of prefixPatterns) {
+    result = result.replace(pattern, '').trim();
+  }
+
+  result = result.replace(/^(execution reverted:?)(\s)*/i, '').trim();
+  result = result.replace(/^VM Exception while processing transaction:\s*/i, '').trim();
+  result = result.replace(/^reverted with reason string\s*/i, '').trim();
+  result = result.replace(/^Returned error:\s*/i, '').trim();
+
+  if (
+    (result.startsWith('"') && result.endsWith('"')) ||
+    (result.startsWith("'") && result.endsWith("'"))
+  ) {
+    result = result.slice(1, -1).trim();
+  }
+
+  return result;
+}
+
+function interpretError(err) {
+  const fallback = 'Unknown error';
+  if (!err) {
+    return { message: fallback, severity: 'error' };
+  }
+
+  const messages = [];
+  const seen = new Set();
+
+  const pushMessage = (value) => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === '[object Object]') return;
+    messages.push(trimmed);
+  };
+
+  const parseBody = (body) => {
+    if (typeof body !== 'string') return;
+    try {
+      const parsed = JSON.parse(body);
+      traverse(parsed);
+    } catch (jsonErr) {
+      // ignore malformed JSON bodies
+    }
+  };
+
+  const traverse = (value) => {
+    if (value == null) return;
+
+    if (typeof value === 'string') {
+      pushMessage(value);
+      return;
+    }
+
+    if (typeof value !== 'object') {
+      return;
+    }
+
+    if (seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+
+    if (typeof value.message === 'string') pushMessage(value.message);
+    if (typeof value.reason === 'string') pushMessage(value.reason);
+    if (typeof value.shortMessage === 'string') pushMessage(value.shortMessage);
+
+    if (typeof value.error === 'string') pushMessage(value.error);
+    if (typeof value.error === 'object') traverse(value.error);
+
+    if (typeof value.data === 'string') pushMessage(value.data);
+    if (typeof value.data === 'object') traverse(value.data);
+
+    if (Array.isArray(value.errors)) {
+      value.errors.forEach((item) => traverse(item));
+    }
+
+    if (typeof value.body === 'string') parseBody(value.body);
+    if (typeof value.error?.body === 'string') parseBody(value.error.body);
+
+    if (typeof value.cause === 'object' || typeof value.cause === 'string') {
+      traverse(value.cause);
+    }
+
+    Object.keys(value).forEach((key) => {
+      if (['message', 'reason', 'shortMessage', 'error', 'data', 'errors', 'body', 'cause'].includes(key)) {
+        return;
+      }
+      const nested = value[key];
+      if (typeof nested === 'string') {
+        pushMessage(nested);
+      } else if (typeof nested === 'object') {
+        traverse(nested);
+      }
+    });
+  };
+
+  traverse(err);
+
+  let rawMessage = messages.find(Boolean);
+  if (!rawMessage) {
+    if (typeof err === 'string') {
+      rawMessage = err;
+    } else {
+      try {
+        rawMessage = String(err);
+      } catch (stringErr) {
+        rawMessage = fallback;
+      }
+    }
+  }
+
+  if (!rawMessage) {
+    rawMessage = fallback;
+  }
+
+  const cleaned = cleanErrorMessage(rawMessage);
+  const baseMessage = cleaned || rawMessage || fallback;
+  const normalized = baseMessage.toLowerCase();
+
+  if (normalized.includes('circuit breaker')) {
+    return {
+      message: `Arbitrum network circuit breaker is active. Wait for the sequencer to recover before retrying. (${baseMessage})`,
+      severity: 'warning',
+    };
+  }
+
+  if (normalized.includes('sequencer is down') || normalized.includes('sequencer down')) {
+    return {
+      message: `Arbitrum sequencer is currently offline. Retry once it resumes processing transactions. (${baseMessage})`,
+      severity: 'warning',
+    };
+  }
+
+  return { message: baseMessage, severity: 'error' };
 }
 
 function formatUsdc(value) {
@@ -146,7 +286,8 @@ async function refreshSnapshot() {
     snapshotOutputEl.textContent = lines.join('\n');
   } catch (error) {
     console.error('Failed to refresh snapshot', error);
-    snapshotOutputEl.textContent = `Failed to load snapshot: ${describeError(error)}`;
+    const { message } = interpretError(error);
+    snapshotOutputEl.textContent = `Failed to load snapshot: ${message}`;
   }
 }
 
@@ -165,7 +306,8 @@ async function withSigner(label, action, button) {
     await refreshSnapshot();
   } catch (err) {
     console.error(err);
-    setActionStatus(`${label} failed: ${describeError(err)}`, 'error');
+    const { message, severity } = interpretError(err);
+    setActionStatus(`${label} failed: ${message}`, severity);
   } finally {
     if (button) button.disabled = false;
   }
@@ -230,7 +372,8 @@ connectBtn.addEventListener('click', async () => {
     setActionStatus('Wallet connected.', 'success');
   } catch (err) {
     console.error(err);
-    setActionStatus(`Connection failed: ${describeError(err)}`, 'error');
+    const { message, severity } = interpretError(err);
+    setActionStatus(`Connection failed: ${message}`, severity);
     connectBtn.disabled = false;
   }
 });
@@ -266,7 +409,8 @@ function bindForm(form, label, handler) {
     } catch (err) {
       if (submitButton) submitButton.disabled = false;
       console.error(err);
-      setActionStatus(describeError(err), 'error');
+      const { message, severity } = interpretError(err);
+      setActionStatus(message, severity);
     }
   });
 }
