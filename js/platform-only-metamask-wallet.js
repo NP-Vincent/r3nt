@@ -6,14 +6,14 @@ const MMSDK = new MetaMaskSDK.MetaMaskSDK({
   infuraAPIKey: '822e08935dea4fb48f668ff353ac863a',
 });
 
-const SCROLL_CHAIN_ID = '0x82750';
+const ARBITRUM_CHAIN_ID = '0xa4b1';
 
-const SCROLL_PARAMS = {
-  chainId: SCROLL_CHAIN_ID,
-  chainName: 'Scroll',
+const ARBITRUM_PARAMS = {
+  chainId: ARBITRUM_CHAIN_ID,
+  chainName: 'Arbitrum One',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-  rpcUrls: ['https://rpc.scroll.io'],
-  blockExplorerUrls: ['https://scrollscan.com'],
+  rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+  blockExplorerUrls: ['https://arbiscan.io'],
 };
 
 export async function connectWallet(statusId) {
@@ -26,21 +26,21 @@ export async function connectWallet(statusId) {
     // MMSDK.connect already exposes the account; no additional eth_accounts
     // request is made to prevent duplicate MetaMask popups
     let chainId = await ethereum.request({ method: 'eth_chainId', params: [] });
-    if (chainId !== SCROLL_CHAIN_ID) {
+    if (chainId !== ARBITRUM_CHAIN_ID) {
       try {
         await ethereum.request({
           method: 'wallet_switchEthereumChain',
-          params: [{ chainId: SCROLL_CHAIN_ID }],
+          params: [{ chainId: ARBITRUM_CHAIN_ID }],
         });
       } catch (switchErr) {
         if (switchErr.code === 4902) {
           await ethereum.request({
             method: 'wallet_addEthereumChain',
-            params: [SCROLL_PARAMS],
+            params: [ARBITRUM_PARAMS],
           });
           await ethereum.request({
             method: 'wallet_switchEthereumChain',
-            params: [{ chainId: SCROLL_CHAIN_ID }],
+            params: [{ chainId: ARBITRUM_CHAIN_ID }],
           });
         } else {
           const isWalletConnect =
@@ -49,7 +49,7 @@ export async function connectWallet(statusId) {
             switchErr.code === 4200 || switchErr.code === -32601;
           if (isWalletConnect && unsupportedMethod) {
             statusDiv.innerHTML =
-              '<span style="color:red;">Please switch to the Scroll network manually in MetaMask Mobile.</span>';
+              '<span style="color:red;">Please switch to the Arbitrum One network manually in MetaMask Mobile.</span>';
             switchErr.handled = true;
             throw switchErr;
           }
@@ -63,7 +63,7 @@ export async function connectWallet(statusId) {
     const signer = provider.getSigner();
 
     statusDiv.innerHTML =
-      '<span style="color:green;">Connected to Scroll</span>';
+      '<span style="color:green;">Connected to Arbitrum One</span>';
     return { provider, signer };
   } catch (err) {
     if (!err.handled) {
