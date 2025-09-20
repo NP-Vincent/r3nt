@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>r3nt — Platform Owner Console</title>
+  <style>
+    :root {
+      --fg: #0f172a;
+      --bg: #ffffff;
+      --muted: #475569;
+      --border: #cbd5f5;
+      --accent: #2563eb;
+      --card: #f8fafc;
+      --danger: #b91c1c;
+      --success: #047857;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      padding: 16px 16px 48px;
+      max-width: 760px;
+    }
+    h1 {
+      font-size: 1.6rem;
+      margin-bottom: 6px;
+    }
+    h2 {
+      font-size: 1.2rem;
+      margin: 24px 0 10px;
+    }
+    h3 {
+      font-size: 1rem;
+      margin: 18px 0 6px;
+    }
+    p {
+      line-height: 1.5;
+      margin: 10px 0;
+    }
+    .muted { color: var(--muted); }
+    .card {
+      background: var(--card);
+      border: 1px solid rgba(148, 163, 184, 0.4);
+      border-radius: 12px;
+      padding: 18px;
+      margin: 18px 0;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+    .card h2:first-child { margin-top: 0; }
+    .card form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin: 12px 0 0;
+    }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+    input, select, textarea {
+      padding: 10px 12px;
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-family: inherit;
+      background: #fff;
+      color: inherit;
+    }
+    textarea { resize: vertical; min-height: 90px; }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 16px rgba(37, 99, 235, 0.18); }
+    button:disabled { opacity: 0.65; cursor: not-allowed; box-shadow: none; }
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    .button-row button.secondary {
+      background: #1f2937;
+    }
+    .button-row button.danger {
+      background: var(--danger);
+    }
+    .inline-label {
+      display: block;
+      font-weight: 500;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: -4px;
+    }
+    .note {
+      background: rgba(59, 130, 246, 0.08);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 8px 0 0;
+    }
+    #snapshotOutput {
+      font-family: ui-monospace, SFMono-Regular, SFMono, Menlo, Consolas, 'Liberation Mono', monospace;
+      font-size: 0.88rem;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 12px;
+      border-radius: 10px;
+      overflow-x: auto;
+      line-height: 1.6;
+      min-height: 120px;
+    }
+    #actionStatus {
+      min-height: 24px;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+    .status-ok { color: var(--success); }
+    .status-error { color: var(--danger); }
+    .section-divider {
+      border: none;
+      border-top: 1px solid rgba(148, 163, 184, 0.3);
+      margin: 22px 0;
+    }
+    @media (max-width: 600px) {
+      body { padding: 14px 14px 48px; }
+      .card { padding: 16px; }
+      button { width: 100%; }
+      .button-row { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+  <script src="./js/dev-error-console.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@metamask/sdk@1.1.0/dist/metamask-sdk.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Platform Owner Console</h1>
+    <p class="muted">Direct access for the r3nt platform multi-sig. Review the live configuration before submitting changes.</p>
+    <div class="muted">Build <span data-version></span></div>
+  </header>
+
+  <section class="card">
+    <h2>Connection</h2>
+    <p class="muted">Connect with the wallet that controls <code>Platform.sol</code>. The interface will insist on Arbitrum One.</p>
+    <div class="button-row">
+      <button id="connectBtn">Connect MetaMask</button>
+      <button id="disconnectBtn" class="secondary" disabled>Disconnect</button>
+      <button id="refreshSnapshotBtn" class="secondary">Refresh snapshot</button>
+    </div>
+    <div class="note" id="walletStatus">Not connected.</div>
+    <div class="muted" id="connectedAccount"></div>
+  </section>
+
+  <section class="card">
+    <h2>Platform snapshot</h2>
+    <p class="muted">Use this read-only summary to confirm the on-chain configuration before and after updates.</p>
+    <pre id="snapshotOutput">Loading current state…</pre>
+  </section>
+
+  <section class="card" id="coreConfigSection">
+    <h2>Core configuration</h2>
+    <p class="muted">Addresses must be checksum formatted (0x-prefixed). Fees use basis points (1% = 100 bps). Totals cannot exceed 10,000 bps.</p>
+
+    <form id="formUpdateUsdc" data-requires-signer>
+      <h3>Set USDC token</h3>
+      <p class="inline-label">Expects the canonical ERC-20 USDC address. Changing this will break transfers if set incorrectly.</p>
+      <label>USDC contract address
+        <input id="usdcAddress" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <button type="submit">Update USDC</button>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formUpdateTreasury" data-requires-signer>
+      <h3>Set treasury</h3>
+      <p class="inline-label">Protocol fees flow to this wallet.</p>
+      <label>Treasury address
+        <input id="treasuryAddress" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <button type="submit">Update treasury</button>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formUpdateModules" data-requires-signer>
+      <h3>Module addresses</h3>
+      <p class="inline-label">All three fields are required. Use deployed implementation addresses.</p>
+      <label>ListingFactory address
+        <input id="moduleFactory" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <label>BookingRegistry address
+        <input id="moduleRegistry" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <label>r3nt-SQMU (SQMU-R) token address
+        <input id="moduleSqmu" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <button type="submit">Set modules</button>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formUpdateFees" data-requires-signer>
+      <h3>Platform fees</h3>
+      <p class="inline-label">Enter whole numbers in basis points. Example: 150 = 1.5%. Tenant + landlord fees must stay within 10,000 bps.</p>
+      <label>Tenant fee (bps)
+        <input id="tenantFee" inputmode="numeric" autocomplete="off" required />
+      </label>
+      <label>Landlord fee (bps)
+        <input id="landlordFee" inputmode="numeric" autocomplete="off" required />
+      </label>
+      <button type="submit">Update fees</button>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formUpdatePricing" data-requires-signer>
+      <h3>Listing &amp; view pricing</h3>
+      <p class="inline-label">USDC values accept up to 6 decimals. Set duration to <code>0</code> to disable view passes.</p>
+      <label>Listing creation fee (USDC)
+        <input id="listingFee" inputmode="decimal" autocomplete="off" placeholder="0.00" required />
+      </label>
+      <label>View pass price (USDC)
+        <input id="viewPrice" inputmode="decimal" autocomplete="off" placeholder="0.00" required />
+      </label>
+      <label>View pass duration (hours)
+        <input id="viewDuration" inputmode="numeric" autocomplete="off" placeholder="0" required />
+      </label>
+      <button type="submit">Update pricing</button>
+    </form>
+  </section>
+
+  <section class="card" id="agentConfigSection">
+    <h2>Agent controls</h2>
+    <p class="muted">Deployers must be pre-approved before they can request agent proxies. Operators manage the deployed agent wallets.</p>
+
+    <form id="formAgentImplementation" data-requires-signer>
+      <h3>Agent implementation</h3>
+      <p class="inline-label">Proxy implementation used when deploying new agents.</p>
+      <label>Implementation address
+        <input id="agentImplementation" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <button type="submit">Set implementation</button>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formAgentMaxFee" data-requires-signer>
+      <h3>Agent fee cap</h3>
+      <p class="inline-label">Maximum fee in basis points that any agent can charge (0 – 10,000).</p>
+      <label>Max agent fee (bps)
+        <input id="agentMaxFee" inputmode="numeric" autocomplete="off" required />
+      </label>
+      <button type="submit">Update cap</button>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formAgentDeployer" data-requires-signer>
+      <h3>Approve deployers</h3>
+      <p class="inline-label">Grant or revoke permission for an address to deploy agent proxies.</p>
+      <label>Account address
+        <input id="agentDeployerAddress" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <label>Permission
+        <select id="agentDeployerFlag">
+          <option value="true">Approve</option>
+          <option value="false">Revoke</option>
+        </select>
+      </label>
+      <button type="submit">Update deployer access</button>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formAgentOperator" data-requires-signer>
+      <h3>Approve operators</h3>
+      <p class="inline-label">Operators must be approved before they can manage newly created agent proxies.</p>
+      <label>Operator address
+        <input id="agentOperatorAddress" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <label>Permission
+        <select id="agentOperatorFlag">
+          <option value="true">Approve</option>
+          <option value="false">Revoke</option>
+        </select>
+      </label>
+      <button type="submit">Update operator access</button>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formCreateAgent" data-requires-signer>
+      <h3>Deploy agent proxy</h3>
+      <p class="inline-label">Requires an existing booking on a registered listing. Agent fee must respect the global cap.</p>
+      <label>Listing address
+        <input id="createAgentListing" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <label>Booking ID (integer)
+        <input id="createAgentBooking" inputmode="numeric" autocomplete="off" required />
+      </label>
+      <label>Agent wallet (operator)
+        <input id="createAgentWallet" placeholder="0x…" autocomplete="off" required />
+      </label>
+      <label>Agent fee (bps)
+        <input id="createAgentFee" inputmode="numeric" autocomplete="off" required />
+      </label>
+      <label>Fee recipient (optional)
+        <input id="createAgentRecipient" placeholder="0x… or leave blank" autocomplete="off" />
+      </label>
+      <button type="submit">Create agent</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Activity</h2>
+    <p class="muted">Status updates for submitted transactions appear here.</p>
+    <div id="actionStatus" class="muted">No activity yet.</div>
+  </section>
+
+  <script type="module" src="./js/platform.js"></script>
+</body>
+</html>
