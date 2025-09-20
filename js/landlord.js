@@ -52,6 +52,30 @@ const info = (t) => (els.status.textContent = t);
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'landlord' });
 
+const checklistItems = {
+  basics: document.querySelector('[data-check="basics"]'),
+  location: document.querySelector('[data-check="location"]'),
+  pricing: document.querySelector('[data-check="pricing"]'),
+  policies: document.querySelector('[data-check="policies"]'),
+};
+
+const checkpointLabels = {
+  basics: 'Basics',
+  location: 'Location & size',
+  pricing: 'Pricing',
+  policies: 'Policies',
+};
+
+const checkpointState = {
+  basics: false,
+  location: false,
+  pricing: false,
+  policies: false,
+};
+
+let lastAllComplete = false;
+let walletConnected = false;
+
 const onboardingFields = [
   'title',
   'shortDesc',
@@ -250,29 +274,6 @@ function normalizeCastHash(h) {
   return toBytes32FromCastHash(hex);
 }
 
-const checklistItems = {
-  basics: document.querySelector('[data-check="basics"]'),
-  location: document.querySelector('[data-check="location"]'),
-  pricing: document.querySelector('[data-check="pricing"]'),
-  policies: document.querySelector('[data-check="policies"]'),
-};
-
-const checkpointLabels = {
-  basics: 'Basics',
-  location: 'Location & size',
-  pricing: 'Pricing',
-  policies: 'Policies',
-};
-
-const checkpointState = {
-  basics: false,
-  location: false,
-  pricing: false,
-  policies: false,
-};
-
-let lastAllComplete = false;
-let walletConnected = false;
 function disableWhile(el, fn) {
   return (async () => {
     el.disabled = true;

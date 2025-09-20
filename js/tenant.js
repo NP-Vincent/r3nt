@@ -39,6 +39,16 @@ const els = {
   },
 };
 
+let selectedListing = null;
+let selectedCard = null;
+let selectedListingTitle = '';
+let pub;
+let viewPassPrice;
+let viewPassDuration;
+let configLoading;
+let viewPassRequired = false;
+let hasActiveViewPass = false;
+
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
 
 if (els.period && !els.period.value) {
@@ -82,10 +92,6 @@ const PERIOD_OPTIONS = {
 const supportsViewPassPurchase = PLATFORM_ABI.some(
   (item) => item?.type === 'function' && item?.name === 'buyViewPass'
 );
-
-let selectedListing = null;
-let selectedCard = null;
-let selectedListingTitle = '';
 
 function formatUsdc(amount) {
   const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
@@ -360,13 +366,6 @@ function setSelectedListing(info, card) {
     notify({ message: `Planning stay at ${selectedListingTitle}`, variant: 'info', role: 'tenant', timeout: 4200 });
   }
 }
-
-let pub;
-let viewPassPrice;
-let viewPassDuration;
-let configLoading;
-let viewPassRequired = false;
-let hasActiveViewPass = false;
 
 function updateBuyLabel() {
   const parts = [];
