@@ -23,6 +23,13 @@
     nav { margin-bottom:16px; }
     nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
     .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
+    .notification-tray { position:sticky; top:0; display:flex; flex-direction:column; gap:8px; margin:0 0 12px; z-index:2; }
+    .notification { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:12px; border:1px solid #cbd5f5; background:#eef2ff; color:#1e3a8a; }
+    .notification.notification-success { border-color:#bbf7d0; background:#ecfdf5; color:#065f46; }
+    .notification.notification-error { border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
+    .notification.notification-warning { border-color:#fef08a; background:#fffbeb; color:#92400e; }
+    .notification-message { margin-right:12px; font-size:.9rem; }
+    .notification-close { background:transparent; border:0; color:inherit; font-size:1.1rem; cursor:pointer; padding:0 4px; }
   </style>
   <script src="./js/dev-error-console.js"></script>
 </head>
@@ -31,9 +38,13 @@
     <a href="./index.html">Home</a>
     <a href="./tenant.html">Tenant</a>
     <a href="./landlord.html">Landlord</a>
+    <a href="./investor.html">Investor</a>
+    <a href="./agent.html">Agent</a>
     <a href="./admin.html">Admin</a>
+    <a href="./platform.html">Platform</a>
     <span class="version-badge" data-version></span>
   </nav>
+  <div id="notificationTray" class="notification-tray"></div>
   <h1>r3nt — Deposit Admin</h1>
   <div id="contextBar" class="muted">Starting…</div>
   <button id="connect" disabled>Connect Wallet</button>

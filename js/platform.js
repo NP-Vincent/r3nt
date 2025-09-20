@@ -5,6 +5,7 @@ if (!ethersLib) {
 
 import { PLATFORM_ADDRESS, PLATFORM_ABI, RPC_URL, APP_VERSION } from './config.js';
 import { connectWallet, disconnectWallet } from './platform-only-metamask-wallet.js';
+import { notify, mountNotificationCenter } from './notifications.js';
 
 const { BigNumber, constants, utils, providers, Contract } = ethersLib;
 
@@ -21,12 +22,18 @@ const connectedAccountEl = document.getElementById('connectedAccount');
 const snapshotOutputEl = document.getElementById('snapshotOutput');
 const actionStatusEl = document.getElementById('actionStatus');
 
-const versionBadge = document.querySelector('[data-version]');
-if (versionBadge) {
-  versionBadge.textContent = APP_VERSION || 'dev';
+mountNotificationCenter(document.getElementById('notificationTray'), { role: 'platform' });
+
+const versionTargets = document.querySelectorAll('[data-version]');
+versionTargets.forEach((node) => {
+  if (node) node.textContent = APP_VERSION || 'dev';
+});
+const navBadge = document.querySelector('nav .version-badge[data-version]');
+if (navBadge) {
+  navBadge.textContent = `Build ${APP_VERSION}`;
 }
 
-function setActionStatus(message, type = 'info') {
+function setActionStatus(message, type = 'info', toast = false) {
   actionStatusEl.textContent = message ?? '';
   actionStatusEl.classList.remove('status-ok', 'status-error', 'status-warning');
   if (type === 'success') {
@@ -35,6 +42,10 @@ function setActionStatus(message, type = 'info') {
     actionStatusEl.classList.add('status-error');
   } else if (type === 'warning') {
     actionStatusEl.classList.add('status-warning');
+  }
+  if (toast && message) {
+    const variant = type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
+    notify({ message, variant, role: 'platform', timeout: type === 'error' ? 8000 : 5000 });
   }
 }
 
@@ -231,6 +242,7 @@ enableForms(false);
 async function refreshSnapshot() {
   try {
     snapshotOutputEl.textContent = 'Loading current state…';
+    setActionStatus('Refreshing snapshot…');
     const [
       owner,
       usdc,
@@ -284,10 +296,12 @@ async function refreshSnapshot() {
     ];
 
     snapshotOutputEl.textContent = lines.join('\n');
+    setActionStatus('Snapshot refreshed.', 'success', true);
   } catch (error) {
     console.error('Failed to refresh snapshot', error);
     const { message } = interpretError(error);
     snapshotOutputEl.textContent = `Failed to load snapshot: ${message}`;
+    setActionStatus(`Failed to load snapshot: ${message}`, 'error', true);
   }
 }
 
@@ -302,12 +316,12 @@ async function withSigner(label, action, button) {
     const tx = await action();
     setActionStatus(`${label} submitted. Waiting for confirmation (tx: ${tx.hash}).`);
     await tx.wait();
-    setActionStatus(`${label} confirmed.`, 'success');
+    setActionStatus(`${label} confirmed.`, 'success', true);
     await refreshSnapshot();
   } catch (err) {
     console.error(err);
     const { message, severity } = interpretError(err);
-    setActionStatus(`${label} failed: ${message}`, severity);
+    setActionStatus(`${label} failed: ${message}`, severity, true);
   } finally {
     if (button) button.disabled = false;
   }
@@ -369,11 +383,11 @@ connectBtn.addEventListener('click', async () => {
     disconnectBtn.disabled = false;
     platformWrite = new Contract(PLATFORM_ADDRESS, PLATFORM_ABI, signer);
     enableForms(true);
-    setActionStatus('Wallet connected.', 'success');
+    setActionStatus('Wallet connected.', 'success', true);
   } catch (err) {
     console.error(err);
     const { message, severity } = interpretError(err);
-    setActionStatus(`Connection failed: ${message}`, severity);
+    setActionStatus(`Connection failed: ${message}`, severity, true);
     connectBtn.disabled = false;
   }
 });
@@ -391,7 +405,7 @@ disconnectBtn.addEventListener('click', async () => {
     connectedAccountEl.textContent = '';
     enableForms(false);
     connectBtn.disabled = false;
-    setActionStatus('Disconnected.', 'info');
+    setActionStatus('Disconnected.', 'info', true);
   }
 });
 

@@ -25,6 +25,37 @@
     select { width:100%; padding:6px; margin:4px 0 8px; }
     a.listing-link { display:inline-block; margin-top:8px; color:#1f6feb; font-weight:600; text-decoration:none; }
     a.listing-link:hover { text-decoration:underline; }
+    .notification-tray { position: sticky; top: 0; display:flex; flex-direction:column; gap:8px; margin:0 0 12px; z-index:2; }
+    .notification { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:12px; border:1px solid #cbd5f5; background:#eef2ff; color:#1e3a8a; }
+    .notification.notification-success { border-color:#bbf7d0; background:#ecfdf5; color:#065f46; }
+    .notification.notification-error { border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
+    .notification.notification-warning { border-color:#fef08a; background:#fffbeb; color:#92400e; }
+    .notification-message { margin-right:12px; font-size:.9rem; }
+    .notification-close { background:transparent; border:0; color:inherit; font-size:1.1rem; cursor:pointer; padding:0 4px; }
+    .planner-card { margin-top:24px; padding:18px; border:1px solid #e2e8f0; border-radius:16px; background:#f8fafc; }
+    .planner-card h2 { margin:0 0 6px; font-size:1.2rem; }
+    .planner-card p { margin:0; font-size:.9rem; color:#475569; }
+    .planner-grid { display:grid; gap:18px; margin-top:16px; }
+    .planner-inputs label { display:block; font-size:.9rem; margin:10px 0 6px; }
+    .planner-inputs input, .planner-inputs select { width:100%; padding:10px 12px; border:1px solid #d0d7de; border-radius:8px; font-size:.95rem; }
+    .planner-summary { background:#fff; border:1px solid #e2e8f0; border-radius:16px; padding:16px; display:flex; flex-direction:column; gap:10px; }
+    .summary-header { display:flex; flex-direction:column; gap:4px; }
+    .summary-title { font-weight:700; font-size:1rem; }
+    .summary-subtitle { color:#475569; font-size:.9rem; }
+    .summary-breakdown { margin:0; padding:0; }
+    .summary-breakdown div { display:flex; justify-content:space-between; gap:12px; margin:6px 0; font-size:.95rem; }
+    .summary-breakdown dt { font-weight:600; }
+    .summary-breakdown dd { margin:0; font-variant-numeric:tabular-nums; }
+    #confirmBooking { background:#0ea5e9; color:#fff; margin-top:4px; }
+    #confirmBooking:disabled { opacity:.55; cursor:not-allowed; }
+    .summary-footnote { font-size:.85rem; color:#64748b; }
+    .info-dot { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:#e0f2fe; color:#0369a1; font-size:.75rem; margin-left:6px; }
+    .card.selected { border-color:#3b82f6; box-shadow:0 8px 20px rgba(59,130,246,0.18); }
+    .listing-actions { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+    @media (min-width: 640px) {
+      .planner-grid { grid-template-columns: 1fr 1fr; }
+      button { width:auto; }
+    }
   </style>
   <script src="./js/dev-error-console.js"></script>
 </head>
@@ -33,31 +64,55 @@
     <a href="./index.html">Home</a>
     <a href="./tenant.html">Tenant</a>
     <a href="./landlord.html">Landlord</a>
+    <a href="./investor.html">Investor</a>
+    <a href="./agent.html">Agent</a>
     <a href="./admin.html">Admin</a>
+    <a href="./platform.html">Platform</a>
     <span class="version-badge" data-version></span>
   </nav>
+  <div id="notificationTray" class="notification-tray"></div>
   <h1>r3nt View Pass</h1>
   <button id="connect">Connect Wallet</button>
   <div id="address">Not connected</div>
   <button id="buy" disabled>Buy View Pass</button>
   <div id="status">Loading…</div>
-  <h2>Select Dates</h2>
-  <div class="row">
-    <label>Start
-      <input type="date" id="startDate">
-    </label>
-    <label>End
-      <input type="date" id="endDate">
-    </label>
+  <div class="planner-card">
+    <h2>Plan your stay</h2>
+    <p>Choose dates and a payment cadence to preview totals before booking.</p>
+    <div class="planner-grid">
+      <div class="planner-inputs">
+        <label>Check-in
+          <input type="date" id="startDate">
+        </label>
+        <label>Check-out
+          <input type="date" id="endDate">
+        </label>
+        <label>Rent payment cadence
+          <select id="paymentPeriod">
+            <option value="">Select cadence…</option>
+            <option value="day">Daily</option>
+            <option value="week">Weekly</option>
+            <option value="month">Monthly</option>
+          </select>
+        </label>
+      </div>
+      <div class="planner-summary" id="bookingSummary">
+        <div class="summary-header">
+          <div class="summary-title" data-summary-title>No listing selected</div>
+          <div class="summary-subtitle" data-summary-subtitle>Select a property to preview totals.</div>
+        </div>
+        <dl class="summary-breakdown">
+          <div><dt>Stay length</dt><dd data-summary-nights>—</dd></div>
+          <div><dt>Deposit <span class="info-dot" title="Deposits are escrowed on-chain and require landlord and platform approval before release.">?</span></dt><dd data-summary-deposit>—</dd></div>
+          <div><dt>Total rent</dt><dd data-summary-rent>—</dd></div>
+          <div><dt>Installments</dt><dd data-summary-installment>—</dd></div>
+          <div><dt>Due today</dt><dd data-summary-total>—</dd></div>
+        </dl>
+        <button id="confirmBooking" disabled>Confirm booking</button>
+        <div class="summary-footnote" data-summary-notice>Select stay dates to continue.</div>
+      </div>
+    </div>
   </div>
-  <label>Rent payment cadence
-    <select id="paymentPeriod">
-      <option value="">Select cadence…</option>
-      <option value="day">Daily</option>
-      <option value="week">Weekly</option>
-      <option value="month">Monthly</option>
-    </select>
-  </label>
   <h2>Listings</h2>
   <div id="listings"></div>
   <script type="module" src="./js/tenant.js"></script>

@@ -43,6 +43,7 @@
     .btn{display:inline-block;padding:12px 16px;border-radius:10px;border:1px solid var(--stroke);font-weight:700;text-decoration:none}
     .btn.primary{background:var(--cta);color:var(--cta-ink);border-color:transparent}
     .btn.secondary{background:#eef2ff;color:#3730a3;border-color:transparent}
+    .btn.outline{background:transparent;color:var(--primary);}
     nav{margin-bottom:16px}
     nav a{margin-right:10px;color:var(--primary);font-weight:600;text-decoration:none}
     .version-badge{display:inline-block;margin-left:8px;padding:2px 6px;border-radius:8px;font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;background:#e2e8f0;color:#475569}
@@ -51,6 +52,17 @@
     .grid{display:grid;grid-template-columns:1fr;gap:12px}
     .card{padding:16px;border:1px solid var(--stroke);border-radius:12px;background:#fff}
     .muted{color:var(--muted)}
+    .role-onboarding{margin-top:32px}
+    .role-selector{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+    .role-tab{appearance:none;border:1px solid var(--stroke);background:#fff;color:var(--muted);padding:10px 14px;border-radius:999px;font-weight:600;cursor:pointer;transition:all .15s ease}
+    .role-tab[aria-selected="true"],.role-tab:focus-visible{outline:none;border-color:var(--primary);color:var(--primary);box-shadow:0 0 0 3px rgba(31,111,235,0.12)}
+    .role-panels{border:1px solid var(--stroke);border-radius:16px;background:var(--card);padding:18px}
+    .role-panel{display:none}
+    .role-panel.active{display:block}
+    .role-panel h3{margin:0 0 8px;font-size:1.15rem}
+    .role-panel p{margin:0;color:var(--muted)}
+    .role-panel ul{margin:12px 0 0;padding-left:20px;color:var(--muted)}
+    .role-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
     @media (min-width: 800px){
       .hero{grid-template-columns:1.3fr .7fr}
       .grid{grid-template-columns:1fr 1fr}
@@ -70,10 +82,14 @@
 
     <nav>
       <a href="./index.html">Home</a>
-    <a href="./tenant.html">Tenant</a>
-    <a href="./landlord.html">Landlord</a>
-    <span class="version-badge" data-version></span>
-  </nav>
+      <a href="./tenant.html">Tenant</a>
+      <a href="./landlord.html">Landlord</a>
+      <a href="./investor.html">Investor</a>
+      <a href="./agent.html">Agent</a>
+      <a href="./admin.html">Admin</a>
+      <a href="./platform.html">Platform</a>
+      <span class="version-badge" data-version></span>
+    </nav>
 
     <div class="hero">
       <div>
@@ -84,6 +100,8 @@
         <div class="cta-row">
           <a class="btn primary" href="./tenant.html">I’m a Tenant</a>
           <a class="btn secondary" href="./landlord.html">I’m a Landlord</a>
+          <a class="btn outline" href="./investor.html">I’m an Investor</a>
+          <a class="btn outline" href="./agent.html">I’m an Agent</a>
         </div>
       </div>
       <div class="card">
@@ -96,7 +114,72 @@
       </div>
     </div>
 
-    <section>
+    <section class="role-onboarding">
+      <h2>Start with your role</h2>
+      <div class="muted">Pick the role that matches how you use r3nt. Actions and links adjust automatically.</div>
+      <div class="role-selector" role="tablist" aria-label="Role onboarding">
+        <button type="button" class="role-tab" data-role-button="tenant" aria-selected="true">Tenant</button>
+        <button type="button" class="role-tab" data-role-button="landlord">Landlord</button>
+        <button type="button" class="role-tab" data-role-button="agent">Agent</button>
+        <button type="button" class="role-tab" data-role-button="investor">Investor</button>
+      </div>
+      <div class="role-panels">
+        <div class="role-panel active" data-role-panel="tenant" role="tabpanel">
+          <h3>Tenant onboarding</h3>
+          <p>Preview listings, secure a view pass and book with USDC.</p>
+          <ul>
+            <li>Connect your wallet inside Farcaster to unlock booking actions.</li>
+            <li>Select stay dates with the booking planner and review deposits up front.</li>
+            <li>Complete on-chain checkout — deposits stay escrowed until released.</li>
+          </ul>
+          <div class="role-actions">
+            <a class="btn primary" href="./tenant.html">Open tenant console</a>
+            <a class="btn outline" href="./index.html#how-it-works">See how it works</a>
+          </div>
+        </div>
+        <div class="role-panel" data-role-panel="landlord" role="tabpanel" hidden>
+          <h3>Landlord onboarding</h3>
+          <p>Compose a Farcaster cast, configure pricing and deploy listings from the UI.</p>
+          <ul>
+            <li>Use guided onboarding to set property basics, pricing and booking policies.</li>
+            <li>Launch your listing directly from the console — the platform handles deployment.</li>
+            <li>Monitor availability and confirm deposits with the built-in tools.</li>
+          </ul>
+          <div class="role-actions">
+            <a class="btn secondary" href="./landlord.html">Open landlord console</a>
+            <a class="btn outline" href="./admin.html">Manage deposits</a>
+          </div>
+        </div>
+        <div class="role-panel" data-role-panel="agent" role="tabpanel" hidden>
+          <h3>Agent onboarding</h3>
+          <p>Manage fundraising rounds, subletting and rent distribution for curated listings.</p>
+          <ul>
+            <li>Load your agent contract to review fundraising progress and investor metrics.</li>
+            <li>Open or close tokenisation rounds and record rent directly from the console.</li>
+            <li>Withdraw agent fees and coordinate sub-bookings without leaving the Mini App.</li>
+          </ul>
+          <div class="role-actions">
+            <a class="btn secondary" href="./agent.html">Open agent console</a>
+            <a class="btn outline" href="./platform.html">View platform state</a>
+          </div>
+        </div>
+        <div class="role-panel" data-role-panel="investor" role="tabpanel" hidden>
+          <h3>Investor onboarding</h3>
+          <p>Track tokenised bookings, SQMU-R positions and live rent accruals.</p>
+          <ul>
+            <li>Connect your wallet to surface bookings where you hold SQMU-R.</li>
+            <li>Review fundraising caps, sold supply and rent distribution cadence per booking.</li>
+            <li>Claim accumulated rent in a single click directly from the dashboard.</li>
+          </ul>
+          <div class="role-actions">
+            <a class="btn primary" href="./investor.html">Open investor dashboards</a>
+            <a class="btn outline" href="./tenant.html">Browse properties</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how-it-works">
       <h2>How it works</h2>
       <div class="grid">
         <div class="card">
@@ -146,10 +229,48 @@
       if (badge) badge.textContent = `Build ${APP_VERSION}`;
     };
 
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', applyVersionBadge);
-    } else {
+    const setupRoleSelector = () => {
+      const buttons = Array.from(document.querySelectorAll('[data-role-button]'));
+      const panels = Array.from(document.querySelectorAll('[data-role-panel]'));
+      if (!buttons.length || !panels.length) return;
+
+      const activate = (role) => {
+        buttons.forEach((button) => {
+          const isActive = button.dataset.roleButton === role;
+          button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        panels.forEach((panel) => {
+          const isMatch = panel.dataset.rolePanel === role;
+          panel.classList.toggle('active', isMatch);
+          if (isMatch) {
+            panel.removeAttribute('hidden');
+          } else {
+            panel.setAttribute('hidden', '');
+          }
+        });
+      };
+
+      for (const button of buttons) {
+        button.addEventListener('click', () => {
+          activate(button.dataset.roleButton);
+        });
+      }
+
+      const defaultRole = (buttons.find((btn) => btn.getAttribute('aria-selected') === 'true') || buttons[0])?.dataset.roleButton;
+      if (defaultRole) {
+        activate(defaultRole);
+      }
+    };
+
+    const boot = () => {
       applyVersionBadge();
+      setupRoleSelector();
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
     }
 
     (async () => {

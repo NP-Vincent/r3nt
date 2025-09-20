@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>r3nt — Agent Console</title>
+  <style>
+    :root {
+      --fg:#0f172a; --bg:#ffffff; --muted:#475569; --stroke:#e2e8f0;
+      --accent:#1f6feb; --accent-ink:#ffffff; --success:#10b981; --danger:#dc2626;
+    }
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; max-width: 760px; margin:0 auto; padding:24px 16px 72px; background:var(--bg); color:var(--fg); }
+    nav { margin-bottom:18px; }
+    nav a { margin-right:10px; color:var(--accent); text-decoration:none; font-weight:600; }
+    .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
+    h1 { margin:0 0 8px; font-size:1.6rem; }
+    p.lead { margin:0 0 18px; font-size:1rem; color:var(--muted); }
+    button { appearance:none; border:0; border-radius:10px; padding:12px 16px; font-weight:600; cursor:pointer; background:var(--accent); color:var(--accent-ink); }
+    button.secondary { background:#0f172a; color:#fff; }
+    button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    input, select, textarea { width:100%; padding:10px 12px; border:1px solid #d0d7de; border-radius:10px; font-size:.95rem; font-family:inherit; }
+    textarea { resize:vertical; min-height:90px; }
+    .notification-tray { position:sticky; top:0; display:flex; flex-direction:column; gap:8px; margin:0 0 12px; z-index:2; }
+    .notification { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:12px; border:1px solid #cbd5f5; background:#eef2ff; color:#1e3a8a; }
+    .notification.notification-success { border-color:#bbf7d0; background:#ecfdf5; color:#065f46; }
+    .notification.notification-error { border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
+    .notification.notification-warning { border-color:#fef08a; background:#fffbeb; color:#92400e; }
+    .notification-message { margin-right:12px; font-size:.9rem; }
+    .notification-close { background:transparent; border:0; color:inherit; font-size:1.1rem; cursor:pointer; padding:0 4px; }
+    .status { margin:12px 0; min-height:24px; color:#444; font-size:.95rem; }
+    .muted { color:#64748b; font-size:.9rem; }
+    .card { border:1px solid var(--stroke); border-radius:18px; background:#f8fafc; padding:20px; margin:20px 0; box-shadow:0 14px 32px rgba(15,23,42,0.08); }
+    .card h2 { margin:0 0 8px; font-size:1.2rem; }
+    .card h3 { margin:16px 0 6px; font-size:1.05rem; }
+    .data-list { display:flex; flex-direction:column; gap:12px; }
+    .data-card { border:1px solid var(--stroke); border-radius:14px; background:#fff; padding:14px; display:flex; flex-direction:column; gap:10px; }
+    .data-card-header { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; align-items:center; }
+    .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; background:#e2e8f0; color:#475569; font-size:.75rem; font-weight:600; }
+    .metric-row { display:flex; flex-wrap:wrap; gap:14px; }
+    .metric { flex:1 1 140px; }
+    .metric label { display:block; font-size:.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; }
+    .metric span { display:block; font-size:1rem; font-weight:600; color:#0f172a; }
+    .metric span.highlight { color:var(--success); }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+    .form-grid { display:grid; gap:12px; margin:16px 0 0; }
+    .form-grid label { display:flex; flex-direction:column; gap:6px; font-weight:600; font-size:.9rem; color:#0f172a; }
+    .form-grid button { justify-self:start; }
+    .empty-state { color:#64748b; font-size:.9rem; }
+    .inline-group { display:flex; flex-wrap:wrap; gap:10px; }
+    @media (max-width:640px) {
+      button { width:100%; }
+      .actions { flex-direction:column; }
+    }
+  </style>
+  <script src="./js/dev-error-console.js"></script>
+</head>
+<body>
+  <nav>
+    <a href="./index.html">Home</a>
+    <a href="./tenant.html">Tenant</a>
+    <a href="./landlord.html">Landlord</a>
+    <a href="./investor.html">Investor</a>
+    <a href="./agent.html">Agent</a>
+    <a href="./admin.html">Admin</a>
+    <a href="./platform.html">Platform</a>
+    <span class="version-badge" data-version></span>
+  </nav>
+  <div id="notificationTray" class="notification-tray"></div>
+  <h1>Agent console</h1>
+  <p class="lead">Coordinate fundraising, manage sub-bookings and keep rent flowing to investors.</p>
+
+  <section class="card">
+    <h2>Connection</h2>
+    <p class="muted">Connect your wallet and paste the agent wrapper address to load live data.</p>
+    <div class="actions">
+      <button id="connect">Connect wallet</button>
+      <button id="loadAgent" class="secondary">Load agent</button>
+    </div>
+    <div class="form-grid" style="margin-top:12px;">
+      <label>Agent contract address
+        <input id="agentAddress" placeholder="0x..." autocomplete="off" />
+      </label>
+    </div>
+    <div id="walletAddress" class="muted" style="margin-top:8px;">Not connected</div>
+    <div id="status" class="status">Load an agent to begin.</div>
+  </section>
+
+  <section id="overviewCard" class="card" hidden>
+    <h2>Agent overview</h2>
+    <div id="agentOverview" class="data-list">
+      <div class="empty-state">No agent loaded.</div>
+    </div>
+  </section>
+
+  <section id="fundraisingCard" class="card" hidden>
+    <h2>Fundraising controls</h2>
+    <p class="muted">Configure supply and pricing, then open or close the fundraising round.</p>
+    <form id="fundraisingForm" class="form-grid">
+      <label>Total SQMU supply
+        <input id="fundraisingTotal" inputmode="numeric" autocomplete="off" />
+      </label>
+      <label>Price per SQMU (USDC)
+        <input id="fundraisingPrice" inputmode="decimal" autocomplete="off" />
+      </label>
+      <label>Fundraising fee (bps)
+        <input id="fundraisingFee" inputmode="numeric" autocomplete="off" />
+      </label>
+      <label>Rent cadence
+        <select id="fundraisingPeriod">
+          <option value="1">Daily</option>
+          <option value="2">Weekly</option>
+          <option value="3">Monthly</option>
+        </select>
+      </label>
+      <button type="submit">Save configuration</button>
+    </form>
+    <div class="actions">
+      <button id="openFundraising" class="secondary">Open fundraising</button>
+      <button id="closeFundraising" class="ghost">Close fundraising</button>
+    </div>
+  </section>
+
+  <section id="rentCard" class="card" hidden>
+    <h2>Rent & fees</h2>
+    <div id="rentMetrics" class="metric-row"></div>
+    <form id="collectRentForm" class="form-grid">
+      <h3>Collect rent</h3>
+      <label>Payer address
+        <input id="rentPayer" placeholder="0x..." autocomplete="off" />
+      </label>
+      <label>Gross amount (USDC)
+        <input id="rentAmount" inputmode="decimal" autocomplete="off" />
+      </label>
+      <button type="submit">Collect rent</button>
+    </form>
+    <form id="withdrawFeesForm" class="form-grid">
+      <h3>Withdraw agent fees</h3>
+      <label>Recipient (optional)
+        <input id="withdrawRecipient" placeholder="0x..." autocomplete="off" />
+      </label>
+      <button type="submit">Withdraw fees</button>
+    </form>
+  </section>
+
+  <section id="subBookingsCard" class="card" hidden>
+    <h2>Sub-bookings</h2>
+    <div id="subBookingsList" class="data-list">
+      <div class="empty-state">No sub-bookings recorded.</div>
+    </div>
+    <form id="subBookingForm" class="form-grid">
+      <h3>Create sub-booking</h3>
+      <label>Tenant address (optional)
+        <input id="subTenant" placeholder="0x..." autocomplete="off" />
+      </label>
+      <label>Start (UTC)
+        <input type="datetime-local" id="subStart" />
+      </label>
+      <label>End (UTC)
+        <input type="datetime-local" id="subEnd" />
+      </label>
+      <label>Expected rent (USDC)
+        <input id="subRent" inputmode="decimal" autocomplete="off" />
+      </label>
+      <button type="submit">Create sub-booking</button>
+    </form>
+    <form id="collectSubRentForm" class="form-grid">
+      <h3>Collect sublet rent</h3>
+      <label>Sub-booking ID
+        <input id="collectSubId" inputmode="numeric" autocomplete="off" />
+      </label>
+      <label>Payer address
+        <input id="collectSubPayer" placeholder="0x..." autocomplete="off" />
+      </label>
+      <label>Gross amount (USDC)
+        <input id="collectSubAmount" inputmode="decimal" autocomplete="off" />
+      </label>
+      <label>Mark complete
+        <select id="collectSubComplete">
+          <option value="true">Yes — release calendar</option>
+          <option value="false">No — keep active</option>
+        </select>
+      </label>
+      <button type="submit">Record sublet rent</button>
+    </form>
+  </section>
+
+  <script type="module" src="./js/agent.js"></script>
+</body>
+</html>

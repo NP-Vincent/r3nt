@@ -2,6 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { CHAIN_ID, RPC_URL, PLATFORM_ADDRESS, PLATFORM_ABI, LISTING_ABI, APP_VERSION } from './config.js';
+import { notify, mountNotificationCenter } from './notifications.js';
 
 const CHAIN_ID_HEX = '0x' + CHAIN_ID.toString(16);
 const STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
@@ -19,7 +20,20 @@ const els = {
   status:     document.getElementById('status'),
 };
 
-const info = (t) => { els.status.textContent = t; };
+mountNotificationCenter(document.getElementById('notificationTray'), { role: 'admin' });
+
+function setStatus(message) {
+  if (els.status) {
+    els.status.textContent = message || '';
+  }
+}
+
+function updateStatus(message, variant = 'info') {
+  setStatus(message);
+  if (message) {
+    notify({ message, variant, role: 'admin', timeout: variant === 'error' ? 7000 : 5000 });
+  }
+}
 
 const applyVersionBadge = () => {
   const badge = document.querySelector('[data-version]');
@@ -158,10 +172,10 @@ async function loadBooking() {
     };
 
     renderBookingInfo(listingAddr, bookingId, booking, pending);
-    info('Booking details loaded.');
+    updateStatus('Booking details loaded.', 'success');
   } catch (e) {
     els.bookingInfo.textContent = '';
-    info(e?.message || 'Unable to load booking details.');
+    updateStatus(e?.message || 'Unable to load booking details.', 'error');
   }
 }
 
@@ -185,9 +199,9 @@ els.propose.onclick = async () => {
     });
 
     const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to: listingAddr, data }] });
-    info(`Proposal tx sent: ${txHash}`);
+    updateStatus(`Proposal tx sent: ${txHash}`, 'success');
   } catch (e) {
-    info(e?.message || 'Failed to propose split.');
+    updateStatus(e?.message || 'Failed to propose split.', 'error');
   }
 };
 
@@ -203,9 +217,9 @@ els.confirm.onclick = async () => {
 
     const data = encodeFunctionData({ abi: LISTING_ABI, functionName:'confirmDepositSplit', args:[bookingId, '0x'] });
     const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to: listingAddr, data }] });
-    info(`Confirm tx sent: ${txHash}`);
+    updateStatus(`Confirm tx sent: ${txHash}`, 'success');
   } catch (e) {
-    info(e?.message || 'Failed to confirm release.');
+    updateStatus(e?.message || 'Failed to confirm release.', 'error');
   }
 };
 
@@ -218,9 +232,9 @@ els.connect.onclick = async () => {
     els.connect.style.background = '#10b981';
     els.propose.disabled = false;
     els.confirm.disabled = false;
-    info('Wallet ready.');
+    updateStatus('Wallet ready.', 'success');
   } catch (e) {
-    info(e?.message || 'Wallet connection failed.');
+    updateStatus(e?.message || 'Wallet connection failed.', 'error');
   }
 };
 
@@ -231,10 +245,13 @@ els.connect.onclick = async () => {
     const [, payloadB64] = token.split('.');
     const payloadJson = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/')));
     els.contextBar.textContent = `FID: ${payloadJson.sub} · Signed in`;
+    notify({ message: 'QuickAuth complete.', variant: 'success', role: 'admin', timeout: 4000 });
   } catch {
     els.contextBar.textContent = 'QuickAuth failed. Open inside a Farcaster client.';
+    notify({ message: 'QuickAuth failed. Open inside a Farcaster client.', variant: 'warning', role: 'admin', timeout: 6000 });
     return;
   }
   els.connect.disabled = false;
   els.refresh.disabled = false;
+  setStatus('Connect wallet to manage deposits.');
 })();

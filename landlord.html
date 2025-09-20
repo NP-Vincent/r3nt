@@ -53,6 +53,27 @@
     .availability-result.error { color:#dc2626; }
     a.listing-link { display:inline-block; margin-top:8px; color:#1f6feb; font-weight:600; text-decoration:none; }
     a.listing-link:hover { text-decoration:underline; }
+    .notification-tray { position:sticky; top:0; display:flex; flex-direction:column; gap:8px; margin:0 0 12px; z-index:2; }
+    .notification { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:12px; border:1px solid #cbd5f5; background:#eef2ff; color:#1e3a8a; }
+    .notification.notification-success { border-color:#bbf7d0; background:#ecfdf5; color:#065f46; }
+    .notification.notification-error { border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
+    .notification.notification-warning { border-color:#fef08a; background:#fffbeb; color:#92400e; }
+    .notification-message { margin-right:12px; font-size:.9rem; }
+    .notification-close { background:transparent; border:0; color:inherit; font-size:1.1rem; cursor:pointer; padding:0 4px; }
+    .onboarding-guide { border:1px solid #e2e8f0; border-radius:16px; background:#f8fafc; padding:16px; margin:12px 0 18px; }
+    .onboarding-guide h2 { margin:0 0 6px; font-size:1.1rem; }
+    .onboarding-guide p { margin:0; font-size:.9rem; color:#475569; }
+    .checklist { list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:10px; }
+    .checklist li { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid #e2e8f0; border-radius:12px; background:#fff; transition:border-color .15s ease, background .15s ease; }
+    .checklist li.complete { border-color:#bbf7d0; background:#ecfdf5; }
+    .status-dot { width:12px; height:12px; border-radius:50%; background:#cbd5f5; margin-top:4px; flex-shrink:0; }
+    .checklist li.complete .status-dot { background:#10b981; }
+    .checklist strong { font-size:.95rem; display:block; }
+    .checklist small { font-size:.8rem; color:#64748b; display:block; margin-top:2px; }
+    .onboarding-hints { margin-top:12px; font-size:.9rem; color:#475569; }
+    .guided-section { border:1px solid #e2e8f0; border-radius:16px; background:#fff; padding:16px; margin-top:18px; }
+    .guided-section h3 { margin:0 0 6px; font-size:1.05rem; }
+    .guided-section p.section-subtext { margin:0 0 12px; font-size:.85rem; color:#64748b; }
   </style>
   <script src="./js/dev-error-console.js"></script>
 </head>
@@ -61,9 +82,13 @@
     <a href="./index.html">Home</a>
     <a href="./tenant.html">Tenant</a>
     <a href="./landlord.html">Landlord</a>
+    <a href="./investor.html">Investor</a>
+    <a href="./agent.html">Agent</a>
     <a href="./admin.html">Admin</a>
+    <a href="./platform.html">Platform</a>
     <span class="version-badge" data-version></span>
   </nav>
+  <div id="notificationTray" class="notification-tray"></div>
   <h1>r3nt — Create Listing</h1>
 
   <div id="contextBar" class="muted">Starting…</div>
@@ -73,65 +98,112 @@
 
   <!-- Removed manual Cast URL/Hash field. We will compose and capture the hash automatically. -->
 
-  <div class="row">
-    <label>Latitude
-      <input id="lat" placeholder="25.2048" inputmode="decimal">
+  <section class="onboarding-guide">
+    <h2>Guided property onboarding</h2>
+    <p>Complete each checkpoint to unlock Create Listing. We keep track of the essentials for you.</p>
+    <ul class="checklist" id="onboardingChecklist">
+      <li data-check="basics">
+        <span class="status-dot"></span>
+        <div>
+          <strong>Basics</strong>
+          <small>Set the title and short description.</small>
+        </div>
+      </li>
+      <li data-check="location">
+        <span class="status-dot"></span>
+        <div>
+          <strong>Location & size</strong>
+          <small>Add latitude, longitude and square metre area.</small>
+        </div>
+      </li>
+      <li data-check="pricing">
+        <span class="status-dot"></span>
+        <div>
+          <strong>Pricing</strong>
+          <small>Deposit plus at least one rent cadence.</small>
+        </div>
+      </li>
+      <li data-check="policies">
+        <span class="status-dot"></span>
+        <div>
+          <strong>Policies</strong>
+          <small>Minimum notice and booking window configured.</small>
+        </div>
+      </li>
+    </ul>
+    <div id="onboardingHints" class="onboarding-hints muted">Start with the basics — headline and short description.</div>
+  </section>
+
+  <div class="guided-section">
+    <h3>1. Property basics</h3>
+    <p class="section-subtext">We use these details to generate your Farcaster cast and metadata.</p>
+    <div class="row">
+      <label>Latitude
+        <input id="lat" placeholder="25.2048" inputmode="decimal">
+      </label>
+      <label>Longitude
+        <input id="lon" placeholder="55.2708" inputmode="decimal">
+      </label>
+    </div>
+    <div class="muted"><small>We derive a GeoHash locally from these coordinates.</small></div>
+
+    <label>Title (max 64 chars)
+      <input id="title" maxlength="64" placeholder="Cozy studio near metro">
     </label>
-    <label>Longitude
-      <input id="lon" placeholder="55.2708" inputmode="decimal">
+
+    <label>Short description (max 140 chars)
+      <input id="shortDesc" maxlength="140" placeholder="Furnished, walk to metro, fast Wi‑Fi">
     </label>
   </div>
-  <div class="muted"><small>We derive a GeoHash locally from these coordinates.</small></div>
 
-  <label>Title (max 64 chars)
-    <input id="title" maxlength="64" placeholder="Cozy studio near metro">
-  </label>
-
-  <label>Short description (max 140 chars)
-    <input id="shortDesc" maxlength="140" placeholder="Furnished, walk to metro, fast Wi‑Fi">
-  </label>
-
-  <div class="divider"></div>
-
-  <div class="row">
-    <label>Deposit (USDC)
-      <input id="deposit" placeholder="100.00" inputmode="decimal">
-    </label>
-    <label>Property size (m²)
-      <input id="areaSqm" placeholder="85" inputmode="numeric">
-    </label>
+  <div class="guided-section">
+    <h3>2. Pricing & size</h3>
+    <p class="section-subtext">Share the deposit, footprint and daily/weekly/monthly rates you want to accept.</p>
+    <div class="row">
+      <label>Deposit (USDC)
+        <input id="deposit" placeholder="100.00" inputmode="decimal">
+      </label>
+      <label>Property size (m²)
+        <input id="areaSqm" placeholder="85" inputmode="numeric">
+      </label>
+    </div>
+    <div class="row">
+      <label>Daily (USDC)
+        <input id="rateDaily"  value="0" inputmode="decimal">
+      </label>
+      <label>Weekly (USDC)
+        <input id="rateWeekly" value="0" inputmode="decimal">
+      </label>
+      <label>Monthly (USDC)
+        <input id="rateMonthly" value="0" inputmode="decimal">
+      </label>
+    </div>
   </div>
 
-  <div class="row">
-    <label>Min booking notice (hours)
-      <input id="minNotice" value="24" inputmode="numeric">
-    </label>
-    <label>Booking window (days, 0 = none)
-      <input id="maxWindow" value="90" inputmode="numeric">
-    </label>
-  </div>
-  <div class="muted"><small>Adjust how soon and how far ahead tenants can reserve.</small></div>
-
-  <div class="row">
-    <label>Daily (USDC)
-      <input id="rateDaily"  value="0" inputmode="decimal">
-    </label>
-    <label>Weekly (USDC)
-      <input id="rateWeekly" value="0" inputmode="decimal">
-    </label>
-    <label>Monthly (USDC)
-      <input id="rateMonthly" value="0" inputmode="decimal">
-    </label>
+  <div class="guided-section">
+    <h3>3. Booking policies</h3>
+    <p class="section-subtext">Control how soon tenants can book and how far in advance your calendar opens.</p>
+    <div class="row">
+      <label>Min booking notice (hours)
+        <input id="minNotice" value="24" inputmode="numeric">
+      </label>
+      <label>Booking window (days, 0 = none)
+        <input id="maxWindow" value="90" inputmode="numeric">
+      </label>
+    </div>
+    <div class="muted"><small>Adjust how soon and how far ahead tenants can reserve.</small></div>
   </div>
 
-  <label>Metadata URL (optional)
-    <input id="metadataUrl" placeholder="https://example.com/listing.json">
-  </label>
-  <div class="muted"><small>Leave blank to auto-generate an inline JSON metadata payload.</small></div>
+  <div class="guided-section">
+    <h3>4. Metadata (optional)</h3>
+    <p class="section-subtext">Leave blank and we’ll generate a JSON payload with your inputs.</p>
+    <label>Metadata URL (optional)
+      <input id="metadataUrl" placeholder="https://example.com/listing.json">
+    </label>
+    <div class="muted"><small>Leave blank to auto-generate an inline JSON metadata payload.</small></div>
+  </div>
 
-  <div class="divider"></div>
-
-  <div class="muted"><small class="mono">Listings deploy via the Platform contract. Your wallet address becomes the landlord.</small></div>
+  <div class="muted" style="margin-top:16px;"><small class="mono">Listings deploy via the Platform contract. Your wallet address becomes the landlord.</small></div>
 
   <button id="create" disabled>Create Listing</button>
   <div id="status"></div>
