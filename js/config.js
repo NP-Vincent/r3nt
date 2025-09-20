@@ -18,12 +18,14 @@ const [
   ListingArtifact,
   ListingFactoryArtifact,
   PlatformArtifact,
+  AgentArtifact,
 ] = await Promise.all([
   loadArtifact('./abi/r3nt-SQMU.json'),
   loadArtifact('./abi/BookingRegistry.json'),
   loadArtifact('./abi/Listing.json'),
   loadArtifact('./abi/ListingFactory.json'),
   loadArtifact('./abi/Platform.json'),
+  loadArtifact('./abi/Agent.json'),
 ]);
 
 export const CHAIN_ID = 42161; // Arbitrum One
@@ -46,6 +48,8 @@ export const FACTORY_ABI = ListingFactoryArtifact.abi || [];
 export const PLATFORM_ADDRESS = '0x572891eB77CFe11bB61e970a64604fED524d7792'; // Platform
 export const PLATFORM_ABI = PlatformArtifact.abi || [];
 
+export const AGENT_ABI = AgentArtifact.abi || [];
+
 export const APP_NAME = 'r3nt';
 export const APP_DOMAIN = 'r3nt.sqmu.net'; // origin used in EIP-712 domain if needed
-export const APP_VERSION = '0.1.6';
+export const APP_VERSION = '0.2.0';

@@ -2,6 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
+import { notify, mountNotificationCenter } from './notifications.js';
 import {
   PLATFORM_ADDRESS,
   PLATFORM_ABI,
@@ -44,8 +45,35 @@ const els = {
   maxWindow: document.getElementById('maxWindow'),
   metadataUrl: document.getElementById('metadataUrl'),
   landlordListings: document.getElementById('landlordListings'),
+  onboardingHints: document.getElementById('onboardingHints'),
+  onboardingChecklist: document.getElementById('onboardingChecklist'),
 };
 const info = (t) => (els.status.textContent = t);
+
+mountNotificationCenter(document.getElementById('notificationTray'), { role: 'landlord' });
+
+const onboardingFields = [
+  'title',
+  'shortDesc',
+  'lat',
+  'lon',
+  'areaSqm',
+  'deposit',
+  'rateDaily',
+  'rateWeekly',
+  'rateMonthly',
+  'minNotice',
+  'maxWindow',
+];
+
+for (const key of onboardingFields) {
+  const element = els[key];
+  if (element) {
+    element.addEventListener('input', updateOnboardingProgress);
+  }
+}
+
+updateOnboardingProgress();
 
 function formatUsdc(amount) {
   const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
@@ -221,6 +249,30 @@ function normalizeCastHash(h) {
   if (!isHex20or32(hex)) return null;
   return toBytes32FromCastHash(hex);
 }
+
+const checklistItems = {
+  basics: document.querySelector('[data-check="basics"]'),
+  location: document.querySelector('[data-check="location"]'),
+  pricing: document.querySelector('[data-check="pricing"]'),
+  policies: document.querySelector('[data-check="policies"]'),
+};
+
+const checkpointLabels = {
+  basics: 'Basics',
+  location: 'Location & size',
+  pricing: 'Pricing',
+  policies: 'Policies',
+};
+
+const checkpointState = {
+  basics: false,
+  location: false,
+  pricing: false,
+  policies: false,
+};
+
+let lastAllComplete = false;
+let walletConnected = false;
 function disableWhile(el, fn) {
   return (async () => {
     el.disabled = true;
@@ -230,6 +282,101 @@ function disableWhile(el, fn) {
       el.disabled = false;
     }
   })();
+}
+
+function evaluateOnboardingSteps() {
+  const results = {
+    basics: false,
+    location: false,
+    pricing: false,
+    policies: false,
+  };
+
+  try {
+    const title = els.title.value.trim();
+    const shortDesc = els.shortDesc.value.trim();
+    results.basics = Boolean(title) && Boolean(shortDesc) && utf8BytesLen(title) <= 64 && utf8BytesLen(shortDesc) <= 140;
+  } catch {
+    results.basics = false;
+  }
+
+  try {
+    parseLatLon(els.lat.value, els.lon.value);
+    parseAreaSqm(els.areaSqm.value);
+    results.location = true;
+  } catch {
+    results.location = false;
+  }
+
+  try {
+    const deposit = parseDec6(els.deposit.value);
+    const daily = parseOptionalDec6(els.rateDaily.value);
+    const weekly = parseOptionalDec6(els.rateWeekly.value);
+    const monthly = parseOptionalDec6(els.rateMonthly.value);
+    results.pricing = deposit > 0n && (daily > 0n || weekly > 0n || monthly > 0n);
+  } catch {
+    results.pricing = false;
+  }
+
+  try {
+    parseHoursToSeconds(els.minNotice.value);
+    parseDaysToSeconds(els.maxWindow.value);
+    results.policies = true;
+  } catch {
+    results.policies = false;
+  }
+
+  return results;
+}
+
+function updateOnboardingProgress() {
+  const results = evaluateOnboardingSteps();
+  const hints = [];
+
+  if (!results.basics) hints.push('Add a title and short description.');
+  if (!results.location) hints.push('Provide latitude, longitude and area.');
+  if (!results.pricing) hints.push('Set a deposit and at least one rent rate.');
+  if (!results.policies) hints.push('Configure booking notice and window.');
+
+  if (els.onboardingHints) {
+    if (hints.length) {
+      els.onboardingHints.textContent = `Next: ${hints.join(' ')}`;
+    } else {
+      els.onboardingHints.textContent = 'All checkpoints cleared — ready to deploy.';
+    }
+  }
+
+  for (const step of Object.keys(results)) {
+    const complete = results[step];
+    const node = checklistItems[step];
+    if (node) {
+      node.classList.toggle('complete', complete);
+    }
+    if (complete && !checkpointState[step]) {
+      notify({
+        message: `Checkpoint complete: ${checkpointLabels[step]}`,
+        variant: 'success',
+        role: 'landlord',
+        timeout: 5000,
+      });
+    }
+    checkpointState[step] = complete;
+  }
+
+  const allComplete = Object.values(results).every(Boolean);
+  if (allComplete && !lastAllComplete) {
+    notify({
+      message: 'All onboarding checkpoints cleared. You can deploy your listing.',
+      variant: 'success',
+      role: 'landlord',
+      timeout: 6000,
+    });
+  }
+  lastAllComplete = allComplete;
+
+  if (els.create) {
+    els.create.disabled = !(walletConnected && allComplete);
+  }
 }
 
 async function loadPlatformAbi() {
@@ -487,6 +634,7 @@ async function loadLandlordListings(landlordAddr) {
       console.error('Failed to load Platform ABI for listings', err);
       setMessage('Unable to load listings.');
       info(err?.message ? `Error: ${err.message}` : 'Failed to load listings.');
+      notify({ message: 'Unable to load listings.', variant: 'error', role: 'landlord', timeout: 6000 });
       throw err;
     }
 
@@ -502,6 +650,7 @@ async function loadLandlordListings(landlordAddr) {
       console.error('Failed to load listing addresses', err);
       setMessage('Unable to load listings.');
       info(err?.message ? `Error: ${err.message}` : 'Unable to load listings.');
+      notify({ message: 'Unable to load listings.', variant: 'error', role: 'landlord', timeout: 6000 });
       throw err;
     }
 
@@ -512,6 +661,7 @@ async function loadLandlordListings(landlordAddr) {
     if (!cleaned.length) {
       setMessage('No listings yet');
       info('No listings yet.');
+      notify({ message: 'No listings yet — create your first property.', variant: 'info', role: 'landlord', timeout: 5000 });
       return;
     }
 
@@ -522,6 +672,7 @@ async function loadLandlordListings(landlordAddr) {
     if (!matches.length) {
       setMessage('No listings yet');
       info('No listings yet.');
+      notify({ message: 'No listings yet — create your first property.', variant: 'info', role: 'landlord', timeout: 5000 });
       return;
     }
 
@@ -533,6 +684,12 @@ async function loadLandlordListings(landlordAddr) {
     }
 
     info(`Loaded ${matches.length} listing${matches.length === 1 ? '' : 's'}.`);
+    notify({
+      message: `Loaded ${matches.length} listing${matches.length === 1 ? '' : 's'}.`,
+      variant: 'success',
+      role: 'landlord',
+      timeout: 5000,
+    });
   })();
 
   try {
@@ -560,12 +717,15 @@ const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'ht
     const payloadJson = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/')));
     fidBig = BigInt(payloadJson.sub);
     els.contextBar.textContent = `FID: ${fidBig.toString()} · Signed in`;
+    notify({ message: `Signed in with FID ${fidBig.toString()}.`, variant: 'success', role: 'landlord', timeout: 5000 });
   } catch (e) {
     els.contextBar.textContent = 'QuickAuth failed. Open this inside a Farcaster client.';
+    notify({ message: 'QuickAuth failed. Open inside a Farcaster client.', variant: 'error', role: 'landlord', timeout: 6000 });
     return;
   }
 
   els.connect.disabled = false;
+  updateOnboardingProgress();
 })();
 
 // -------------------- Wallet connect --------------------
@@ -601,15 +761,20 @@ els.connect.onclick = async () => {
     const landlordAddr = getAddress(from);
     els.connect.textContent = 'Wallet Connected';
     els.connect.style.background = '#10b981';
-    els.create.disabled = false;
+    walletConnected = true;
+    updateOnboardingProgress();
     info('Wallet ready. Loading your listings…');
+    notify({ message: 'Wallet connected — ready to deploy.', variant: 'success', role: 'landlord', timeout: 5000 });
     try {
       await loadLandlordListings(landlordAddr);
     } catch (err) {
       console.error('Failed to refresh landlord listings after connect', err);
     }
   } catch (e) {
+    walletConnected = false;
     info(e?.message || 'Wallet connection failed.');
+    notify({ message: e?.message || 'Wallet connection failed.', variant: 'error', role: 'landlord', timeout: 6000 });
+    updateOnboardingProgress();
   }
 };
 
@@ -617,6 +782,17 @@ els.connect.onclick = async () => {
 els.create.onclick = () =>
   disableWhile(els.create, async () => {
     try {
+      const allComplete = Object.values(checkpointState).every(Boolean);
+      if (!walletConnected || !allComplete) {
+        info('Complete onboarding checkpoints before creating a listing.');
+        notify({
+          message: 'Complete onboarding checkpoints before creating a listing.',
+          variant: 'warning',
+          role: 'landlord',
+          timeout: 5000,
+        });
+        return;
+      }
       if (fidBig === undefined) throw new Error('QuickAuth did not provide FID.');
       if (!provider) throw new Error('Connect your wallet first.');
 
@@ -653,6 +829,7 @@ els.create.onclick = () =>
 
       // 1) Compose the landlord's canonical cast and capture the hash
       info('Open composer… Post your listing cast.');
+      notify({ message: 'Opening Farcaster composer…', variant: 'info', role: 'landlord', timeout: 4000 });
       const qs = [
         'draft=1',
         `title=${encodeURIComponent(title)}`,
@@ -678,6 +855,7 @@ els.create.onclick = () =>
         throw new Error('Host returned an unexpected cast.hash format.');
       }
       info('Cast posted. Continuing on-chain…');
+      notify({ message: 'Cast posted — preparing on-chain deployment.', variant: 'success', role: 'landlord', timeout: 5000 });
 
       const metadataUri = buildMetadataUri({
         metadataUrl: els.metadataUrl.value,
@@ -700,6 +878,7 @@ els.create.onclick = () =>
 
       // 2) Submit createListing to the platform
       info(`Submitting createListing (fee ${formatUsdc(listingPrice)} USDC)…`);
+      notify({ message: `Submitting createListing (fee ${formatUsdc(listingPrice)} USDC)…`, variant: 'info', role: 'landlord', timeout: 5000 });
       const createData = encodeFunctionData({
         abi,
         functionName: 'createListing',
@@ -784,11 +963,14 @@ els.create.onclick = () =>
 
       if (txHash) {
         info(`Listing tx sent: ${txHash}`);
+        notify({ message: 'Listing transaction sent.', variant: 'success', role: 'landlord', timeout: 6000 });
       } else {
         info('Listing transaction submitted.');
+        notify({ message: 'Listing transaction submitted.', variant: 'success', role: 'landlord', timeout: 6000 });
       }
     } catch (e) {
       info(`Error: ${e?.message || e}`);
+      notify({ message: e?.message ? `Create listing failed: ${e.message}` : 'Create listing failed.', variant: 'error', role: 'landlord', timeout: 6000 });
     }
   });
 

@@ -2,6 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './tools.js';
+import { notify, mountNotificationCenter } from './notifications.js';
 import {
   RPC_URL,
   REGISTRY_ADDRESS,
@@ -24,11 +25,39 @@ const els = {
   start: document.getElementById('startDate'),
   end: document.getElementById('endDate'),
   period: document.getElementById('paymentPeriod'),
+  confirmBooking: document.getElementById('confirmBooking'),
+  summary: {
+    container: document.getElementById('bookingSummary'),
+    title: document.querySelector('[data-summary-title]'),
+    subtitle: document.querySelector('[data-summary-subtitle]'),
+    nights: document.querySelector('[data-summary-nights]'),
+    deposit: document.querySelector('[data-summary-deposit]'),
+    rent: document.querySelector('[data-summary-rent]'),
+    installment: document.querySelector('[data-summary-installment]'),
+    total: document.querySelector('[data-summary-total]'),
+    notice: document.querySelector('[data-summary-notice]'),
+  },
 };
+
+mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
 
 if (els.period && !els.period.value) {
   els.period.value = 'month';
 }
+
+if (els.start) {
+  els.start.addEventListener('change', updateSummary);
+  els.start.addEventListener('input', updateSummary);
+}
+if (els.end) {
+  els.end.addEventListener('change', updateSummary);
+  els.end.addEventListener('input', updateSummary);
+}
+if (els.period) {
+  els.period.addEventListener('change', updateSummary);
+}
+
+updateSummary();
 
 const setVersionBadge = () => {
   const badge = document.querySelector('[data-version]');
@@ -53,6 +82,10 @@ const PERIOD_OPTIONS = {
 const supportsViewPassPurchase = PLATFORM_ABI.some(
   (item) => item?.type === 'function' && item?.name === 'buyViewPass'
 );
+
+let selectedListing = null;
+let selectedCard = null;
+let selectedListingTitle = '';
 
 function formatUsdc(amount) {
   const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
@@ -168,10 +201,172 @@ async function ensureArbitrum(p){ const id = await p.request({ method:'eth_chain
 
 function short(a){ return a ? `${a.slice(0,6)}…${a.slice(-4)}` : ''; }
 
+function getListingTitle(info) {
+  if (info && typeof info.title === 'string') {
+    const trimmed = info.title.trim();
+    if (trimmed) return trimmed;
+  }
+  if (info && typeof info.address === 'string') {
+    return `Listing ${short(info.address)}`;
+  }
+  return 'Listing';
+}
+
+function getListingSubtitle(info) {
+  if (!info) {
+    return 'Select a property to preview totals.';
+  }
+  const daily = formatUsdc(info.baseDailyRate);
+  const deposit = formatUsdc(info.depositAmount);
+  return `Base ${daily} USDC/day · Deposit ${deposit} USDC`;
+}
+
+function setText(node, value) {
+  if (node) {
+    node.textContent = value;
+  }
+}
+
+function updateSummary() {
+  const summary = els.summary || {};
+  const listing = selectedListing;
+  const depositAmount = listing
+    ? (typeof listing.depositAmount === 'bigint' ? listing.depositAmount : BigInt(listing.depositAmount || 0))
+    : 0n;
+
+  const title = listing ? selectedListingTitle || getListingTitle(listing) : 'No listing selected';
+  setText(summary.title, title);
+  setText(summary.subtitle, listing ? getListingSubtitle(listing) : 'Select a property to preview totals.');
+  setText(summary.nights, '—');
+  setText(summary.deposit, listing ? (depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : 'No deposit') : '—');
+  setText(summary.rent, listing ? '0 USDC' : '—');
+  setText(summary.installment, listing ? 'Choose cadence' : '—');
+  setText(summary.total, listing ? (depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : '0 USDC') : '—');
+  setText(summary.notice, listing ? 'Select stay dates to continue.' : 'Pick a property to enable booking.');
+
+  const requiresPass = viewPassRequired && !hasActiveViewPass;
+  if (requiresPass) {
+    setText(summary.notice, 'Purchase a view pass to unlock bookings.');
+  }
+
+  if (els.confirmBooking) {
+    els.confirmBooking.disabled = true;
+    els.confirmBooking.textContent = depositAmount > 0n
+      ? `Book with ${formatUsdc(depositAmount)} USDC deposit`
+      : 'Book stay';
+  }
+
+  if (!listing) {
+    return;
+  }
+
+  const startValue = els.start?.value || '';
+  const endValue = els.end?.value || '';
+  if (!startValue || !endValue) {
+    return;
+  }
+
+  const startMs = Date.parse(`${startValue}T00:00:00Z`);
+  const endMs = Date.parse(`${endValue}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    setText(summary.notice, 'Dates look invalid — choose again.');
+    return;
+  }
+  if (endMs <= startMs) {
+    setText(summary.notice, 'Check-out must be after check-in.');
+    return;
+  }
+
+  const periodKey = els.period?.value || '';
+  const selectedPeriod = PERIOD_OPTIONS[periodKey];
+  if (!selectedPeriod) {
+    setText(summary.notice, 'Pick a rent payment cadence.');
+    return;
+  }
+
+  const startTs = BigInt(Math.floor(startMs / 1000));
+  const endTs = BigInt(Math.floor(endMs / 1000));
+  let nightsBig = endTs - startTs;
+  nightsBig = (nightsBig + SECONDS_PER_DAY - 1n) / SECONDS_PER_DAY;
+  if (nightsBig <= 0n) {
+    nightsBig = 1n;
+  }
+  const nights = Number(nightsBig);
+  setText(summary.nights, `${nights} night${nights === 1 ? '' : 's'}`);
+
+  const rent = calculateRent(listing.baseDailyRate, startTs, endTs);
+  setText(summary.rent, rent > 0n ? `${formatUsdc(rent)} USDC` : '0 USDC');
+
+  const installmentCap = calculateInstallmentCap(rent, startTs, endTs, selectedPeriod.days);
+  setText(
+    summary.installment,
+    installmentCap > 0n
+      ? `${selectedPeriod.label} up to ${formatUsdc(installmentCap)} USDC`
+      : `${selectedPeriod.label} cadence`
+  );
+
+  setText(summary.total, depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : '0 USDC');
+
+  if (requiresPass) {
+    setText(summary.notice, 'Purchase a view pass to unlock bookings.');
+    if (els.confirmBooking) {
+      els.confirmBooking.disabled = true;
+      els.confirmBooking.textContent = depositAmount > 0n
+        ? `Book with ${formatUsdc(depositAmount)} USDC deposit`
+        : 'Book stay';
+    }
+    return;
+  }
+
+  setText(summary.notice, 'Ready to book — confirm when you’re happy with the details.');
+
+  if (els.confirmBooking) {
+    els.confirmBooking.disabled = false;
+    els.confirmBooking.textContent = depositAmount > 0n
+      ? `Book with ${formatUsdc(depositAmount)} USDC deposit`
+      : 'Book stay';
+  }
+}
+
+function clearSelection() {
+  if (selectedCard) {
+    selectedCard.classList.remove('selected');
+  }
+  selectedCard = null;
+  selectedListing = null;
+  selectedListingTitle = '';
+  updateSummary();
+}
+
+function setSelectedListing(info, card) {
+  if (!info) {
+    clearSelection();
+    return;
+  }
+  const alreadySelected = selectedListing && selectedListing.address === info.address;
+  if (selectedCard && selectedCard !== card) {
+    selectedCard.classList.remove('selected');
+  }
+  selectedListing = info;
+  selectedCard = card || null;
+  selectedListingTitle = card?.dataset.displayTitle || getListingTitle(info);
+  if (selectedCard) {
+    selectedCard.classList.add('selected');
+  }
+  setText(els.summary?.title, selectedListingTitle);
+  setText(els.summary?.subtitle, getListingSubtitle(info));
+  updateSummary();
+  if (!alreadySelected) {
+    notify({ message: `Planning stay at ${selectedListingTitle}`, variant: 'info', role: 'tenant', timeout: 4200 });
+  }
+}
+
 let pub;
 let viewPassPrice;
 let viewPassDuration;
 let configLoading;
+let viewPassRequired = false;
+let hasActiveViewPass = false;
 
 function updateBuyLabel() {
   const parts = [];
@@ -399,10 +594,9 @@ function renderListingCard(info){
 
   const title = document.createElement('div');
   title.className = 'listing-title';
-  const displayTitle = (info && typeof info.title === 'string' && info.title.trim())
-    ? info.title.trim()
-    : `Listing ${short(info.address)}`;
+  const displayTitle = getListingTitle(info);
   title.textContent = displayTitle;
+  card.dataset.displayTitle = displayTitle;
   card.appendChild(title);
 
   if (info && typeof info.description === 'string') {
@@ -457,13 +651,14 @@ function renderListingCard(info){
     card.appendChild(metaLink);
   }
 
-  const row = document.createElement('div');
-  row.className = 'row';
-  const btnBook = document.createElement('button');
-  btnBook.textContent = 'Book';
-  btnBook.onclick = () => bookListing(info);
-  row.appendChild(btnBook);
-  card.appendChild(row);
+  const actions = document.createElement('div');
+  actions.className = 'listing-actions';
+  const planBtn = document.createElement('button');
+  planBtn.type = 'button';
+  planBtn.textContent = 'Plan stay';
+  planBtn.onclick = () => setSelectedListing(info, card);
+  actions.appendChild(planBtn);
+  card.appendChild(actions);
 
   const farcasterUrl = buildFarcasterCastUrl(info.fid, info.castHash);
   const viewLink = document.createElement('a');
@@ -484,6 +679,7 @@ function renderListingCard(info){
 async function loadListings(){
   await loadConfig();
   els.listings.textContent = 'Loading listings…';
+  clearSelection();
   let addresses;
   try {
     const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allListings' });
@@ -491,6 +687,7 @@ async function loadListings(){
   } catch (err) {
     console.error('Failed to load listing addresses', err);
     els.listings.textContent = 'Unable to load listings.';
+    notify({ message: 'Unable to load listings.', variant: 'error', role: 'tenant', timeout: 6000 });
     return;
   }
   const cleaned = addresses.filter((addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr) && !/^0x0+$/.test(addr));
@@ -503,17 +700,29 @@ async function loadListings(){
   els.listings.innerHTML = '';
   if (!valid.length) {
     els.listings.textContent = 'No active listings.';
+    notify({ message: 'No active listings right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
     return;
   }
   for (const info of valid) {
     els.listings.appendChild(renderListingCard(info));
   }
+  notify({
+    message: `Loaded ${valid.length} listing${valid.length === 1 ? '' : 's'}.`,
+    variant: 'success',
+    role: 'tenant',
+    timeout: 4500,
+  });
 }
 
-async function bookListing(listing){
+async function bookListing(listing = selectedListing){
   try {
+    if (!listing) {
+      els.status.textContent = 'Select a listing first.';
+      notify({ message: 'Select a listing before booking.', variant: 'warning', role: 'tenant', timeout: 4200 });
+      return;
+    }
     const p = await getProvider();
-    const [from] = await p.request({ method: 'eth_accounts' }) || [];
+    const [from] = (await p.request({ method: 'eth_accounts' })) || [];
     if (!from) throw new Error('No wallet account connected.');
     await ensureArbitrum(p);
     await loadConfig();
@@ -528,15 +737,19 @@ async function bookListing(listing){
         });
       if (!active) {
         els.status.textContent = 'Purchase a view pass before booking.';
+        notify({ message: 'View pass required before booking.', variant: 'warning', role: 'tenant', timeout: 5000 });
         return;
       }
     }
 
-    const start = els.start.value;
-    const end = els.end.value;
-    if (!start || !end) throw new Error('Select start and end dates.');
-    const startTs = BigInt(Date.parse(start + 'T00:00:00Z') / 1000);
-    const endTs = BigInt(Date.parse(end + 'T00:00:00Z') / 1000);
+    const startValue = els.start?.value || '';
+    const endValue = els.end?.value || '';
+    if (!startValue || !endValue) throw new Error('Select start and end dates.');
+    const startMs = Date.parse(`${startValue}T00:00:00Z`);
+    const endMs = Date.parse(`${endValue}T00:00:00Z`);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) throw new Error('Invalid dates selected.');
+    const startTs = BigInt(Math.floor(startMs / 1000));
+    const endTs = BigInt(Math.floor(endMs / 1000));
     if (endTs <= startTs) throw new Error('End date must be after start.');
     const periodKey = els.period ? els.period.value : '';
     const selectedPeriod = PERIOD_OPTIONS[periodKey];
@@ -557,6 +770,7 @@ async function bookListing(listing){
     });
     if (!available) {
       els.status.textContent = 'Selected dates not available.';
+      notify({ message: 'Those dates are already booked.', variant: 'warning', role: 'tenant', timeout: 4500 });
       return;
     }
 
@@ -586,33 +800,40 @@ async function bookListing(listing){
     els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}; ${cadenceMsg}).`;
 
     try {
-      await p.request({ method:'wallet_sendCalls', params:[{ calls }] });
+      await p.request({ method: 'wallet_sendCalls', params: [{ calls }] });
     } catch {
       try {
-        await p.request({ method:'wallet_sendCalls', params: calls });
+        await p.request({ method: 'wallet_sendCalls', params: calls });
       } catch {
         if (deposit > 0n && approveData) {
-          await p.request({ method:'eth_sendTransaction', params:[{ from, to: USDC_ADDRESS, data: approveData }] });
+          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
         }
-        await p.request({ method:'eth_sendTransaction', params:[{ from, to: listing.address, data: bookData }] });
+        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: listing.address, data: bookData }] });
       }
     }
 
     els.status.textContent = 'Booking submitted.';
-    alert('Booking transaction sent!');
+    notify({ message: 'Booking transaction sent.', variant: 'success', role: 'tenant', timeout: 6000 });
+    updateSummary();
   } catch (e) {
     console.error(e);
-    els.status.textContent = `Error: ${e?.message || e}`;
+    const message = e?.message || e;
+    els.status.textContent = `Error: ${message}`;
+    notify({ message: message ? `Booking failed: ${message}` : 'Booking failed.', variant: 'error', role: 'tenant', timeout: 6000 });
   }
 }
 
 async function checkViewPass(){
   try {
     await loadConfig();
+    viewPassRequired = false;
+    hasActiveViewPass = false;
 
     if (!supportsViewPassPurchase) {
       els.buy.disabled = true;
       els.status.textContent = 'View pass purchase is not supported in this deployment.';
+      hasActiveViewPass = true;
+      updateSummary();
       await loadListings();
       return;
     }
@@ -621,16 +842,21 @@ async function checkViewPass(){
     if (duration === 0n) {
       els.buy.disabled = true;
       els.status.textContent = 'View pass not required.';
+      hasActiveViewPass = true;
+      updateSummary();
       await loadListings();
       return;
     }
 
     els.buy.disabled = false;
+    viewPassRequired = true;
 
     const p = await getProvider();
     const [addr] = (await p.request({ method: 'eth_accounts' })) || [];
     if (!addr) {
       els.status.textContent = 'Connect wallet to verify your view pass status.';
+      hasActiveViewPass = false;
+      updateSummary();
       await loadListings();
       return;
     }
@@ -653,6 +879,7 @@ async function checkViewPass(){
     const expiry = typeof expiryRaw === 'bigint' ? expiryRaw : BigInt(expiryRaw || 0);
     const active = Boolean(activeRaw);
     const now = BigInt(Math.floor(Date.now() / 1000));
+    hasActiveViewPass = active;
 
     if (active) {
       const remaining = expiry > now ? expiry - now : 0n;
@@ -666,14 +893,20 @@ async function checkViewPass(){
       els.status.textContent = `No active view pass.${expiredAt ? ` Expired ${expiredAt}.` : ''}${requirement}`;
     }
 
+    updateSummary();
     await loadListings();
   } catch (e) {
     console.error(e);
     els.status.textContent = 'Unable to verify view pass status.';
+    updateSummary();
   }
 }
 
 // ——— Connect ———
+if (els.confirmBooking) {
+  els.confirmBooking.onclick = () => bookListing();
+}
+
 els.connect.onclick = async () => {
   try {
     if (!inHost) { els.status.textContent = 'Open in Farcaster app to connect wallet.'; return; }

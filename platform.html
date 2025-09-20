@@ -24,6 +24,16 @@
       padding: 16px 16px 48px;
       max-width: 760px;
     }
+    .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
+    nav { margin-bottom:18px; }
+    nav a { margin-right:10px; color:var(--accent); font-weight:600; text-decoration:none; }
+    .notification-tray { position:sticky; top:0; display:flex; flex-direction:column; gap:8px; margin:0 0 12px; z-index:2; }
+    .notification { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:12px; border:1px solid #cbd5f5; background:#eef2ff; color:#1e3a8a; }
+    .notification.notification-success { border-color:#bbf7d0; background:#ecfdf5; color:#065f46; }
+    .notification.notification-error { border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
+    .notification.notification-warning { border-color:#fef08a; background:#fffbeb; color:#92400e; }
+    .notification-message { margin-right:12px; font-size:.9rem; }
+    .notification-close { background:transparent; border:0; color:inherit; font-size:1.1rem; cursor:pointer; padding:0 4px; }
     h1 {
       font-size: 1.6rem;
       margin-bottom: 6px;
@@ -150,6 +160,17 @@
   <script src="https://c0f4f41c-2f55-4863-921b-sdk-docs.github.io/cdn/metamask-sdk.js"></script>
 </head>
 <body>
+  <nav>
+    <a href="./index.html">Home</a>
+    <a href="./tenant.html">Tenant</a>
+    <a href="./landlord.html">Landlord</a>
+    <a href="./investor.html">Investor</a>
+    <a href="./agent.html">Agent</a>
+    <a href="./admin.html">Admin</a>
+    <a href="./platform.html">Platform</a>
+    <span class="version-badge" data-version></span>
+  </nav>
+  <div id="notificationTray" class="notification-tray"></div>
   <header>
     <h1>Platform Owner Console</h1>
     <p class="muted">Direct access for the r3nt platform multi-sig. Review the live configuration before submitting changes.</p>

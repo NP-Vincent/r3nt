@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>r3nt — Investor Dashboards</title>
+  <style>
+    :root {
+      --fg:#0f172a; --bg:#ffffff; --muted:#475569; --stroke:#e2e8f0;
+      --accent:#1f6feb; --accent-ink:#ffffff; --success:#10b981; --danger:#dc2626;
+    }
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; max-width: 720px; margin:0 auto; padding:24px 16px 64px; background:var(--bg); color:var(--fg); }
+    nav { margin-bottom:18px; }
+    nav a { margin-right:10px; color:var(--accent); text-decoration:none; font-weight:600; }
+    .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
+    h1 { margin:0 0 8px; font-size:1.45rem; }
+    p.lead { margin:0 0 18px; font-size:.95rem; color:var(--muted); }
+    button { appearance:none; border:0; border-radius:10px; padding:12px 16px; font-weight:600; cursor:pointer; background:var(--accent); color:var(--accent-ink); }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .notification-tray { position:sticky; top:0; display:flex; flex-direction:column; gap:8px; margin:0 0 12px; z-index:2; }
+    .notification { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:12px; border:1px solid #cbd5f5; background:#eef2ff; color:#1e3a8a; }
+    .notification.notification-success { border-color:#bbf7d0; background:#ecfdf5; color:#065f46; }
+    .notification.notification-error { border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
+    .notification.notification-warning { border-color:#fef08a; background:#fffbeb; color:#92400e; }
+    .notification-message { margin-right:12px; font-size:.9rem; }
+    .notification-close { background:transparent; border:0; color:inherit; font-size:1.1rem; cursor:pointer; padding:0 4px; }
+    .status { margin:12px 0; min-height:24px; color:#444; font-size:.95rem; }
+    .card { border:1px solid var(--stroke); border-radius:16px; background:#f8fafc; padding:18px; margin:20px 0; box-shadow:0 10px 24px rgba(15,23,42,0.06); }
+    .card h2 { margin:0 0 8px; font-size:1.15rem; }
+    .card p { margin:0; color:var(--muted); font-size:.9rem; }
+    .data-list { margin-top:14px; display:flex; flex-direction:column; gap:12px; }
+    .data-card { border:1px solid var(--stroke); border-radius:14px; background:#fff; padding:14px; display:flex; flex-direction:column; gap:10px; }
+    .data-card-header { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+    .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; background:#e2e8f0; color:#475569; font-size:.75rem; font-weight:600; }
+    .metric-row { display:flex; flex-wrap:wrap; gap:12px; }
+    .metric { flex:1 1 120px; }
+    .metric label { display:block; font-size:.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; }
+    .metric span { display:block; font-size:1rem; font-weight:600; }
+    .token-progress { font-size:.9rem; color:#475569; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; }
+    .secondary { background:#0f172a; color:#fff; }
+    .ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+    .empty-state { color:#64748b; font-size:.9rem; }
+    .muted { color:#64748b; }
+    .highlight { color:var(--success); font-weight:600; }
+    @media (max-width:560px){
+      .metric-row { flex-direction:column; }
+      button { width:100%; }
+    }
+  </style>
+  <script src="./js/dev-error-console.js"></script>
+</head>
+<body>
+  <nav>
+    <a href="./index.html">Home</a>
+    <a href="./tenant.html">Tenant</a>
+    <a href="./landlord.html">Landlord</a>
+    <a href="./investor.html">Investor</a>
+    <a href="./agent.html">Agent</a>
+    <a href="./admin.html">Admin</a>
+    <a href="./platform.html">Platform</a>
+    <span class="version-badge" data-version></span>
+  </nav>
+  <div id="notificationTray" class="notification-tray"></div>
+  <h1>Investor dashboards</h1>
+  <p class="lead">Track tokenised bookings, SQMU-R holdings and live rent accrual across the r3nt platform.</p>
+  <button id="connect">Connect wallet</button>
+  <div id="walletAddress" class="muted" style="margin-top:6px;">Not connected</div>
+  <div id="status" class="status">Loading…</div>
+
+  <section class="card">
+    <h2>Your SQMU-R holdings</h2>
+    <p>Holdings with on-chain SQMU-R balances appear here along with rent details.</p>
+    <div id="holdingsList" class="data-list">
+      <div class="empty-state">Connect your wallet to load holdings.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Tokenisation overview</h2>
+    <p>All tokenised bookings, even those you do not own, to keep an eye on fundraising progress.</p>
+    <div id="tokenisationDashboard" class="data-list">
+      <div class="empty-state">Connect your wallet to inspect tokenised bookings.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Rent accrual</h2>
+    <p>Claimable rent across your SQMU-R holdings. Claim in a single click when available.</p>
+    <div id="rentDashboard" class="data-list">
+      <div class="empty-state">No claimable rent yet.</div>
+    </div>
+  </section>
+
+  <script type="module" src="./js/investor.js"></script>
+</body>
+</html>
