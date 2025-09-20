@@ -211,6 +211,9 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     /// @dev Pending tokenisation proposals keyed by booking id.
     mapping(uint256 => TokenisationProposal) private _tokenisationProposals;
 
+    /// @dev Tracks the agent proxy registered to manage a booking (if any).
+    mapping(uint256 => address) private _bookingAgents;
+
     // -------------------------------------------------
     // Events
     // -------------------------------------------------
@@ -261,6 +264,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     event BookingCancelled(uint256 indexed bookingId, address indexed caller);
     event BookingCompleted(uint256 indexed bookingId, address indexed caller);
     event BookingDefaulted(uint256 indexed bookingId, address indexed caller);
+    event BookingAgentUpdated(uint256 indexed bookingId, address indexed agent);
 
     // -------------------------------------------------
     // Modifiers
@@ -422,6 +426,30 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             expectedNetRentAmount,
             deposit
         );
+    }
+
+    /**
+     * @notice Register an agent proxy as the manager for a booking. Callable by the platform only.
+     * @param bookingId Identifier of the booking being delegated to an agent.
+     * @param agent Address of the agent proxy deployed through the platform.
+     */
+    function registerAgent(uint256 bookingId, address agent) external onlyPlatform {
+        require(agent != address(0), "agent=0");
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status != Status.NONE, "unknown booking");
+        require(_bookingAgents[bookingId] == address(0), "agent set");
+
+        _bookingAgents[bookingId] = agent;
+
+        emit BookingAgentUpdated(bookingId, agent);
+    }
+
+    /**
+     * @notice Return the agent proxy (if any) associated with a booking.
+     * @param bookingId Identifier of the booking.
+     */
+    function bookingAgent(uint256 bookingId) external view returns (address) {
+        return _bookingAgents[bookingId];
     }
 
     /**
@@ -642,7 +670,9 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         Booking storage booking = _bookings[bookingId];
         require(booking.status == Status.ACTIVE, "not active");
         require(!booking.tokenised, "already tokenised");
-        require(msg.sender == landlord || msg.sender == booking.tenant, "unauthorised");
+        address caller = msg.sender;
+        address agent = _bookingAgents[bookingId];
+        require(caller == landlord || caller == booking.tenant || caller == agent, "unauthorised");
 
         if (booking.period != Period.NONE) {
             require(period == booking.period, "period mismatch");
