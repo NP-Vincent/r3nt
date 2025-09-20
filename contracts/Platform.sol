@@ -6,6 +6,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /// @dev Minimal interface exposed by the listing factory.
 interface IListingFactory {
@@ -27,6 +28,27 @@ interface IListingFactory {
 /// @dev Minimal interface exposed by the booking registry.
 interface IBookingRegistry {
     function registerListing(address listing) external;
+}
+
+/// @dev Minimal interface exposed by the agent implementation for initializer encoding.
+interface IAgent {
+    function initialize(
+        address listing,
+        uint256 bookingId,
+        address agent,
+        uint16 agentFeeBps,
+        address agentFeeRecipient
+    ) external;
+}
+
+/// @dev Minimal interface for registering an agent against a listing booking.
+interface IListingWithAgents {
+    function registerAgent(uint256 bookingId, address agent) external;
+}
+
+/// @dev Minimal subset of the r3nt-SQMU manager interface used to grant minting rights.
+interface IR3ntSQMUManager {
+    function grantListingMinter(address listing) external;
 }
 
 /**
@@ -96,6 +118,27 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /// @dev Storage for iterating listings off-chain when necessary.
     address[] private _listings;
 
+    /// @notice Agent implementation used when deploying new proxies.
+    address public agentImplementation;
+
+    /// @notice Maximum agent fee (basis points) allowed when initialising a proxy.
+    uint16 public maxAgentFeeBps;
+
+    /// @notice Tracks agent proxies deployed through the platform.
+    mapping(address => bool) public isAgentProxy;
+
+    /// @notice Registry mapping a listing + booking pair to its managing agent proxy.
+    mapping(address => mapping(uint256 => address)) public agentForBooking;
+
+    /// @notice Addresses authorised to request new agent proxy deployments.
+    mapping(address => bool) public approvedAgentDeployers;
+
+    /// @notice Wallets allowed to operate newly created agent proxies.
+    mapping(address => bool) public approvedAgentOperators;
+
+    /// @dev Storage for iterating registered agent proxies.
+    address[] private _agents;
+
     // -------------------------------------------------
     // Events
     // -------------------------------------------------
@@ -108,6 +151,18 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     event ListingPricingUpdated(uint256 listingCreationFee, uint256 viewPassPrice, uint64 viewPassDuration);
     event ListingRegistered(address indexed listing, address indexed landlord, uint256 indexed listingId);
     event ViewPassBought(address indexed buyer, uint256 expiry);
+    event AgentImplementationUpdated(address indexed previousImplementation, address indexed newImplementation);
+    event MaxAgentFeeUpdated(uint16 previousMaxFeeBps, uint16 newMaxFeeBps);
+    event AgentDeployerStatusUpdated(address indexed account, bool approved);
+    event AgentOperatorStatusUpdated(address indexed operator, bool approved);
+    event AgentRegistered(
+        address indexed listing,
+        uint256 indexed bookingId,
+        address indexed agentProxy,
+        address operator,
+        uint16 agentFeeBps,
+        address feeRecipient
+    );
 
     // -------------------------------------------------
     // Constructor / Initializer
@@ -157,6 +212,8 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         _setFees(tenantFeeBps_, landlordFeeBps_);
         _setListingPricing(listingCreationFee_, viewPassPrice_, viewPassDuration_);
 
+        maxAgentFeeBps = BPS_DENOMINATOR;
+
         emit PlatformInitialized(owner_, usdc_, treasury_);
     }
 
@@ -191,6 +248,29 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         uint64 newViewPassDuration
     ) external onlyOwner {
         _setListingPricing(newListingCreationFee, newViewPassPrice, newViewPassDuration);
+    }
+
+    function setAgentImplementation(address newImplementation) external onlyOwner {
+        address previous = agentImplementation;
+        agentImplementation = newImplementation;
+        emit AgentImplementationUpdated(previous, newImplementation);
+    }
+
+    function setMaxAgentFeeBps(uint16 newMaxAgentFeeBps) external onlyOwner {
+        require(newMaxAgentFeeBps <= BPS_DENOMINATOR, "fee cap too high");
+        uint16 previous = maxAgentFeeBps;
+        maxAgentFeeBps = newMaxAgentFeeBps;
+        emit MaxAgentFeeUpdated(previous, newMaxAgentFeeBps);
+    }
+
+    function setAgentDeployer(address account, bool approved) external onlyOwner {
+        approvedAgentDeployers[account] = approved;
+        emit AgentDeployerStatusUpdated(account, approved);
+    }
+
+    function setAgentOperator(address account, bool approved) external onlyOwner {
+        approvedAgentOperators[account] = approved;
+        emit AgentOperatorStatusUpdated(account, approved);
     }
 
     // -------------------------------------------------
@@ -264,6 +344,58 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         emit ListingRegistered(listing, landlord, listingId);
     }
 
+    function createAgent(
+        address listing,
+        uint256 bookingId,
+        address agentWallet,
+        uint16 agentFeeBps,
+        address agentFeeRecipient
+    ) external returns (address agentProxy) {
+        address caller = _msgSender();
+        if (caller != owner()) {
+            require(approvedAgentDeployers[caller], "not authorised");
+        }
+
+        address implementation = agentImplementation;
+        require(implementation != address(0), "agent impl unset");
+        require(listing != address(0), "listing=0");
+        require(isListing[listing], "unregistered listing");
+        require(bookingId != 0, "booking=0");
+        require(agentWallet != address(0), "agent=0");
+        require(approvedAgentOperators[agentWallet], "operator not approved");
+        require(agentFeeBps <= BPS_DENOMINATOR, "fee bps too high");
+        require(agentFeeBps <= maxAgentFeeBps, "fee above cap");
+        require(agentForBooking[listing][bookingId] == address(0), "agent exists");
+
+        (bool success, ) = listing.staticcall(abi.encodeWithSignature("bookingInfo(uint256)", bookingId));
+        require(success, "unknown booking");
+
+        bytes memory initData = abi.encodeWithSelector(
+            IAgent.initialize.selector,
+            listing,
+            bookingId,
+            agentWallet,
+            agentFeeBps,
+            agentFeeRecipient
+        );
+
+        agentProxy = address(new ERC1967Proxy(implementation, initData));
+
+        isAgentProxy[agentProxy] = true;
+        agentForBooking[listing][bookingId] = agentProxy;
+        _agents.push(agentProxy);
+
+        IListingWithAgents(listing).registerAgent(bookingId, agentProxy);
+
+        address sqmuToken_ = sqmuToken;
+        require(sqmuToken_ != address(0), "sqmuToken=0");
+        IR3ntSQMUManager(sqmuToken_).grantListingMinter(agentProxy);
+
+        address resolvedRecipient = agentFeeRecipient == address(0) ? agentWallet : agentFeeRecipient;
+
+        emit AgentRegistered(listing, bookingId, agentProxy, agentWallet, agentFeeBps, resolvedRecipient);
+    }
+
     function _collectListingFee(address payer) internal {
         uint256 fee = listingCreationFee;
         if (fee == 0) {
@@ -301,6 +433,10 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     function allListings() external view returns (address[] memory) {
         return _listings;
+    }
+
+    function allAgents() external view returns (address[] memory) {
+        return _agents;
     }
 
     function hasActiveViewPass(address account) external view returns (bool) {
@@ -396,5 +532,5 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     // Storage gap for upgradeability
     // -------------------------------------------------
 
-    uint256[36] private __gap;
+    uint256[29] private __gap;
 }
