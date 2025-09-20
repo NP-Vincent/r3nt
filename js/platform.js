@@ -21,6 +21,19 @@ const refreshSnapshotBtn = document.getElementById('refreshSnapshotBtn');
 const connectedAccountEl = document.getElementById('connectedAccount');
 const snapshotOutputEl = document.getElementById('snapshotOutput');
 const actionStatusEl = document.getElementById('actionStatus');
+const ownerGuardMessageEl = document.getElementById('ownerGuardMessage');
+const ownerOnlyNodes = document.querySelectorAll('[data-owner-only]');
+const devConsoleStatusEl = document.getElementById('devConsoleStatus');
+const toggleDevConsoleBtn = document.getElementById('toggleDevConsoleBtn');
+
+let ownerAddress = null;
+let ownerAddressPromise = null;
+let ownerRequirementMessage = 'Connect the platform owner wallet to unlock controls.';
+let ownerAccessGranted = false;
+
+if (toggleDevConsoleBtn) {
+  toggleDevConsoleBtn.disabled = true;
+}
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'platform' });
 
@@ -47,6 +60,83 @@ function setActionStatus(message, type = 'info', toast = false) {
     const variant = type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
     notify({ message, variant, role: 'platform', timeout: type === 'error' ? 8000 : 5000 });
   }
+}
+
+function resetOwnerGuardMessage() {
+  if (ownerGuardMessageEl) {
+    ownerGuardMessageEl.textContent = ownerRequirementMessage;
+  }
+}
+
+async function loadOwnerAddress() {
+  if (ownerAddress) {
+    return ownerAddress;
+  }
+  if (!ownerAddressPromise) {
+    ownerAddressPromise = platformRead
+      .owner()
+      .then((address) => utils.getAddress(address))
+      .then((normalized) => {
+        ownerAddress = normalized;
+        ownerRequirementMessage = `Connect the platform owner wallet (${normalized}) to unlock controls.`;
+        resetOwnerGuardMessage();
+        return normalized;
+      })
+      .catch((error) => {
+        ownerAddressPromise = null;
+        console.error('Failed to load platform owner address', error);
+        if (ownerGuardMessageEl) {
+          ownerGuardMessageEl.textContent =
+            'Unable to load platform owner address. Check RPC configuration and reload.';
+        }
+        throw error;
+      });
+  }
+  return ownerAddressPromise;
+}
+
+function setOwnerControlsEnabled(enabled) {
+  ownerAccessGranted = Boolean(enabled);
+  ownerOnlyNodes.forEach((node) => {
+    if (!node) return;
+    if (ownerAccessGranted) {
+      node.removeAttribute('hidden');
+    } else {
+      node.setAttribute('hidden', 'true');
+    }
+  });
+  if (refreshSnapshotBtn) {
+    refreshSnapshotBtn.disabled = !ownerAccessGranted;
+  }
+  if (!ownerAccessGranted) {
+    snapshotOutputEl.textContent = 'Connect the platform owner wallet to view snapshot.';
+    if (toggleDevConsoleBtn) {
+      toggleDevConsoleBtn.disabled = true;
+    }
+  } else if (toggleDevConsoleBtn) {
+    toggleDevConsoleBtn.disabled = false;
+  }
+}
+
+function updateDevConsoleStatus() {
+  if (!devConsoleStatusEl || !toggleDevConsoleBtn) {
+    return;
+  }
+  const manager = window.r3ntDevConsole;
+  let enabled = false;
+  if (manager) {
+    try {
+      if (typeof manager.isEnabled === 'function') {
+        enabled = Boolean(manager.isEnabled());
+      } else if (typeof manager.isActive === 'function') {
+        enabled = Boolean(manager.isActive());
+      }
+    } catch (err) {
+      console.error('Failed to determine dev console status', err);
+    }
+  }
+  devConsoleStatusEl.textContent = enabled ? 'Dev console is enabled.' : 'Dev console is disabled.';
+  toggleDevConsoleBtn.textContent = enabled ? 'Disable dev console' : 'Enable dev console';
 }
 
 function cleanErrorMessage(message) {
@@ -240,6 +330,11 @@ function enableForms(enabled) {
 enableForms(false);
 
 async function refreshSnapshot() {
+  if (!ownerAccessGranted) {
+    snapshotOutputEl.textContent = 'Connect the platform owner wallet to view snapshot.';
+    setActionStatus('Owner access required to load snapshot.', 'warning');
+    return;
+  }
   try {
     snapshotOutputEl.textContent = 'Loading current state…';
     setActionStatus('Refreshing snapshot…');
@@ -373,22 +468,53 @@ function parseBookingId(value) {
 }
 
 connectBtn.addEventListener('click', async () => {
+  let normalizedAccount = null;
   try {
     connectBtn.disabled = true;
     const result = await connectWallet('walletStatus');
     provider = result.provider;
     signer = result.signer;
-    const account = await signer.getAddress();
-    connectedAccountEl.textContent = `Connected as ${account}`;
+    normalizedAccount = utils.getAddress(await signer.getAddress());
+    connectedAccountEl.textContent = `Connected as ${normalizedAccount}`;
     disconnectBtn.disabled = false;
+
+    const owner = await loadOwnerAddress();
+    if (normalizedAccount !== owner) {
+      platformWrite = null;
+      provider = null;
+      signer = null;
+      connectedAccountEl.textContent = `Connected as ${normalizedAccount} (not owner)`;
+      if (ownerGuardMessageEl) {
+        ownerGuardMessageEl.textContent = `Connected wallet (${normalizedAccount}) is not the platform owner (${owner}). Disconnect and switch wallets.`;
+      }
+      setOwnerControlsEnabled(false);
+      enableForms(false);
+      setActionStatus('Connected wallet is not the platform owner. Switch wallets to continue.', 'error', true);
+      return;
+    }
+
     platformWrite = new Contract(PLATFORM_ADDRESS, PLATFORM_ABI, signer);
+    setOwnerControlsEnabled(true);
     enableForms(true);
-    setActionStatus('Wallet connected.', 'success', true);
+    if (ownerGuardMessageEl) {
+      ownerGuardMessageEl.textContent = 'Owner wallet connected. Controls unlocked.';
+    }
+    updateDevConsoleStatus();
+    setActionStatus('Owner wallet connected. Loading snapshot…');
+    await refreshSnapshot();
   } catch (err) {
     console.error(err);
     const { message, severity } = interpretError(err);
     setActionStatus(`Connection failed: ${message}`, severity, true);
-    connectBtn.disabled = false;
+    connectedAccountEl.textContent = '';
+    signer = null;
+    provider = null;
+    platformWrite = null;
+    disconnectBtn.disabled = true;
+  } finally {
+    if (!platformWrite) {
+      connectBtn.disabled = false;
+    }
   }
 });
 
@@ -403,7 +529,9 @@ disconnectBtn.addEventListener('click', async () => {
     provider = null;
     platformWrite = null;
     connectedAccountEl.textContent = '';
+    setOwnerControlsEnabled(false);
     enableForms(false);
+    resetOwnerGuardMessage();
     connectBtn.disabled = false;
     setActionStatus('Disconnected.', 'info', true);
   }
@@ -412,6 +540,39 @@ disconnectBtn.addEventListener('click', async () => {
 refreshSnapshotBtn.addEventListener('click', () => {
   refreshSnapshot();
 });
+
+if (toggleDevConsoleBtn) {
+  toggleDevConsoleBtn.addEventListener('click', () => {
+    if (!ownerAccessGranted) {
+      return;
+    }
+    const manager = window.r3ntDevConsole;
+    if (!manager || typeof manager.setEnabled !== 'function') {
+      setActionStatus('Dev console controller unavailable.', 'error', true);
+      return;
+    }
+    let currentlyEnabled = false;
+    try {
+      if (typeof manager.isEnabled === 'function') {
+        currentlyEnabled = Boolean(manager.isEnabled());
+      } else if (typeof manager.isActive === 'function') {
+        currentlyEnabled = Boolean(manager.isActive());
+      }
+    } catch (err) {
+      console.error('Failed to determine dev console status', err);
+    }
+    const nextState = !currentlyEnabled;
+    try {
+      manager.setEnabled(nextState);
+      updateDevConsoleStatus();
+      setActionStatus(nextState ? 'Dev console enabled.' : 'Dev console disabled.', 'success', true);
+    } catch (err) {
+      console.error('Failed to toggle dev console', err);
+      const { message, severity } = interpretError(err);
+      setActionStatus(`Failed to toggle dev console: ${message}`, severity, true);
+    }
+  });
+}
 
 function bindForm(form, label, handler) {
   form.addEventListener('submit', async (event) => {
@@ -493,5 +654,7 @@ bindForm(document.getElementById('formCreateAgent'), 'Creating agent', () => {
   return async () => platformWrite.createAgent(listing, bookingId, wallet, feeBps, recipient);
 });
 
-refreshSnapshot();
-setActionStatus('Waiting for wallet connection.');
+setOwnerControlsEnabled(false);
+resetOwnerGuardMessage();
+loadOwnerAddress().catch(() => {});
+setActionStatus('Connect the platform owner wallet to begin.');

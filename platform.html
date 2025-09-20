@@ -170,7 +170,7 @@
     <span class="version-badge" data-version></span>
   </nav>
   <div id="notificationTray" class="notification-tray"></div>
-  <header>
+  <header data-owner-only hidden>
     <h1>Platform Owner Console</h1>
     <p class="muted">Direct access for the r3nt platform multi-sig. Review the live configuration before submitting changes.</p>
     <div class="muted">Build <span data-version></span></div>
@@ -182,19 +182,20 @@
     <div class="button-row">
       <button id="connectBtn">Connect MetaMask</button>
       <button id="disconnectBtn" class="secondary" disabled>Disconnect</button>
-      <button id="refreshSnapshotBtn" class="secondary">Refresh snapshot</button>
+      <button id="refreshSnapshotBtn" class="secondary" disabled>Refresh snapshot</button>
     </div>
     <div class="note" id="walletStatus">Not connected.</div>
+    <div class="note" id="ownerGuardMessage">Owner wallet required to unlock controls.</div>
     <div class="muted" id="connectedAccount"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-owner-only hidden>
     <h2>Platform snapshot</h2>
     <p class="muted">Use this read-only summary to confirm the on-chain configuration before and after updates.</p>
     <pre id="snapshotOutput">Loading current state…</pre>
   </section>
 
-  <section class="card" id="coreConfigSection">
+  <section class="card" id="coreConfigSection" data-owner-only hidden>
     <h2>Core configuration</h2>
     <p class="muted">Addresses must be checksum formatted (0x-prefixed). Fees use basis points (1% = 100 bps). Totals cannot exceed 10,000 bps.</p>
 
@@ -267,7 +268,7 @@
     </form>
   </section>
 
-  <section class="card" id="agentConfigSection">
+  <section class="card" id="agentConfigSection" data-owner-only hidden>
     <h2>Agent controls</h2>
     <p class="muted">Deployers must be pre-approved before they can request agent proxies. Operators manage the deployed agent wallets.</p>
 
@@ -349,7 +350,16 @@
     </form>
   </section>
 
-  <section class="card">
+  <section class="card" id="developerToolsSection" data-owner-only hidden>
+    <h2>Developer tools</h2>
+    <p class="muted">Toggle the in-app development console when debugging front-end errors. Disable it during normal operations.</p>
+    <div class="button-row">
+      <button id="toggleDevConsoleBtn" type="button" class="secondary">Enable dev console</button>
+      <span class="muted" id="devConsoleStatus">Dev console is disabled.</span>
+    </div>
+  </section>
+
+  <section class="card" data-owner-only hidden>
     <h2>Activity</h2>
     <p class="muted">Status updates for submitted transactions appear here.</p>
     <div id="actionStatus" class="muted">No activity yet.</div>

@@ -2,126 +2,70 @@
   if (typeof window === 'undefined') {
     return;
   }
-  if (window.__DEV_ERROR_CONSOLE__) {
+
+  const STORAGE_KEY = 'r3nt:devConsoleEnabled';
+  const MANAGER_KEY = '__R3NT_DEV_CONSOLE_MANAGER__';
+
+  if (window[MANAGER_KEY]) {
     return;
   }
-  window.__DEV_ERROR_CONSOLE__ = true;
 
-  const root = document.createElement('div');
-  root.id = 'dev-error-console';
-  root.style.cssText = [
-    'position:fixed',
-    'left:0',
-    'right:0',
-    'bottom:0',
-    'z-index:2147483647',
-    'display:flex',
-    'flex-direction:column',
-    'gap:6px',
-    'max-height:40vh',
-    'background:rgba(15,23,42,0.96)',
-    'color:#f8fafc',
-    'font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace',
-    'padding:8px 12px 10px',
-    'border-top:2px solid #f97316',
-    'box-shadow:0 -6px 18px rgba(15,23,42,0.35)',
-    'pointer-events:auto'
-  ].join(';');
+  const state = {
+    root: null,
+    logList: null,
+    toggleBtn: null,
+    clearBtn: null,
+    copyBtn: null,
+    counter: null,
+    collapsed: false,
+    entryCount: 0,
+    entries: [],
+    queue: [],
+    attached: false,
+    copyResetTimer: null,
+    originalError: null,
+    originalWarn: null,
+    domReadyListener: null,
+  };
 
-  const header = document.createElement('div');
-  header.style.cssText = 'display:flex;align-items:center;gap:12px;min-height:20px';
-
-  const titleWrap = document.createElement('div');
-  titleWrap.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#fbbf24';
-
-  const title = document.createElement('span');
-  title.textContent = 'Dev Error Console';
-
-  const counter = document.createElement('span');
-  counter.textContent = '(0)';
-  counter.style.cssText = 'color:#f1f5f9;font-weight:600;text-transform:none';
-
-  titleWrap.appendChild(title);
-  titleWrap.appendChild(counter);
-
-  const controls = document.createElement('div');
-  controls.style.cssText = 'display:flex;align-items:center;gap:8px;margin-left:auto';
-
-  function styleButton(btn) {
-    btn.style.cssText = [
-      'background:rgba(148,163,184,0.18)',
-      'color:#f8fafc',
-      'border:1px solid rgba(148,163,184,0.45)',
-      'border-radius:6px',
-      'padding:2px 8px',
-      'font-size:11px',
-      'line-height:1.4',
-      'cursor:pointer'
-    ].join(';');
+  function readStored() {
+    try {
+      return window.localStorage.getItem(STORAGE_KEY) === '1';
+    } catch (err) {
+      return false;
+    }
   }
 
-  const toggleBtn = document.createElement('button');
-  toggleBtn.type = 'button';
-  toggleBtn.textContent = 'Hide';
-  styleButton(toggleBtn);
-
-  const clearBtn = document.createElement('button');
-  clearBtn.type = 'button';
-  clearBtn.textContent = 'Clear';
-  styleButton(clearBtn);
-
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.textContent = 'Copy';
-  styleButton(copyBtn);
-
-  controls.appendChild(toggleBtn);
-  controls.appendChild(clearBtn);
-  controls.appendChild(copyBtn);
-
-  header.appendChild(titleWrap);
-  header.appendChild(controls);
-
-  const logList = document.createElement('div');
-  logList.style.cssText = 'overflow-y:auto;overflow-x:hidden;flex:1 1 auto;padding-right:4px;border-top:1px solid rgba(148,163,184,0.22)';
-
-  root.appendChild(header);
-  root.appendChild(logList);
-
-  let collapsed = false;
-  let entryCount = 0;
-  const entries = [];
-  const queue = [];
-  let attached = false;
-  let copyResetTimer = null;
+  function writeStored(enabled) {
+    try {
+      if (enabled) {
+        window.localStorage.setItem(STORAGE_KEY, '1');
+      } else {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (err) {
+      // ignore storage errors
+    }
+  }
 
   function updateCounter() {
-    counter.textContent = `(${entryCount})`;
+    if (state.counter) {
+      state.counter.textContent = `(${state.entryCount})`;
+    }
   }
 
   function setCollapsed(next) {
-    collapsed = Boolean(next);
-    logList.style.display = collapsed ? 'none' : 'block';
-    toggleBtn.textContent = collapsed ? 'Show' : 'Hide';
-    root.style.opacity = collapsed ? '0.75' : '1';
-  }
-
-  toggleBtn.addEventListener('click', () => {
-    setCollapsed(!collapsed);
-  });
-
-  clearBtn.addEventListener('click', () => {
-    entryCount = 0;
-    logList.innerHTML = '';
-    entries.length = 0;
-    queue.length = 0;
-    if (copyResetTimer) {
-      clearTimeout(copyResetTimer);
-      copyResetTimer = null;
+    state.collapsed = Boolean(next);
+    if (state.logList) {
+      state.logList.style.display = state.collapsed ? 'none' : 'block';
     }
-    copyBtn.textContent = 'Copy';
-    updateCounter();
-  });
+    if (state.toggleBtn) {
+      state.toggleBtn.textContent = state.collapsed ? 'Show' : 'Hide';
+    }
+    if (state.root) {
+      state.root.style.opacity = state.collapsed ? '0.75' : '1';
+    }
+  }
 
   function entryToText(entry) {
     const timeLabel = entry.time.toLocaleTimeString();
@@ -133,14 +77,20 @@
   }
 
   function resetCopyButton(text) {
-    if (copyResetTimer) {
-      clearTimeout(copyResetTimer);
+    if (!state.copyBtn) {
+      return;
     }
-    copyResetTimer = setTimeout(() => {
-      copyBtn.textContent = 'Copy';
-      copyResetTimer = null;
+    if (state.copyResetTimer) {
+      clearTimeout(state.copyResetTimer);
+      state.copyResetTimer = null;
+    }
+    state.copyBtn.textContent = text;
+    state.copyResetTimer = setTimeout(() => {
+      if (state.copyBtn) {
+        state.copyBtn.textContent = 'Copy';
+      }
+      state.copyResetTimer = null;
     }, 1500);
-    copyBtn.textContent = text;
   }
 
   function legacyCopy(text) {
@@ -167,7 +117,7 @@
   }
 
   async function copyEntriesToClipboard() {
-    const text = entries.map(entryToText).join('\n\n');
+    const text = state.entries.map(entryToText).join('\n\n');
     if (!text) {
       resetCopyButton('No logs');
       return;
@@ -179,7 +129,7 @@
         return;
       }
     } catch (err) {
-      // fall through to legacy path on error
+      // fall back to legacy path
     }
     if (legacyCopy(text)) {
       resetCopyButton('Copied!');
@@ -188,22 +138,23 @@
     resetCopyButton('Copy failed');
   }
 
-  copyBtn.addEventListener('click', () => {
-    copyEntriesToClipboard();
-  });
-
   function ensureAttached() {
-    if (attached) {
+    if (!state.root || state.attached) {
       return;
     }
     if (document.body) {
-      document.body.appendChild(root);
-      attached = true;
-      if (queue.length) {
-        queue.splice(0, queue.length).forEach(writeEntry);
+      document.body.appendChild(state.root);
+      state.attached = true;
+      if (state.queue.length) {
+        const queued = state.queue.splice(0, state.queue.length);
+        queued.forEach(writeEntry);
       }
-    } else {
-      document.addEventListener('DOMContentLoaded', ensureAttached, { once: true });
+    } else if (!state.domReadyListener) {
+      state.domReadyListener = () => {
+        state.domReadyListener = null;
+        ensureAttached();
+      };
+      document.addEventListener('DOMContentLoaded', state.domReadyListener, { once: true });
     }
   }
 
@@ -229,97 +180,329 @@
     }
     try {
       const seen = new WeakSet();
-      return JSON.stringify(value, function (key, val) {
-        if (val instanceof Error) {
-          return val.stack || `${val.name || 'Error'}: ${val.message}`;
-        }
-        if (typeof val === 'object' && val !== null) {
-          if (seen.has(val)) {
-            return '[Circular]';
+      return JSON.stringify(
+        value,
+        function (key, val) {
+          if (val instanceof Error) {
+            return val.stack || `${val.name || 'Error'}: ${val.message}`;
           }
-          seen.add(val);
-        }
-        return val;
-      }, 2);
+          if (typeof val === 'object' && val !== null) {
+            if (seen.has(val)) {
+              return '[Circular]';
+            }
+            seen.add(val);
+          }
+          return val;
+        },
+        2
+      );
     } catch (err) {
       try {
         return String(value);
-      } catch {
+      } catch (stringErr) {
         return '[Unserializable value]';
       }
     }
   }
 
   function writeEntry(entry) {
-    const { type, args, time } = entry;
+    if (!state.logList) {
+      return;
+    }
     const entryEl = document.createElement('div');
     entryEl.style.cssText = 'padding:6px 0;border-bottom:1px solid rgba(71,85,105,0.35)';
 
     const meta = document.createElement('div');
     meta.style.cssText = 'font-size:10px;color:#cbd5f5;margin-bottom:3px;letter-spacing:0.05em;text-transform:uppercase';
-    const timeLabel = time.toLocaleTimeString();
-    meta.textContent = `[${timeLabel}] ${type}`;
+    const timeLabel = entry.time.toLocaleTimeString();
+    meta.textContent = `[${timeLabel}] ${entry.type}`;
 
     const message = document.createElement('pre');
     message.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-word;color:#f8fafc;font-size:12px';
-    message.textContent = args.map(formatValue).join(' ');
+    message.textContent = entry.args.map(formatValue).join(' ');
 
     entryEl.appendChild(meta);
     entryEl.appendChild(message);
 
-    logList.appendChild(entryEl);
-    logList.scrollTop = logList.scrollHeight;
+    state.logList.appendChild(entryEl);
+    state.logList.scrollTop = state.logList.scrollHeight;
   }
 
   function addEntry(type, argsLike) {
     const args = Array.prototype.slice.call(argsLike ?? []);
     const payload = { type, args, time: new Date() };
-    entries.push(payload);
-    entryCount += 1;
+    state.entries.push(payload);
+    state.entryCount += 1;
     updateCounter();
-    if (!attached) {
-      queue.push(payload);
+    if (!state.attached || !state.logList) {
+      state.queue.push(payload);
       ensureAttached();
       return;
     }
     writeEntry(payload);
   }
 
-  window.addEventListener('error', (event) => {
-    const details = [];
-    if (event.message) {
-      details.push(event.message);
-    }
-    if (event.filename) {
-      const location = `${event.filename}${event.lineno ? `:${event.lineno}` : ''}${event.colno ? `:${event.colno}` : ''}`;
-      details.push(location);
-    }
-    if (event.error) {
-      details.push(event.error);
-    }
-    addEntry('window.error', details);
-  });
-
-  window.addEventListener('unhandledrejection', (event) => {
-    const reason = event.reason !== undefined ? [event.reason] : ['Unknown rejection'];
-    addEntry('unhandledrejection', reason);
-  });
-
-  const originalError = console.error ? console.error.bind(console) : null;
-  console.error = function (...args) {
-    addEntry('console.error', args);
-    if (originalError) {
-      originalError(...args);
-    }
+  const handlers = {
+    toggle: () => {
+      setCollapsed(!state.collapsed);
+    },
+    clear: () => {
+      state.entryCount = 0;
+      state.entries = [];
+      state.queue = [];
+      updateCounter();
+      if (state.logList) {
+        state.logList.innerHTML = '';
+      }
+      if (state.copyResetTimer) {
+        clearTimeout(state.copyResetTimer);
+        state.copyResetTimer = null;
+      }
+      if (state.copyBtn) {
+        state.copyBtn.textContent = 'Copy';
+      }
+    },
+    copy: () => {
+      copyEntriesToClipboard();
+    },
+    windowError: (event) => {
+      const details = [];
+      if (event.message) {
+        details.push(event.message);
+      }
+      if (event.filename) {
+        const location = `${event.filename}${event.lineno ? `:${event.lineno}` : ''}${event.colno ? `:${event.colno}` : ''}`;
+        details.push(location);
+      }
+      if (event.error) {
+        details.push(event.error);
+      }
+      addEntry('window.error', details);
+    },
+    unhandledRejection: (event) => {
+      const reason = event.reason !== undefined ? [event.reason] : ['Unknown rejection'];
+      addEntry('unhandledrejection', reason);
+    },
+    consoleError: (...args) => {
+      addEntry('console.error', args);
+      if (typeof state.originalError === 'function') {
+        state.originalError.apply(console, args);
+      }
+    },
+    consoleWarn: (...args) => {
+      addEntry('console.warn', args);
+      if (typeof state.originalWarn === 'function') {
+        state.originalWarn.apply(console, args);
+      }
+    },
   };
 
-  const originalWarn = console.warn ? console.warn.bind(console) : null;
-  console.warn = function (...args) {
-    addEntry('console.warn', args);
-    if (originalWarn) {
-      originalWarn(...args);
-    }
-  };
+  function styleButton(btn) {
+    btn.style.cssText = [
+      'background:rgba(148,163,184,0.18)',
+      'color:#f8fafc',
+      'border:1px solid rgba(148,163,184,0.45)',
+      'border-radius:6px',
+      'padding:2px 8px',
+      'font-size:11px',
+      'line-height:1.4',
+      'cursor:pointer',
+    ].join(';');
+  }
 
-  ensureAttached();
+  function buildConsoleDom() {
+    const root = document.createElement('div');
+    root.id = 'dev-error-console';
+    root.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'right:0',
+      'bottom:0',
+      'z-index:2147483647',
+      'display:flex',
+      'flex-direction:column',
+      'gap:6px',
+      'max-height:40vh',
+      'background:rgba(15,23,42,0.96)',
+      'color:#f8fafc',
+      'font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace',
+      'padding:8px 12px 10px',
+      'border-top:2px solid #f97316',
+      'box-shadow:0 -6px 18px rgba(15,23,42,0.35)',
+      'pointer-events:auto',
+    ].join(';');
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:12px;min-height:20px';
+
+    const titleWrap = document.createElement('div');
+    titleWrap.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#fbbf24';
+
+    const title = document.createElement('span');
+    title.textContent = 'Dev Error Console';
+
+    const counter = document.createElement('span');
+    counter.textContent = '(0)';
+    counter.style.cssText = 'color:#f1f5f9;font-weight:600;text-transform:none';
+
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(counter);
+
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;align-items:center;gap:8px;margin-left:auto';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = 'Hide';
+    styleButton(toggleBtn);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.textContent = 'Clear';
+    styleButton(clearBtn);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = 'Copy';
+    styleButton(copyBtn);
+
+    controls.appendChild(toggleBtn);
+    controls.appendChild(clearBtn);
+    controls.appendChild(copyBtn);
+
+    header.appendChild(titleWrap);
+    header.appendChild(controls);
+
+    const logList = document.createElement('div');
+    logList.style.cssText = 'overflow-y:auto;overflow-x:hidden;flex:1 1 auto;padding-right:4px;border-top:1px solid rgba(148,163,184,0.22)';
+
+    root.appendChild(header);
+    root.appendChild(logList);
+
+    state.root = root;
+    state.logList = logList;
+    state.toggleBtn = toggleBtn;
+    state.clearBtn = clearBtn;
+    state.copyBtn = copyBtn;
+    state.counter = counter;
+
+    toggleBtn.addEventListener('click', handlers.toggle);
+    clearBtn.addEventListener('click', handlers.clear);
+    copyBtn.addEventListener('click', handlers.copy);
+
+    setCollapsed(false);
+    updateCounter();
+  }
+
+  function mountConsole() {
+    if (state.root) {
+      return;
+    }
+    state.entries = [];
+    state.queue = [];
+    state.entryCount = 0;
+    state.collapsed = false;
+    buildConsoleDom();
+    ensureAttached();
+    window.addEventListener('error', handlers.windowError);
+    window.addEventListener('unhandledrejection', handlers.unhandledRejection);
+    state.originalError = typeof console.error === 'function' ? console.error : null;
+    console.error = function (...args) {
+      handlers.consoleError(...args);
+    };
+    state.originalWarn = typeof console.warn === 'function' ? console.warn : null;
+    console.warn = function (...args) {
+      handlers.consoleWarn(...args);
+    };
+    window.__DEV_ERROR_CONSOLE__ = true;
+  }
+
+  function teardownDom() {
+    if (state.toggleBtn) {
+      state.toggleBtn.removeEventListener('click', handlers.toggle);
+    }
+    if (state.clearBtn) {
+      state.clearBtn.removeEventListener('click', handlers.clear);
+    }
+    if (state.copyBtn) {
+      state.copyBtn.removeEventListener('click', handlers.copy);
+    }
+    if (state.root && state.root.parentNode) {
+      state.root.parentNode.removeChild(state.root);
+    }
+    state.root = null;
+    state.logList = null;
+    state.toggleBtn = null;
+    state.clearBtn = null;
+    state.copyBtn = null;
+    state.counter = null;
+    state.attached = false;
+    if (state.domReadyListener) {
+      document.removeEventListener('DOMContentLoaded', state.domReadyListener);
+      state.domReadyListener = null;
+    }
+  }
+
+  function unmountConsole() {
+    if (!state.root && !state.attached) {
+      window.__DEV_ERROR_CONSOLE__ = false;
+      return;
+    }
+    teardownDom();
+    if (state.copyResetTimer) {
+      clearTimeout(state.copyResetTimer);
+      state.copyResetTimer = null;
+    }
+    state.entries = [];
+    state.queue = [];
+    state.entryCount = 0;
+    state.collapsed = false;
+    window.removeEventListener('error', handlers.windowError);
+    window.removeEventListener('unhandledrejection', handlers.unhandledRejection);
+    if (state.originalError !== null) {
+      console.error = state.originalError;
+      state.originalError = null;
+    }
+    if (state.originalWarn !== null) {
+      console.warn = state.originalWarn;
+      state.originalWarn = null;
+    }
+    window.__DEV_ERROR_CONSOLE__ = false;
+  }
+
+  function enable() {
+    writeStored(true);
+    mountConsole();
+  }
+
+  function disable() {
+    writeStored(false);
+    unmountConsole();
+  }
+
+  function setEnabled(value) {
+    if (value) {
+      enable();
+    } else {
+      disable();
+    }
+  }
+
+  function isEnabled() {
+    return readStored();
+  }
+
+  function isActive() {
+    return Boolean(state.root);
+  }
+
+  const manager = { enable, disable, setEnabled, isEnabled, isActive };
+  window.r3ntDevConsole = manager;
+  window[MANAGER_KEY] = manager;
+
+  if (isEnabled()) {
+    enable();
+  } else {
+    window.__DEV_ERROR_CONSOLE__ = false;
+  }
 })();
