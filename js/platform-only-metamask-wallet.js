@@ -1,7 +1,12 @@
 // wallet.js - shared wallet helpers for SQMU widgets
 // This module relies on ethers.js and MetaMask SDK loaded via CDN.
 
-const MMSDK = new MetaMaskSDK.MetaMaskSDK({
+const metaMaskNamespace = window.MetaMaskSDK;
+if (!metaMaskNamespace || !metaMaskNamespace.MetaMaskSDK) {
+  throw new Error('MetaMask SDK not found. Ensure the UMD bundle is loaded before wallet helpers.');
+}
+
+const MMSDK = new metaMaskNamespace.MetaMaskSDK({
   dappMetadata: { name: 'SQMU Wallet', url: window.location.href },
   infuraAPIKey: '822e08935dea4fb48f668ff353ac863a',
 });
