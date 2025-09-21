@@ -10,6 +10,9 @@
       --accent:#1f6feb; --accent-ink:#ffffff; --success:#10b981; --danger:#dc2626;
     }
     body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; max-width: 720px; margin:0 auto; padding:24px 16px 64px; background:var(--bg); color:var(--fg); }
+    header { margin-bottom: 16px; }
+    .brand { font-weight: 800; letter-spacing: .3px; font-size: 1.3rem; }
+    .beta-note { font-size: .9rem; margin: -12px 0 16px; }
     nav { margin-bottom:18px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
     nav a { color:var(--accent); text-decoration:none; font-weight:600; }
     .back-button { appearance:none; border:1px solid var(--stroke); background:#fff; color:var(--fg); padding:8px 12px; border-radius:999px; font-weight:600; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
@@ -57,6 +60,12 @@
   <script src="./js/dev-error-console.js"></script>
 </head>
 <body>
+  <header>
+    <div class="brand">r3nt by SQMU</div>
+  </header>
+
+  <div class="muted beta-note">early beta.</div>
+
   <nav>
     <button type="button" class="back-button" data-back-button hidden aria-label="Go back">
       <span aria-hidden="true">←</span>
