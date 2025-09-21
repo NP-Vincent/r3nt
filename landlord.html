@@ -111,9 +111,6 @@
     button.inline-button.location-detect { background:#6366f1; }
     .location-tip { margin-top:8px; font-size:.8rem; }
     .location-tip a { color:#1f6feb; text-decoration:underline; }
-    .geohash-region { margin-top:4px; font-size:.8rem; color:#475569; }
-    .geohash-region strong { font-weight:600; color:#0f172a; }
-    .geohash-region[data-region-state='known'] { color:#047857; }
     footer { margin-top:32px; padding-top:12px; border-top:1px solid var(--stroke, #e2e8f0); font-size:.9rem; color:var(--muted, #475569); text-align:center; }
   </style>
   <script src="./js/dev-settings.js"></script>
@@ -217,7 +214,6 @@
           <span class="field-title">GeoHash</span>
           <span class="field-hint">We derive this automatically. Paste one to update the coordinates.</span>
           <input id="geohash" placeholder="thrr3sq" autocapitalize="off" spellcheck="false">
-          <div class="geohash-region" id="geohashRegion" aria-live="polite"><strong>Region:</strong> —</div>
         </div>
       </label>
     </div>

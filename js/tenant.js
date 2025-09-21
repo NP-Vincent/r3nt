@@ -2,7 +2,6 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './tools.js';
-import { lookupRegionForGeohash } from './georegions.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
 import {
@@ -573,7 +572,6 @@ async function fetchListingInfo(listingAddr){
     );
     let lat = null;
     let lon = null;
-    const region = lookupRegionForGeohash(geohash);
     if (geohash) {
       try {
         const coords = geohashToLatLon(geohash);
@@ -601,7 +599,6 @@ async function fetchListingInfo(listingAddr){
       geohashPrecision,
       lat,
       lon,
-      region,
       landlord,
     };
   } catch (err) {
@@ -665,13 +662,6 @@ function renderListingCard(info){
       label.textContent = 'Location: —';
     }
     geoLine.appendChild(label);
-
-    if (info.region) {
-      const regionTag = document.createElement('span');
-      regionTag.className = 'geo-region-tag';
-      regionTag.textContent = info.region;
-      geoLine.appendChild(regionTag);
-    }
 
     if (preciseCoords) {
       const copyBtn = document.createElement('button');
