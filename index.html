@@ -44,8 +44,12 @@
     .btn.primary{background:var(--cta);color:var(--cta-ink);border-color:transparent}
     .btn.secondary{background:#eef2ff;color:#3730a3;border-color:transparent}
     .btn.outline{background:transparent;color:var(--primary);}
-    nav{margin-bottom:16px}
-    nav a{margin-right:10px;color:var(--primary);font-weight:600;text-decoration:none}
+    nav{margin-bottom:16px;display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+    nav a{color:var(--primary);font-weight:600;text-decoration:none}
+    .back-button{appearance:none;border:1px solid var(--stroke);background:#fff;color:var(--fg);padding:8px 12px;border-radius:999px;font-weight:600;display:inline-flex;align-items:center;gap:6px;cursor:pointer;}
+    .back-button span{font-size:1rem;line-height:1;}
+    .back-button[hidden]{display:none;}
+    .back-button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
     .version-badge{display:inline-block;margin-left:8px;padding:2px 6px;border-radius:8px;font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;background:#e2e8f0;color:#475569}
     section{margin-top:28px;padding-top:8px}
     h2{font-size:1.15rem;margin:0 0 8px}
@@ -81,6 +85,10 @@
     <div class="muted beta-note">early beta — under development.</div>
 
     <nav>
+      <button type="button" class="back-button" data-back-button hidden aria-label="Go back">
+        <span aria-hidden="true">←</span>
+        Back
+      </button>
       <a href="./index.html">Home</a>
       <a href="./tenant.html">Tenant</a>
       <a href="./landlord.html">Landlord</a>
@@ -222,11 +230,16 @@
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { APP_VERSION } from './js/config.js';
+    import createBackController from './js/back-navigation.js';
 
     const applyVersionBadge = () => {
       const badge = document.querySelector('[data-version]');
       if (badge) badge.textContent = `Build ${APP_VERSION}`;
     };
+
+    const backButton = document.querySelector('[data-back-button]');
+    const backController = createBackController({ sdk, button: backButton });
+    backController.update();
 
     const setupRoleSelector = () => {
       const buttons = Array.from(document.querySelectorAll('[data-role-button]'));

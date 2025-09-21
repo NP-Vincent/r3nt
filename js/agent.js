@@ -10,6 +10,7 @@ import {
   R3NT_ADDRESS,
   APP_VERSION,
 } from './config.js';
+import createBackController from './back-navigation.js';
 
 const ARBITRUM_HEX = '0xa4b1';
 const USDC_DECIMALS = 6;
@@ -63,6 +64,10 @@ if (els.fundraisingPeriod && !els.fundraisingPeriod.value) {
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 let provider;
 const state = { account: null, agent: null, data: null };
+const backButton = document.querySelector('[data-back-button]');
+const backController = createBackController({ sdk, button: backButton });
+let agentViewBackEntry = null;
+backController.update();
 
 function setStatus(message) {
   if (els.status) {
@@ -200,6 +205,27 @@ function toggleSection(element, show) {
   } else {
     element.setAttribute('hidden', '');
   }
+}
+
+function resetAgentView() {
+  state.agent = null;
+  state.data = null;
+  toggleSection(els.overviewCard, false);
+  toggleSection(els.fundraisingCard, false);
+  toggleSection(els.rentCard, false);
+  toggleSection(els.subBookingsCard, false);
+  if (els.overview) {
+    els.overview.innerHTML = '';
+  }
+  if (els.rentMetrics) {
+    els.rentMetrics.innerHTML = '';
+  }
+  if (els.subBookingsList) {
+    els.subBookingsList.innerHTML = '';
+  }
+  setStatus('Connect your wallet and load an agent to begin.');
+  backController.reset({ skipHandlers: true });
+  backController.update();
 }
 
 function renderAgentOverview(data) {
@@ -537,6 +563,15 @@ async function loadAgentData(address) {
     renderRentMetrics(data);
     renderSubBookings(subBookings);
     updateFundraisingForm(data);
+    if (!agentViewBackEntry) {
+      agentViewBackEntry = backController.push({
+        onPop: () => {
+          agentViewBackEntry = null;
+          resetAgentView();
+        },
+      });
+    }
+    backController.update();
   } catch (err) {
     console.error('Failed to load agent data', err);
     state.data = null;
@@ -546,6 +581,11 @@ async function loadAgentData(address) {
     toggleSection(els.fundraisingCard, false);
     toggleSection(els.rentCard, false);
     toggleSection(els.subBookingsCard, false);
+    if (agentViewBackEntry) {
+      agentViewBackEntry = null;
+      backController.reset({ skipHandlers: true });
+    }
+    backController.update();
   }
 }
 

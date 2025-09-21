@@ -3,6 +3,7 @@ import { createPublicClient, http, encodeFunctionData } from 'https://esm.sh/vie
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { CHAIN_ID, RPC_URL, PLATFORM_ADDRESS, PLATFORM_ABI, LISTING_ABI, APP_VERSION } from './config.js';
 import { notify, mountNotificationCenter } from './notifications.js';
+import createBackController from './back-navigation.js';
 
 const CHAIN_ID_HEX = '0x' + CHAIN_ID.toString(16);
 const STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
@@ -21,6 +22,10 @@ const els = {
 };
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'admin' });
+
+const backButton = document.querySelector('[data-back-button]');
+const backController = createBackController({ sdk, button: backButton });
+backController.update();
 
 function setStatus(message) {
   if (els.status) {

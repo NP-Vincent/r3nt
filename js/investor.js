@@ -11,6 +11,7 @@ import {
   R3NT_ABI,
   APP_VERSION,
 } from './config.js';
+import createBackController from './back-navigation.js';
 
 const ARBITRUM_HEX = '0xa4b1';
 const USDC_SCALAR = 1_000_000n;
@@ -29,6 +30,9 @@ mountNotificationCenter(document.getElementById('notificationTray'), { role: 'in
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 let provider;
 const state = { account: null, holdings: [] };
+const backButton = document.querySelector('[data-back-button]');
+const backController = createBackController({ sdk, button: backButton });
+backController.update();
 
 function isHexAddress(value) {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value);

@@ -3,6 +3,7 @@ import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './tools.js';
 import { notify, mountNotificationCenter } from './notifications.js';
+import createBackController from './back-navigation.js';
 import {
   RPC_URL,
   REGISTRY_ADDRESS,
@@ -50,6 +51,11 @@ let viewPassRequired = false;
 let hasActiveViewPass = false;
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
+
+const backButton = document.querySelector('[data-back-button]');
+const backController = createBackController({ sdk, button: backButton });
+let selectionBackEntry = null;
+backController.update();
 
 if (els.period && !els.period.value) {
   els.period.value = 'month';
@@ -334,7 +340,7 @@ function updateSummary() {
   }
 }
 
-function clearSelection() {
+function clearSelection(options = {}) {
   if (selectedCard) {
     selectedCard.classList.remove('selected');
   }
@@ -342,6 +348,11 @@ function clearSelection() {
   selectedListing = null;
   selectedListingTitle = '';
   updateSummary();
+  if (!options.fromBack && selectionBackEntry) {
+    selectionBackEntry = null;
+    backController.reset({ skipHandlers: true });
+  }
+  backController.update();
 }
 
 function setSelectedListing(info, card) {
@@ -365,6 +376,15 @@ function setSelectedListing(info, card) {
   if (!alreadySelected) {
     notify({ message: `Planning stay at ${selectedListingTitle}`, variant: 'info', role: 'tenant', timeout: 4200 });
   }
+  if (!selectionBackEntry) {
+    selectionBackEntry = backController.push({
+      onPop: () => {
+        selectionBackEntry = null;
+        clearSelection({ fromBack: true });
+      },
+    });
+  }
+  backController.update();
 }
 
 function updateBuyLabel() {
