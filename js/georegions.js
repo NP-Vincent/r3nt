@@ -13,7 +13,7 @@ const GEOHASH_REGION_PREFIXES = Object.freeze({
   
   // UAE
   thrr: 'Dubai',
-  thrs: 'Ras Al Khaimah',
+  thxf: 'Ras Al Khaimah',
   thes: 'Abu Dhabi',
   ther: 'Al Ain - Abu Dhabi',
   thrt: 'Hatta - Dubai',
