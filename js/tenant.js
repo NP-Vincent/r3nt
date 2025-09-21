@@ -2,6 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './tools.js';
+import { lookupRegionForGeohash } from './georegions.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
 import {
@@ -572,6 +573,7 @@ async function fetchListingInfo(listingAddr){
     );
     let lat = null;
     let lon = null;
+    const region = lookupRegionForGeohash(geohash);
     if (geohash) {
       try {
         const coords = geohashToLatLon(geohash);
@@ -599,6 +601,7 @@ async function fetchListingInfo(listingAddr){
       geohashPrecision,
       lat,
       lon,
+      region,
       landlord,
     };
   } catch (err) {
@@ -650,13 +653,66 @@ function renderListingCard(info){
 
   if (info.geohash) {
     const geoLine = document.createElement('div');
+    geoLine.className = 'listing-geo';
+    const label = document.createElement('span');
+    let preciseCoords = null;
     if (Number.isFinite(info.lat) && Number.isFinite(info.lon)) {
       const latText = info.lat.toFixed(5);
       const lonText = info.lon.toFixed(5);
-      geoLine.textContent = `Location: ${latText}°, ${lonText}°`;
+      preciseCoords = `${info.lat.toFixed(6)},${info.lon.toFixed(6)}`;
+      label.textContent = `Location: ${latText}°, ${lonText}°`;
     } else {
-      geoLine.textContent = 'Location: —';
+      label.textContent = 'Location: —';
     }
+    geoLine.appendChild(label);
+
+    if (info.region) {
+      const regionTag = document.createElement('span');
+      regionTag.className = 'geo-region-tag';
+      regionTag.textContent = info.region;
+      geoLine.appendChild(regionTag);
+    }
+
+    if (preciseCoords) {
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'inline-button geo-copy-button';
+      copyBtn.textContent = 'Copy';
+      if (navigator?.clipboard?.writeText) {
+        copyBtn.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(preciseCoords);
+            notify({
+              message: 'Coordinates copied to clipboard.',
+              variant: 'success',
+              role: 'tenant',
+              timeout: 4000,
+            });
+          } catch (err) {
+            console.error('Failed to copy coordinates', err);
+            notify({
+              message: 'Unable to copy coordinates.',
+              variant: 'error',
+              role: 'tenant',
+              timeout: 5000,
+            });
+          }
+        };
+      } else {
+        copyBtn.disabled = true;
+        copyBtn.title = 'Clipboard unavailable';
+      }
+      geoLine.appendChild(copyBtn);
+
+      const mapLink = document.createElement('a');
+      mapLink.href = `geo:${preciseCoords}`;
+      mapLink.target = '_blank';
+      mapLink.rel = 'noopener';
+      mapLink.className = 'geo-map-link';
+      mapLink.textContent = 'Open map';
+      geoLine.appendChild(mapLink);
+    }
+
     card.appendChild(geoLine);
   }
 
