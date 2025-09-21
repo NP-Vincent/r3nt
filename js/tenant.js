@@ -705,7 +705,7 @@ function renderListingCard(info){
       geoLine.appendChild(copyBtn);
 
       const mapLink = document.createElement('a');
-      mapLink.href = `geo:${preciseCoords}`;
+      mapLink.href = `https://www.google.com/maps/search/?api=1&query=${preciseCoords}`;
       mapLink.target = '_blank';
       mapLink.rel = 'noopener';
       mapLink.className = 'geo-map-link';
