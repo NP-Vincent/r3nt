@@ -3,7 +3,6 @@ import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, e
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
 import { notify, mountNotificationCenter } from './notifications.js';
-import { lookupRegionForGeohash } from './georegions.js';
 import {
   PLATFORM_ADDRESS,
   PLATFORM_ABI,
@@ -40,7 +39,6 @@ const els = {
   lat: document.getElementById('lat'),
   lon: document.getElementById('lon'),
   geohash: document.getElementById('geohash'),
-  geohashRegion: document.getElementById('geohashRegion'),
   useLocation: document.getElementById('useLocation'),
   title: document.getElementById('title'),
   shortDesc: document.getElementById('shortDesc'),
@@ -123,7 +121,6 @@ if (els.geohash) {
     handleGeohashInput();
     updateGeohashFromLatLon();
   });
-  updateGeohashRegionDisplay(els.geohash.value);
 }
 initGeolocationButton();
 
@@ -313,29 +310,6 @@ function disableWhile(el, fn) {
   })();
 }
 
-function updateGeohashRegionDisplay(value) {
-  const target = els.geohashRegion;
-  if (!target) return;
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  const region = lookupRegionForGeohash(normalized);
-  let label = target.querySelector('strong');
-  if (!label) {
-    label = document.createElement('strong');
-    label.textContent = 'Region:';
-    target.textContent = '';
-    target.appendChild(label);
-  } else {
-    label.textContent = 'Region:';
-  }
-  const textValue = region || '—';
-  if (label.nextSibling) {
-    label.nextSibling.textContent = ` ${textValue}`;
-  } else {
-    target.appendChild(document.createTextNode(` ${textValue}`));
-  }
-  target.dataset.regionState = region ? 'known' : 'unknown';
-}
-
 function updateGeohashFromLatLon() {
   if (!els.lat || !els.lon) return;
   if (locationUpdateSource === 'geohash') return;
@@ -346,7 +320,6 @@ function updateGeohashFromLatLon() {
     if (els.geohash && locationUpdateSource !== 'geohash') {
       els.geohash.value = '';
     }
-    updateGeohashRegionDisplay('');
     return;
   }
 
@@ -358,9 +331,7 @@ function updateGeohashFromLatLon() {
       els.geohash.value = geohash;
       locationUpdateSource = null;
     }
-    updateGeohashRegionDisplay(geohash);
   } catch {
-    updateGeohashRegionDisplay('');
   }
 }
 
@@ -374,11 +345,9 @@ function handleGeohashInput() {
   }
 
   if (!raw) {
-    updateGeohashRegionDisplay('');
     return;
   }
 
-  updateGeohashRegionDisplay(raw);
   if (locationUpdateSource === 'latlon') return;
 
   try {
