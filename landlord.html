@@ -24,6 +24,9 @@
   <style>
     :root { --fg:#0f172a; --bg:#ffffff; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 16px 16px 40px; background: var(--bg); color: var(--fg); }
+    header { margin-bottom: 16px; }
+    .brand { font-weight: 800; letter-spacing: .3px; font-size: 1.3rem; }
+    .beta-note { font-size: .9rem; margin: -12px 0 16px; }
     h1 { font-size: 1.25rem; margin: 8px 0 12px; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; }
     label { display: block; font-size: .9rem; margin: 10px 0 6px; }
@@ -107,6 +110,12 @@
   <script src="./js/dev-error-console.js"></script>
 </head>
 <body>
+  <header>
+    <div class="brand">r3nt by SQMU</div>
+  </header>
+
+  <div class="muted beta-note">early beta.</div>
+
   <nav>
     <button type="button" class="back-button" data-back-button hidden aria-label="Go back">
       <span aria-hidden="true">←</span>
