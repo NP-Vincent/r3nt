@@ -26,9 +26,11 @@ const ownerOnlyNodes = document.querySelectorAll('[data-owner-only]');
 const devConsoleStatusEl = document.getElementById('devConsoleStatus');
 const toggleDevConsoleBtn = document.getElementById('toggleDevConsoleBtn');
 
+const OWNER_REQUIREMENT_MESSAGE = 'Connect the platform owner wallet to unlock controls.';
+
 let ownerAddress = null;
 let ownerAddressPromise = null;
-let ownerRequirementMessage = 'Connect the platform owner wallet to unlock controls.';
+let ownerRequirementMessage = OWNER_REQUIREMENT_MESSAGE;
 let ownerAccessGranted = false;
 
 if (toggleDevConsoleBtn) {
@@ -78,7 +80,7 @@ async function loadOwnerAddress() {
       .then((address) => utils.getAddress(address))
       .then((normalized) => {
         ownerAddress = normalized;
-        ownerRequirementMessage = `Connect the platform owner wallet (${normalized}) to unlock controls.`;
+        ownerRequirementMessage = OWNER_REQUIREMENT_MESSAGE;
         resetOwnerGuardMessage();
         return normalized;
       })
@@ -485,7 +487,8 @@ connectBtn.addEventListener('click', async () => {
       signer = null;
       connectedAccountEl.textContent = `Connected as ${normalizedAccount} (not owner)`;
       if (ownerGuardMessageEl) {
-        ownerGuardMessageEl.textContent = `Connected wallet (${normalizedAccount}) is not the platform owner (${owner}). Disconnect and switch wallets.`;
+        ownerGuardMessageEl.textContent =
+          'Connected wallet is not authorized for platform owner controls. Disconnect and switch wallets.';
       }
       setOwnerControlsEnabled(false);
       enableForms(false);
