@@ -56,6 +56,7 @@
     .info-dot { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:#e0f2fe; color:#0369a1; font-size:.75rem; margin-left:6px; }
     .card.selected { border-color:#3b82f6; box-shadow:0 8px 20px rgba(59,130,246,0.18); }
     .listing-actions { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+    footer { margin-top:32px; padding-top:12px; border-top:1px solid var(--stroke, #e2e8f0); font-size:.9rem; color:var(--muted, #475569); text-align:center; }
     @media (min-width: 640px) {
       .planner-grid { grid-template-columns: 1fr 1fr; }
       button { width:auto; }
@@ -123,6 +124,9 @@
   </div>
   <h2>Listings</h2>
   <div id="listings"></div>
+  <footer>
+    r3nt by SQMU. USDC. Arbitrum.
+  </footer>
   <script type="module" src="./js/tenant.js"></script>
 </body>
 </html>
