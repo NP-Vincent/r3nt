@@ -252,7 +252,7 @@ function updateSummary() {
   setText(summary.nights, '—');
   setText(summary.deposit, listing ? (depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : 'No deposit') : '—');
   setText(summary.rent, listing ? '0 USDC' : '—');
-  setText(summary.installment, listing ? 'Choose cadence' : '—');
+  setText(summary.installment, listing ? 'Select how often to pay rent' : '—');
   setText(summary.total, listing ? (depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : '0 USDC') : '—');
   setText(summary.notice, listing ? 'Select stay dates to continue.' : 'Pick a property to enable booking.');
 
@@ -292,7 +292,7 @@ function updateSummary() {
   const periodKey = els.period?.value || '';
   const selectedPeriod = PERIOD_OPTIONS[periodKey];
   if (!selectedPeriod) {
-    setText(summary.notice, 'Pick a rent payment cadence.');
+    setText(summary.notice, "Pick how often you'll pay rent.");
     return;
   }
 
@@ -314,7 +314,7 @@ function updateSummary() {
     summary.installment,
     installmentCap > 0n
       ? `${selectedPeriod.label} up to ${formatUsdc(installmentCap)} USDC`
-      : `${selectedPeriod.label} cadence`
+      : `${selectedPeriod.label} payments`
   );
 
   setText(summary.total, depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : '0 USDC');
@@ -772,7 +772,7 @@ async function bookListing(listing = selectedListing){
     if (endTs <= startTs) throw new Error('End date must be after start.');
     const periodKey = els.period ? els.period.value : '';
     const selectedPeriod = PERIOD_OPTIONS[periodKey];
-    if (!selectedPeriod) throw new Error('Select a rent payment cadence.');
+    if (!selectedPeriod) throw new Error("Select how often you'll pay rent.");
     const nowTs = BigInt(Math.floor(Date.now() / 1000));
     if (listing.minBookingNotice > 0n && startTs < nowTs + listing.minBookingNotice) {
       throw new Error(`Start must respect the ${formatDuration(listing.minBookingNotice)} minimum notice.`);
