@@ -1,8 +1,9 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
-import { latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
+import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
 import { notify, mountNotificationCenter } from './notifications.js';
+import { lookupRegionForGeohash } from './georegions.js';
 import {
   PLATFORM_ADDRESS,
   PLATFORM_ABI,
@@ -19,12 +20,15 @@ import createBackController from './back-navigation.js';
 const ARBITRUM_HEX = '0xa4b1';
 const USDC_DECIMALS = 6;
 const USDC_SCALAR = 1_000_000n;
+const GEOHASH_PRECISION = 7;
+const MANUAL_COORDS_HINT = 'Right-click → “What’s here?” in Google Maps to copy coordinates.';
 
 const UINT64_MAX = (1n << 64n) - 1n;
 const utf8Encoder = new TextEncoder();
 let platformAbi = Array.isArray(PLATFORM_ABI) && PLATFORM_ABI.length ? PLATFORM_ABI : null;
 let listingPriceCache;
 let listingPriceLoading;
+let locationUpdateSource = null;
 
 // -------------------- UI handles --------------------
 const els = {
@@ -35,6 +39,9 @@ const els = {
   status: document.getElementById('status'),
   lat: document.getElementById('lat'),
   lon: document.getElementById('lon'),
+  geohash: document.getElementById('geohash'),
+  geohashRegion: document.getElementById('geohashRegion'),
+  useLocation: document.getElementById('useLocation'),
   title: document.getElementById('title'),
   shortDesc: document.getElementById('shortDesc'),
   deposit: document.getElementById('deposit'),
@@ -99,10 +106,26 @@ for (const key of onboardingFields) {
   const element = els[key];
   if (element) {
     element.addEventListener('input', updateOnboardingProgress);
+    if (key === 'lat' || key === 'lon') {
+      element.addEventListener('input', updateGeohashFromLatLon);
+      element.addEventListener('blur', updateGeohashFromLatLon);
+    }
   }
 }
 
 updateOnboardingProgress();
+updateGeohashFromLatLon();
+if (els.geohash) {
+  els.geohash.addEventListener('input', () => {
+    handleGeohashInput();
+  });
+  els.geohash.addEventListener('blur', () => {
+    handleGeohashInput();
+    updateGeohashFromLatLon();
+  });
+  updateGeohashRegionDisplay(els.geohash.value);
+}
+initGeolocationButton();
 
 function formatUsdc(amount) {
   const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
@@ -288,6 +311,146 @@ function disableWhile(el, fn) {
       el.disabled = false;
     }
   })();
+}
+
+function updateGeohashRegionDisplay(value) {
+  const target = els.geohashRegion;
+  if (!target) return;
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const region = lookupRegionForGeohash(normalized);
+  let label = target.querySelector('strong');
+  if (!label) {
+    label = document.createElement('strong');
+    label.textContent = 'Region:';
+    target.textContent = '';
+    target.appendChild(label);
+  } else {
+    label.textContent = 'Region:';
+  }
+  const textValue = region || '—';
+  if (label.nextSibling) {
+    label.nextSibling.textContent = ` ${textValue}`;
+  } else {
+    target.appendChild(document.createTextNode(` ${textValue}`));
+  }
+  target.dataset.regionState = region ? 'known' : 'unknown';
+}
+
+function updateGeohashFromLatLon() {
+  if (!els.lat || !els.lon) return;
+  if (locationUpdateSource === 'geohash') return;
+
+  const latRaw = String(els.lat.value ?? '').trim();
+  const lonRaw = String(els.lon.value ?? '').trim();
+  if (!latRaw || !lonRaw) {
+    if (els.geohash && locationUpdateSource !== 'geohash') {
+      els.geohash.value = '';
+    }
+    updateGeohashRegionDisplay('');
+    return;
+  }
+
+  try {
+    const { lat, lon } = parseLatLon(latRaw, lonRaw);
+    const geohash = latLonToGeohash(lat, lon, GEOHASH_PRECISION);
+    if (els.geohash) {
+      locationUpdateSource = 'latlon';
+      els.geohash.value = geohash;
+      locationUpdateSource = null;
+    }
+    updateGeohashRegionDisplay(geohash);
+  } catch {
+    updateGeohashRegionDisplay('');
+  }
+}
+
+function handleGeohashInput() {
+  if (!els.geohash) return;
+  const raw = String(els.geohash.value ?? '').trim().toLowerCase();
+  if (raw !== els.geohash.value) {
+    locationUpdateSource = 'geohash';
+    els.geohash.value = raw;
+    locationUpdateSource = null;
+  }
+
+  if (!raw) {
+    updateGeohashRegionDisplay('');
+    return;
+  }
+
+  updateGeohashRegionDisplay(raw);
+  if (locationUpdateSource === 'latlon') return;
+
+  try {
+    const coords = geohashToLatLon(raw);
+    if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lon)) {
+      return;
+    }
+    locationUpdateSource = 'geohash';
+    els.lat.value = coords.lat.toFixed(6);
+    els.lon.value = coords.lon.toFixed(6);
+    locationUpdateSource = null;
+    updateOnboardingProgress();
+  } catch (err) {
+    console.warn('Invalid geohash input', raw, err);
+  }
+}
+
+function initGeolocationButton() {
+  const button = els.useLocation;
+  if (!button) return;
+  if (!navigator?.geolocation) {
+    button.disabled = true;
+    button.title = 'Geolocation is not supported in this browser.';
+    return;
+  }
+
+  button.disabled = false;
+  button.title = 'Detect your current location.';
+  button.onclick = () =>
+    disableWhile(button, async () => {
+      info('Detecting your current location…');
+      notify({
+        message: 'Detecting your current location…',
+        variant: 'info',
+        role: 'landlord',
+        timeout: 4000,
+      });
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10_000,
+            maximumAge: 60_000,
+          });
+        });
+        const { latitude, longitude } = position?.coords || {};
+        const latNum = Number(latitude);
+        const lonNum = Number(longitude);
+        assertLatLon(latNum, lonNum);
+        els.lat.value = latNum.toFixed(6);
+        els.lon.value = lonNum.toFixed(6);
+        updateGeohashFromLatLon();
+        updateOnboardingProgress();
+        info('Location detected from your browser.');
+        notify({
+          message: 'Detected your current location — confirm before publishing.',
+          variant: 'success',
+          role: 'landlord',
+          timeout: 5000,
+        });
+      } catch (err) {
+        console.error('Geolocation lookup failed', err);
+        const fallback = `Enter coordinates manually (tip: ${MANUAL_COORDS_HINT})`;
+        info(`Unable to detect location. ${fallback}`);
+        notify({
+          message: `Unable to detect location. ${fallback}`,
+          variant: 'warning',
+          role: 'landlord',
+          timeout: 6000,
+        });
+      }
+    });
 }
 
 function evaluateOnboardingSteps() {
@@ -821,7 +984,7 @@ els.create.onclick = () =>
       const rateMonthly = parseOptionalDec6(els.rateMonthly.value);
 
       const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
-      const geohashStr = latLonToGeohash(lat, lon, 7);
+      const geohashStr = latLonToGeohash(lat, lon, GEOHASH_PRECISION);
       const geolen = geohashStr.length;
       const areaSqm = parseAreaSqm(els.areaSqm.value);
       const minBookingNotice = parseHoursToSeconds(els.minNotice.value);
