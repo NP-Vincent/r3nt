@@ -699,7 +699,7 @@ if (els.fundraisingForm) {
       feeBps = parseBpsInput(els.fundraisingFee?.value, 'Fundraising fee');
       periodValue = Number((els.fundraisingPeriod?.value ?? '').trim() || '3');
       if (!Number.isInteger(periodValue) || periodValue <= 0) {
-        throw new Error('Select a rent cadence.');
+        throw new Error('Select how often rent is paid.');
       }
     } catch (err) {
       console.error('Fundraising input error', err);
