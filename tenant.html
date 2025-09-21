@@ -19,8 +19,12 @@
     #listings { margin-top: 20px; }
     .card { border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px; }
     .row { display:flex; gap:8px; }
-    nav { margin-bottom:16px; }
-    nav a { margin-right:10px; color:#1f6feb; text-decoration:none; font-weight:600; }
+    nav { margin-bottom:16px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+    nav a { color:#1f6feb; text-decoration:none; font-weight:600; }
+    .back-button { appearance:none; border:1px solid #d0d7de; background:#fff; color:#1f2937; padding:8px 12px; border-radius:999px; font-weight:600; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+    .back-button span { font-size:1rem; line-height:1; }
+    .back-button[hidden] { display:none; }
+    .back-button:focus-visible { outline:2px solid #1f6feb; outline-offset:2px; }
     .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
     select { width:100%; padding:6px; margin:4px 0 8px; }
     a.listing-link { display:inline-block; margin-top:8px; color:#1f6feb; font-weight:600; text-decoration:none; }
@@ -61,6 +65,10 @@
 </head>
 <body>
   <nav>
+    <button type="button" class="back-button" data-back-button hidden aria-label="Go back">
+      <span aria-hidden="true">←</span>
+      Back
+    </button>
     <a href="./index.html">Home</a>
     <a href="./tenant.html">Tenant</a>
     <a href="./landlord.html">Landlord</a>

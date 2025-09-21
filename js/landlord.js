@@ -13,6 +13,7 @@ import {
   APP_VERSION,
   USDC_ADDRESS,
 } from './config.js';
+import createBackController from './back-navigation.js';
 
 // -------------------- Config --------------------
 const ARBITRUM_HEX = '0xa4b1';
@@ -51,6 +52,10 @@ const els = {
 const info = (t) => (els.status.textContent = t);
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'landlord' });
+
+const backButton = document.querySelector('[data-back-button]');
+const backController = createBackController({ sdk, button: backButton });
+backController.update();
 
 const checklistItems = {
   basics: document.querySelector('[data-check="basics"]'),
