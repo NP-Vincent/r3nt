@@ -87,6 +87,20 @@
     .guided-section { border:1px solid #e2e8f0; border-radius:16px; background:#fff; padding:16px; margin-top:18px; }
     .guided-section h3 { margin:0 0 6px; font-size:1.05rem; }
     .guided-section p.section-subtext { margin:0 0 12px; font-size:.85rem; color:#64748b; }
+    .field-grid { display:grid; gap:12px; margin-top:12px; }
+    .field-grid.columns-2 { grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); }
+    .field-grid.columns-3 { grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); }
+    .field-option { display:flex; align-items:flex-start; gap:12px; padding:12px 14px; border:1px solid #e2e8f0; border-radius:14px; background:#fff; transition:border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+    .field-option .status-dot { margin-top:6px; background:#cbd5f5; }
+    .field-option:focus-within { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.12); background:#f8fafc; }
+    .field-option:focus-within .status-dot { background:#2563eb; }
+    .field-content { display:flex; flex-direction:column; gap:8px; flex:1; }
+    .field-title { font-weight:600; font-size:.95rem; color:#0f172a; }
+    .field-hint { font-size:.8rem; color:#64748b; line-height:1.4; }
+    .field-option input,
+    .field-option select { width:100%; padding:10px 12px; border:1px solid #d0d7de; border-radius:10px; font-size:.95rem; background:#f8fafc; color:#0f172a; transition:border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+    .field-option input:focus,
+    .field-option select:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,0.12); background:#fff; }
     footer { margin-top:32px; padding-top:12px; border-top:1px solid var(--stroke, #e2e8f0); font-size:.9rem; color:var(--muted, #475569); text-align:center; }
   </style>
   <script src="./js/dev-settings.js"></script>
@@ -155,45 +169,92 @@
   <div class="guided-section">
     <h3>1. Property basics</h3>
     <p class="section-subtext">We use these details to generate your Farcaster cast and metadata.</p>
-    <div class="row">
-      <label>Latitude
-        <input id="lat" placeholder="25.2048" inputmode="decimal">
+    <div class="field-grid columns-2">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Latitude</span>
+          <span class="field-hint">Decimal degrees, e.g. 25.2048</span>
+          <input id="lat" placeholder="25.2048" inputmode="decimal">
+        </div>
       </label>
-      <label>Longitude
-        <input id="lon" placeholder="55.2708" inputmode="decimal">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Longitude</span>
+          <span class="field-hint">Decimal degrees, e.g. 55.2708</span>
+          <input id="lon" placeholder="55.2708" inputmode="decimal">
+        </div>
       </label>
     </div>
     <div class="muted"><small>We derive a GeoHash locally from these coordinates.</small></div>
 
-    <label>Title (max 64 chars)
-      <input id="title" maxlength="64" placeholder="Cozy studio near metro">
-    </label>
+    <div class="field-grid">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Title (max 64 chars)</span>
+          <span class="field-hint">Appears as the property headline inside your cast.</span>
+          <input id="title" maxlength="64" placeholder="Cozy studio near metro">
+        </div>
+      </label>
 
-    <label>Short description (max 140 chars)
-      <input id="shortDesc" maxlength="140" placeholder="Furnished, walk to metro, fast Wi‑Fi">
-    </label>
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Short description (max 140 chars)</span>
+          <span class="field-hint">Short summary shown on previews and share cards.</span>
+          <input id="shortDesc" maxlength="140" placeholder="Furnished, walk to metro, fast Wi‑Fi">
+        </div>
+      </label>
+    </div>
   </div>
 
   <div class="guided-section">
     <h3>2. Pricing & size</h3>
     <p class="section-subtext">Share the deposit, footprint and daily/weekly/monthly rates you want to accept.</p>
-    <div class="row">
-      <label>Deposit (USDC)
-        <input id="deposit" placeholder="100.00" inputmode="decimal">
+    <div class="field-grid columns-2">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Deposit (USDC)</span>
+          <span class="field-hint">Escrowed upfront and released after platform approval.</span>
+          <input id="deposit" placeholder="100.00" inputmode="decimal">
+        </div>
       </label>
-      <label>Property size (m²)
-        <input id="areaSqm" placeholder="85" inputmode="numeric">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Property size (m²)</span>
+          <span class="field-hint">Square metre footprint used when tokenising bookings.</span>
+          <input id="areaSqm" placeholder="85" inputmode="numeric">
+        </div>
       </label>
     </div>
-    <div class="row">
-      <label>Daily (USDC)
-        <input id="rateDaily"  value="0" inputmode="decimal">
+    <div class="field-grid columns-3">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Daily (USDC)</span>
+          <span class="field-hint">Enter 0 to disable daily pricing.</span>
+          <input id="rateDaily"  value="0" inputmode="decimal">
+        </div>
       </label>
-      <label>Weekly (USDC)
-        <input id="rateWeekly" value="0" inputmode="decimal">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Weekly (USDC)</span>
+          <span class="field-hint">Enter 0 to disable weekly pricing.</span>
+          <input id="rateWeekly" value="0" inputmode="decimal">
+        </div>
       </label>
-      <label>Monthly (USDC)
-        <input id="rateMonthly" value="0" inputmode="decimal">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Monthly (USDC)</span>
+          <span class="field-hint">Enter 0 to disable monthly pricing.</span>
+          <input id="rateMonthly" value="0" inputmode="decimal">
+        </div>
       </label>
     </div>
   </div>
@@ -201,12 +262,22 @@
   <div class="guided-section">
     <h3>3. Booking policies</h3>
     <p class="section-subtext">Control how soon tenants can book and how far in advance your calendar opens.</p>
-    <div class="row">
-      <label>Min booking notice (hours)
-        <input id="minNotice" value="24" inputmode="numeric">
+    <div class="field-grid columns-2">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Min booking notice (hours)</span>
+          <span class="field-hint">Minimum time before check-in that bookings are allowed.</span>
+          <input id="minNotice" value="24" inputmode="numeric">
+        </div>
       </label>
-      <label>Booking window (days, 0 = none)
-        <input id="maxWindow" value="90" inputmode="numeric">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Booking window (days, 0 = none)</span>
+          <span class="field-hint">How far into the future tenants can reserve.</span>
+          <input id="maxWindow" value="90" inputmode="numeric">
+        </div>
       </label>
     </div>
     <div class="muted"><small>Adjust how soon and how far ahead tenants can reserve.</small></div>
@@ -215,10 +286,16 @@
   <div class="guided-section">
     <h3>4. Metadata (optional)</h3>
     <p class="section-subtext">Leave blank and we’ll generate a JSON payload with your inputs.</p>
-    <label>Metadata URL (optional)
-      <input id="metadataUrl" placeholder="https://example.com/listing.json">
-    </label>
-    <div class="muted"><small>Leave blank to auto-generate an inline JSON metadata payload.</small></div>
+    <div class="field-grid">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Metadata URL (optional)</span>
+          <span class="field-hint">Provide hosted JSON if you manage metadata externally. Leave blank and we’ll auto-generate it.</span>
+          <input id="metadataUrl" placeholder="https://example.com/listing.json">
+        </div>
+      </label>
+    </div>
   </div>
 
   <div class="muted" style="margin-top:16px;"><small class="mono">Listings deploy via the Platform contract. Your wallet address becomes the landlord.</small></div>
