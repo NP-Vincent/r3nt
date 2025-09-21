@@ -48,7 +48,11 @@ export function createBackController({ sdk = importedSdk, button, isDeep } = {})
   ensureBaseHistoryState();
 
   const update = () => {
-    const active = stack.length > 0 || Boolean(externalDepthCheck?.());
+    const internalActive = stack.length > 0 || Boolean(externalDepthCheck?.());
+    const hostNavigationAvailable = hostSupportsBack && Boolean(sdk?.back);
+    const fallbackActive = !hostNavigationAvailable && window.history.length > 1;
+    const active = internalActive || fallbackActive;
+
     if (button) {
       if (active) {
         button.removeAttribute('hidden');
@@ -56,17 +60,19 @@ export function createBackController({ sdk = importedSdk, button, isDeep } = {})
         button.setAttribute('hidden', '');
       }
     }
-    if (hostSupportsBack && sdk?.back) {
+
+    if (hostNavigationAvailable) {
       try {
-        if (active) {
-          sdk.back.show?.();
-        } else {
+        if (internalActive) {
           sdk.back.hide?.();
+        } else {
+          sdk.back.show?.();
         }
       } catch (err) {
         console.warn('Failed toggling host back affordance', err);
       }
     }
+
     return active;
   };
 
