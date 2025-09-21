@@ -6,6 +6,24 @@
   const STORAGE_KEY = 'r3nt:devConsoleEnabled';
   const MANAGER_KEY = '__R3NT_DEV_CONSOLE_MANAGER__';
 
+  function normalizeBoolean(value) {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const lowered = value.toLowerCase();
+      if (lowered === 'true') return true;
+      if (lowered === 'false') return false;
+    }
+    return null;
+  }
+
+  const settings = window.__R3NT_DEV_SETTINGS__ || {};
+  const overrideSetting = normalizeBoolean(settings.devConsoleOverride);
+  const OVERRIDE = overrideSetting === null ? null : overrideSetting;
+  const defaultSetting = normalizeBoolean(settings.devConsoleDefault);
+  const DEFAULT_ENABLED = defaultSetting === null ? false : defaultSetting;
+
   if (window[MANAGER_KEY]) {
     return;
   }
@@ -29,19 +47,35 @@
   };
 
   function readStored() {
+    if (OVERRIDE !== null) {
+      return OVERRIDE;
+    }
     try {
-      return window.localStorage.getItem(STORAGE_KEY) === '1';
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw === '1') {
+        return true;
+      }
+      if (raw === '0') {
+        return false;
+      }
+      if (raw === null) {
+        return DEFAULT_ENABLED;
+      }
+      return raw === '1';
     } catch (err) {
-      return false;
+      return DEFAULT_ENABLED;
     }
   }
 
   function writeStored(enabled) {
+    if (OVERRIDE !== null) {
+      return;
+    }
     try {
       if (enabled) {
         window.localStorage.setItem(STORAGE_KEY, '1');
       } else {
-        window.localStorage.removeItem(STORAGE_KEY);
+        window.localStorage.setItem(STORAGE_KEY, '0');
       }
     } catch (err) {
       // ignore storage errors
@@ -481,11 +515,20 @@
   }
 
   function setEnabled(value) {
+    if (OVERRIDE !== null) {
+      if (OVERRIDE) {
+        enable();
+      } else {
+        disable();
+      }
+      return OVERRIDE;
+    }
     if (value) {
       enable();
     } else {
       disable();
     }
+    return value;
   }
 
   function isEnabled() {
