@@ -2,6 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
+import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import {
   PLATFORM_ADDRESS,
@@ -1074,29 +1075,33 @@ els.create.onclick = () =>
           txHash = hash;
         }
       };
+      let walletSendUnsupported = false;
       try {
-        const result = await provider.request({ method: 'wallet_sendCalls', params: [{ calls }] });
-        recordTxHash(result);
-      } catch (err) {
-        try {
-          const result = await provider.request({ method: 'wallet_sendCalls', params: calls });
+        const { result, unsupported } = await requestWalletSendCalls(provider, {
+          calls,
+          from,
+          chainId: ARBITRUM_HEX,
+        });
+        if (!unsupported) {
           recordTxHash(result);
-        } catch (fallbackErr) {
-          try {
-            if (listingPrice > 0n && approveData) {
-              await provider.request({
-                method: 'eth_sendTransaction',
-                params: [{ from, to: USDC_ADDRESS, data: approveData }],
-              });
-            }
-            txHash = await provider.request({
-              method: 'eth_sendTransaction',
-              params: [{ from, to: PLATFORM_ADDRESS, data: createData }],
-            });
-          } catch (finalErr) {
-            throw finalErr;
-          }
+        } else {
+          walletSendUnsupported = true;
         }
+      } catch (err) {
+        throw err;
+      }
+
+      if (walletSendUnsupported) {
+        if (listingPrice > 0n && approveData) {
+          await provider.request({
+            method: 'eth_sendTransaction',
+            params: [{ from, to: USDC_ADDRESS, data: approveData }],
+          });
+        }
+        txHash = await provider.request({
+          method: 'eth_sendTransaction',
+          params: [{ from, to: PLATFORM_ADDRESS, data: createData }],
+        });
       }
 
       if (txHash) {
@@ -1107,6 +1112,12 @@ els.create.onclick = () =>
         notify({ message: 'Listing transaction submitted.', variant: 'success', role: 'landlord', timeout: 6000 });
       }
     } catch (e) {
+      if (isUserRejectedRequestError(e)) {
+        const message = 'Listing transaction cancelled by user.';
+        info(message);
+        notify({ message, variant: 'warning', role: 'landlord', timeout: 5000 });
+        return;
+      }
       info(`Error: ${e?.message || e}`);
       notify({ message: e?.message ? `Create listing failed: ${e.message}` : 'Create listing failed.', variant: 'error', role: 'landlord', timeout: 6000 });
     }

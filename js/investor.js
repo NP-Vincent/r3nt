@@ -2,6 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
+import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import {
   RPC_URL,
   PLATFORM_ADDRESS,
@@ -430,20 +431,36 @@ async function claimRent(entry, button) {
     const call = { to: entry.listingAddress, data };
     if (button) button.disabled = true;
     setStatus('Submitting claim transaction…');
+    let walletSendUnsupported = false;
     try {
-      await p.request({ method: 'wallet_sendCalls', params: [{ calls: [call] }] });
-    } catch {
-      try {
-        await p.request({ method: 'wallet_sendCalls', params: [call] });
-      } catch {
-        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: entry.listingAddress, data }] });
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls: [call],
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      walletSendUnsupported = unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        setStatus('Claim cancelled by user.');
+        notify({ message: 'Claim cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
+        return;
       }
+      throw err;
+    }
+
+    if (walletSendUnsupported) {
+      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: entry.listingAddress, data }] });
     }
     setStatus('Claim transaction sent.');
     notify({ message: 'Claim transaction sent.', variant: 'success', role: 'investor', timeout: 6000 });
     await loadInvestorData(state.account);
   } catch (err) {
     console.error('Claim failed', err);
+    if (isUserRejectedRequestError(err)) {
+      setStatus('Claim cancelled by user.');
+      notify({ message: 'Claim cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
+      return;
+    }
     setStatus(err?.message || 'Claim failed.');
     notify({ message: err?.message || 'Claim failed.', variant: 'error', role: 'investor', timeout: 6000 });
   } finally {
