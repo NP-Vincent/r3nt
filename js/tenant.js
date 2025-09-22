@@ -1557,8 +1557,8 @@ async function loadTenantBookings(account, options = {}) {
       const entry = nextResults[i];
       if (!entry || entry.status !== 'success') continue;
       const nextId = toBigInt(entry.result, 0n);
-      if (nextId <= 1n) continue;
-      for (let id = 1n; id < nextId; id += 1n) {
+      if (nextId === 0n) continue;
+      for (let id = 1n; id <= nextId; id += 1n) {
         bookingMetas.push({ listing: cleaned[i], bookingId: id });
       }
     }
