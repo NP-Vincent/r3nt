@@ -166,6 +166,52 @@ function formatTimestamp(seconds) {
   return date.toUTCString();
 }
 
+const TRACE_ID_REGEX = /trace[\s_-]*id[:\s-]*([0-9a-f-]{8,})/i;
+
+function extractTraceIdFromError(error) {
+  if (!error) return null;
+  const visited = new Set();
+  const stack = [error];
+  while (stack.length) {
+    const current = stack.pop();
+    if (current === null || current === undefined) continue;
+    if (typeof current === 'string') {
+      const match = current.match(TRACE_ID_REGEX);
+      if (match && match[1]) return match[1];
+      continue;
+    }
+    if (typeof current !== 'object') continue;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    const ownKeys = Object.getOwnPropertyNames(current);
+    for (const key of ownKeys) {
+      const value = current[key];
+      if (typeof key === 'string') {
+        const normalised = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (normalised === 'traceid' && typeof value === 'string') {
+          const trimmed = value.trim();
+          if (trimmed) return trimmed;
+        }
+      }
+      if (typeof value === 'string') {
+        const match = value.match(TRACE_ID_REGEX);
+        if (match && match[1]) return match[1];
+      } else if (value && typeof value === 'object') {
+        stack.push(value);
+      }
+    }
+  }
+  return null;
+}
+
+function logBlockaidTraceId(error) {
+  const traceId = extractTraceIdFromError(error);
+  if (traceId) {
+    console.error(`[Blockaid] Simulation trace ID: ${traceId}`);
+  }
+  return traceId;
+}
+
 function calculateRent(baseDailyRate, startTs, endTs) {
   const rate = typeof baseDailyRate === 'bigint' ? baseDailyRate : BigInt(baseDailyRate || 0);
   const start = typeof startTs === 'bigint' ? startTs : BigInt(startTs || 0);
@@ -854,11 +900,44 @@ async function bookListing(listing = selectedListing){
     const deposit = typeof listing.depositAmount === 'bigint' ? listing.depositAmount : BigInt(listing.depositAmount || 0);
     const installmentCap = calculateInstallmentCap(rent, startTs, endTs, selectedPeriod.days);
 
+    let allowance = 0n;
+    let allowanceFetched = false;
+    if (deposit > 0n) {
+      try {
+        const result = await pub.readContract({
+          address: USDC_ADDRESS,
+          abi: erc20Abi,
+          functionName: 'allowance',
+          args: [from, listing.address],
+        });
+        if (typeof result === 'bigint') {
+          allowance = result;
+          allowanceFetched = true;
+        } else if (typeof result === 'number') {
+          allowance = BigInt(result);
+          allowanceFetched = true;
+        } else if (typeof result === 'string' && result) {
+          allowance = BigInt(result);
+          allowanceFetched = true;
+        }
+      } catch (err) {
+        console.error('Failed to check USDC allowance before booking', err);
+      }
+    }
+
+    const hasAllowanceCoverage = allowanceFetched && allowance > 0n && allowance >= deposit;
+    const needsApproval = deposit > 0n && !hasAllowanceCoverage;
+
     const calls = [];
     let approveData;
-    if (deposit > 0n) {
+    if (needsApproval) {
       approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [listing.address, deposit] });
       calls.push({ to: USDC_ADDRESS, data: approveData });
+    } else if (hasAllowanceCoverage) {
+      console.info('Skipping USDC approval — allowance already covers deposit.', {
+        allowance,
+        deposit,
+      });
     }
 
     const bookData = encodeFunctionData({
@@ -877,11 +956,15 @@ async function bookListing(listing = selectedListing){
 
     try {
       await p.request({ method: 'wallet_sendCalls', params: [{ calls }] });
-    } catch {
+    } catch (err) {
+      console.error('wallet_sendCalls failed during booking (batched payload).', err);
+      logBlockaidTraceId(err);
       try {
         await p.request({ method: 'wallet_sendCalls', params: calls });
-      } catch {
-        if (deposit > 0n && approveData) {
+      } catch (err2) {
+        console.error('wallet_sendCalls failed during booking (flat payload).', err2);
+        logBlockaidTraceId(err2);
+        if (needsApproval && approveData) {
           await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
         }
         await p.request({ method: 'eth_sendTransaction', params: [{ from, to: listing.address, data: bookData }] });
@@ -893,6 +976,7 @@ async function bookListing(listing = selectedListing){
     updateSummary();
   } catch (e) {
     console.error(e);
+    logBlockaidTraceId(e);
     const message = e?.message || e;
     els.status.textContent = `Error: ${message}`;
     notify({ message: message ? `Booking failed: ${message}` : 'Booking failed.', variant: 'error', role: 'tenant', timeout: 6000 });
