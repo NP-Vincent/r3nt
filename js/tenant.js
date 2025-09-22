@@ -99,6 +99,36 @@ const supportsViewPassPurchase = PLATFORM_ABI.some(
   (item) => item?.type === 'function' && item?.name === 'buyViewPass'
 );
 
+function isUserRejectedRequestError(error) {
+  if (!error) return false;
+  const code = Number(error.code);
+  if (Number.isFinite(code) && code === 4001) return true;
+  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+  if (!message) return false;
+  return (
+    message.includes('user rejected') ||
+    message.includes('user denied') ||
+    message.includes('request rejected') ||
+    message.includes('denied transaction') ||
+    message.includes('transaction rejected')
+  );
+}
+
+function isMethodNotFoundError(error) {
+  if (!error) return false;
+  const code = Number(error.code);
+  if (Number.isFinite(code) && code === -32601) return true;
+  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+  if (!message) return false;
+  if (!message.includes('wallet_sendcalls')) return false;
+  return (
+    message.includes('not found') ||
+    message.includes('does not exist') ||
+    message.includes('not supported') ||
+    message.includes('unsupported')
+  );
+}
+
 function formatUsdc(amount) {
   const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
   const negative = value < 0n;
@@ -880,11 +910,18 @@ async function bookListing(listing = selectedListing){
       functionName: 'book',
       args: [startTs, endTs, selectedPeriod.value],
     });
-    const calls = [{ to: listing.address, data: bookData }];
+    const calls = [];
+    if (needsApproval && approveData) {
+      calls.push({ to: USDC_ADDRESS, data: approveData });
+    }
+    calls.push({ to: listing.address, data: bookData });
 
     const submitSequential = async () => {
       if (needsApproval && approveData) {
+        els.status.textContent = 'Wallet does not support batched calls. Approve the deposit, then confirm the booking.';
         await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+      } else {
+        els.status.textContent = 'Wallet does not support batched calls. Confirm the booking transaction.';
       }
       await p.request({ method: 'eth_sendTransaction', params: [{ from, to: listing.address, data: bookData }] });
     };
@@ -895,22 +932,39 @@ async function bookListing(listing = selectedListing){
       ? `${selectedPeriod.label} payments up to ${formatUsdc(installmentCap)} USDC`
       : `${selectedPeriod.label} payments`;
     const approvalNotice = needsApproval
-      ? ' Approve the deposit when prompted, then confirm the booking.'
+      ? ' Confirm the approval and booking when prompted.'
       : '';
     els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}; ${cadenceMsg}).${approvalNotice}`;
 
-    if (!needsApproval && calls.length === 1) {
+    let walletSendUnsupported = false;
+    let batchedSuccess = false;
+    const paramAttempts = [[{ calls }], calls];
+
+    for (const params of paramAttempts) {
       try {
-        await p.request({ method: 'wallet_sendCalls', params: [{ calls }] });
-      } catch {
-        try {
-          await p.request({ method: 'wallet_sendCalls', params: calls });
-        } catch {
-          await submitSequential();
+        await p.request({ method: 'wallet_sendCalls', params });
+        batchedSuccess = true;
+        break;
+      } catch (err) {
+        if (isUserRejectedRequestError(err)) {
+          const message = 'Booking cancelled by user.';
+          els.status.textContent = message;
+          notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+          return;
+        }
+        if (isMethodNotFoundError(err)) {
+          walletSendUnsupported = true;
+          break;
+        }
+        if (params === paramAttempts[paramAttempts.length - 1]) {
+          throw err;
         }
       }
-    } else {
+    }
+
+    if (!batchedSuccess && walletSendUnsupported) {
       await submitSequential();
+      batchedSuccess = true;
     }
 
     els.status.textContent = 'Booking submitted.';
