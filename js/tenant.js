@@ -792,15 +792,26 @@ async function bookListing(listing = selectedListing){
     await ensureArbitrum(p);
     await loadConfig();
 
-    const duration = typeof viewPassDuration === 'bigint' ? viewPassDuration : 0n;
-    if (supportsViewPassPurchase && duration > 0n) {
-      const active = await pub
-        .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'hasActiveViewPass', args: [from] })
-        .catch((err) => {
-          console.error('Failed to verify view pass before booking', err);
-          return true;
+    if (supportsViewPassPurchase) {
+      let active;
+      try {
+        active = await pub.readContract({
+          address: PLATFORM_ADDRESS,
+          abi: PLATFORM_ABI,
+          functionName: 'hasActiveViewPass',
+          args: [from],
         });
-      if (!active) {
+      } catch (err) {
+        console.error('Failed to verify view pass before booking', err);
+        els.status.textContent = 'Unable to verify view pass status. Please try again.';
+        notify({ message: 'Unable to verify view pass status. Try again.', variant: 'error', role: 'tenant', timeout: 5500 });
+        return;
+      }
+
+      hasActiveViewPass = Boolean(active);
+      if (!hasActiveViewPass) {
+        viewPassRequired = true;
+        updateSummary();
         els.status.textContent = 'Purchase a view pass before booking.';
         notify({ message: 'View pass required before booking.', variant: 'warning', role: 'tenant', timeout: 5000 });
         return;
@@ -903,8 +914,9 @@ async function checkViewPass(){
       return;
     }
 
-    const duration = typeof viewPassDuration === 'bigint' ? viewPassDuration : 0n;
-    if (duration === 0n) {
+    const hasDurationValue = typeof viewPassDuration === 'bigint';
+    const duration = hasDurationValue ? viewPassDuration : null;
+    if (hasDurationValue && duration === 0n) {
       els.buy.disabled = true;
       els.status.textContent = 'View pass not required.';
       hasActiveViewPass = true;
@@ -915,6 +927,9 @@ async function checkViewPass(){
 
     els.buy.disabled = false;
     viewPassRequired = true;
+    if (!hasDurationValue) {
+      console.warn('View pass duration unavailable; assuming view pass required.');
+    }
 
     const p = await getProvider();
     const [addr] = (await p.request({ method: 'eth_accounts' })) || [];
@@ -935,11 +950,20 @@ async function checkViewPass(){
         }),
       pub
         .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'hasActiveViewPass', args: [addr] })
+        .then((value) => Boolean(value))
         .catch((err) => {
           console.error('Failed to load view pass status', err);
-          return true;
+          return null;
         }),
     ]);
+
+    if (activeRaw === null) {
+      els.status.textContent = 'Unable to verify view pass status. Please try again.';
+      hasActiveViewPass = false;
+      updateSummary();
+      await loadListings();
+      return;
+    }
 
     const expiry = typeof expiryRaw === 'bigint' ? expiryRaw : BigInt(expiryRaw || 0);
     const active = Boolean(activeRaw);
@@ -950,11 +974,21 @@ async function checkViewPass(){
       const remaining = expiry > now ? expiry - now : 0n;
       const remainingLabel = remaining > 0n ? formatDuration(remaining) : 'Expiring soon';
       const expiresAt = formatTimestamp(expiry);
-      els.status.textContent = `View pass active (${remainingLabel}${expiresAt ? `, expires ${expiresAt}` : ''}).`;
+      if (hasDurationValue) {
+        els.status.textContent = `View pass active (${remainingLabel}${expiresAt ? `, expires ${expiresAt}` : ''}).`;
+      } else {
+        els.status.textContent = 'View pass active.';
+      }
     } else {
       const expiredAt = expiry > 0n ? formatTimestamp(expiry) : '';
-      const priceLabel = typeof viewPassPrice === 'bigint' && viewPassPrice > 0n ? `${formatUsdc(viewPassPrice)} USDC` : '';
-      const requirement = priceLabel ? ` Purchase required (${priceLabel}).` : ' Purchase required.';
+      let requirement;
+      if (typeof viewPassPrice === 'bigint' && viewPassPrice > 0n) {
+        requirement = ` Purchase required (${formatUsdc(viewPassPrice)} USDC).`;
+      } else if (!hasDurationValue) {
+        requirement = ' Unable to load pass details — assume purchase required.';
+      } else {
+        requirement = ' Purchase required.';
+      }
       els.status.textContent = `No active view pass.${expiredAt ? ` Expired ${expiredAt}.` : ''}${requirement}`;
     }
 
@@ -1002,10 +1036,14 @@ els.buy.onclick = async () => {
     if (!from) throw new Error('No wallet account connected.');
     await ensureArbitrum(p);
     await loadConfig();
-    const duration = typeof viewPassDuration === 'bigint' ? viewPassDuration : 0n;
-    if (duration === 0n) {
+    const hasDurationValue = typeof viewPassDuration === 'bigint';
+    const duration = hasDurationValue ? viewPassDuration : 0n;
+    if (hasDurationValue && duration === 0n) {
       els.status.textContent = 'View pass not required right now.';
       return;
+    }
+    if (!hasDurationValue) {
+      console.warn('View pass duration unavailable while purchasing; proceeding with best effort.');
     }
     const price = typeof viewPassPrice === 'bigint' ? viewPassPrice : 0n;
     if (typeof viewPassPrice !== 'bigint') {
