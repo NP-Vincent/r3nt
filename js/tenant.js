@@ -2,6 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './tools.js';
+import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
 import {
@@ -98,36 +99,6 @@ const PERIOD_OPTIONS = {
 const supportsViewPassPurchase = PLATFORM_ABI.some(
   (item) => item?.type === 'function' && item?.name === 'buyViewPass'
 );
-
-function isUserRejectedRequestError(error) {
-  if (!error) return false;
-  const code = Number(error.code);
-  if (Number.isFinite(code) && code === 4001) return true;
-  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
-  if (!message) return false;
-  return (
-    message.includes('user rejected') ||
-    message.includes('user denied') ||
-    message.includes('request rejected') ||
-    message.includes('denied transaction') ||
-    message.includes('transaction rejected')
-  );
-}
-
-function isMethodNotFoundError(error) {
-  if (!error) return false;
-  const code = Number(error.code);
-  if (Number.isFinite(code) && code === -32601) return true;
-  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
-  if (!message) return false;
-  if (!message.includes('wallet_sendcalls')) return false;
-  return (
-    message.includes('not found') ||
-    message.includes('does not exist') ||
-    message.includes('not supported') ||
-    message.includes('unsupported')
-  );
-}
 
 function formatUsdc(amount) {
   const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
@@ -938,28 +909,25 @@ async function bookListing(listing = selectedListing){
 
     let walletSendUnsupported = false;
     let batchedSuccess = false;
-    const paramAttempts = [[{ calls }], calls];
-
-    for (const params of paramAttempts) {
-      try {
-        await p.request({ method: 'wallet_sendCalls', params });
+    try {
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls,
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      if (!unsupported) {
         batchedSuccess = true;
-        break;
-      } catch (err) {
-        if (isUserRejectedRequestError(err)) {
-          const message = 'Booking cancelled by user.';
-          els.status.textContent = message;
-          notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
-          return;
-        }
-        if (isMethodNotFoundError(err)) {
-          walletSendUnsupported = true;
-          break;
-        }
-        if (params === paramAttempts[paramAttempts.length - 1]) {
-          throw err;
-        }
+      } else {
+        walletSendUnsupported = true;
       }
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        const message = 'Booking cancelled by user.';
+        els.status.textContent = message;
+        notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+        return;
+      }
+      throw err;
     }
 
     if (!batchedSuccess && walletSendUnsupported) {
@@ -972,6 +940,12 @@ async function bookListing(listing = selectedListing){
     updateSummary();
   } catch (e) {
     console.error(e);
+    if (isUserRejectedRequestError(e)) {
+      const message = 'Booking cancelled by user.';
+      els.status.textContent = message;
+      notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+      return;
+    }
     const message = e?.message || e;
     els.status.textContent = `Error: ${message}`;
     notify({ message: message ? `Booking failed: ${message}` : 'Booking failed.', variant: 'error', role: 'tenant', timeout: 6000 });
@@ -1137,22 +1111,40 @@ els.buy.onclick = async () => {
     const buyData = encodeFunctionData({ abi: PLATFORM_ABI, functionName: 'buyViewPass', args: [] });
     calls.push({ to: PLATFORM_ADDRESS, data: buyData });
     els.status.textContent = price > 0n ? 'Approving & purchasing…' : 'Purchasing view pass…';
+    let walletSendUnsupported = false;
     try {
-      await p.request({ method:'wallet_sendCalls', params:[{ calls }] });
-    } catch {
-      try {
-        await p.request({ method:'wallet_sendCalls', params: calls });
-      } catch {
-        if (price > 0n && approveData) {
-          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
-        }
-        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: PLATFORM_ADDRESS, data: buyData }] });
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls,
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      walletSendUnsupported = unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        els.status.textContent = 'Purchase cancelled by user.';
+        return;
       }
+      throw err;
     }
-      els.status.textContent = 'Success. View pass purchased.';
-      alert('View pass purchased!');
-      await checkViewPass();
-  } catch (err) { console.error(err); els.status.textContent = `Error: ${err?.message || err}`; }
+
+    if (walletSendUnsupported) {
+      if (price > 0n && approveData) {
+        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+      }
+      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: PLATFORM_ADDRESS, data: buyData }] });
+    }
+
+    els.status.textContent = 'Success. View pass purchased.';
+    alert('View pass purchased!');
+    await checkViewPass();
+  } catch (err) {
+    console.error(err);
+    if (isUserRejectedRequestError(err)) {
+      els.status.textContent = 'Purchase cancelled by user.';
+      return;
+    }
+    els.status.textContent = `Error: ${err?.message || err}`;
+  }
 };
 
 loadConfig().catch((err) => console.error('Initial config load failed', err));

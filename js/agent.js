@@ -2,6 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
+import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import {
   RPC_URL,
   LISTING_ABI,
@@ -603,14 +604,26 @@ async function sendAgentTransaction(functionName, args, messages = {}, button) {
     const pending = messages.pending || 'Submitting transaction…';
     setStatus(pending);
     notify({ message: pending, variant: 'info', role: 'agent', timeout: 5000 });
+    let walletSendUnsupported = false;
     try {
-      await p.request({ method: 'wallet_sendCalls', params: [{ calls: [call] }] });
-    } catch {
-      try {
-        await p.request({ method: 'wallet_sendCalls', params: [call] });
-      } catch {
-        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: state.agent, data }] });
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls: [call],
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      walletSendUnsupported = unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        const cancelled = messages.cancelled || 'Transaction cancelled by user.';
+        setStatus(cancelled);
+        notify({ message: cancelled, variant: 'warning', role: 'agent', timeout: 5000 });
+        return;
       }
+      throw err;
+    }
+
+    if (walletSendUnsupported) {
+      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: state.agent, data }] });
     }
     const success = messages.success || 'Transaction sent.';
     setStatus(success);
@@ -618,6 +631,12 @@ async function sendAgentTransaction(functionName, args, messages = {}, button) {
     await loadAgentData(state.agent);
   } catch (err) {
     console.error('Transaction failed', err);
+    if (isUserRejectedRequestError(err)) {
+      const message = messages.cancelled || 'Transaction cancelled by user.';
+      setStatus(message);
+      notify({ message, variant: 'warning', role: 'agent', timeout: 5000 });
+      return;
+    }
     const message = err?.message || 'Transaction failed.';
     setStatus(message);
     notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
