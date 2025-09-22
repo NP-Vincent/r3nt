@@ -216,6 +216,20 @@ function formatTimestamp(seconds) {
   return date.toUTCString();
 }
 
+function extractErrorMessage(error) {
+  let current = error;
+  const seen = new Set();
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const short = typeof current.shortMessage === 'string' ? current.shortMessage.trim() : '';
+    if (short) return short;
+    const message = typeof current.message === 'string' ? current.message.trim() : '';
+    if (message) return message;
+    current = current.cause;
+  }
+  return '';
+}
+
 function normaliseAddress(value) {
   return typeof value === 'string' ? value.toLowerCase() : '';
 }
@@ -933,6 +947,22 @@ function buildBookingRecord(meta, data, listingInfo) {
   const expectedNetRent = toBigInt(data.expectedNetRent, 0n);
   const depositReleased = Boolean(data.depositReleased);
   const tokenised = Boolean(data.tokenised);
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  const isActive = statusValue === 1;
+  const isUpcoming = start > now;
+  let canCancel = false;
+  let cancelDisabledReason = '';
+  if (!isActive) {
+    cancelDisabledReason = 'Only active bookings can be cancelled.';
+  } else if (!isUpcoming) {
+    cancelDisabledReason = 'Cancellation is unavailable once the stay has started.';
+  } else if (depositReleased) {
+    cancelDisabledReason = 'Security deposit already handled — contact the landlord for help.';
+  } else if (rentPaid > 0n) {
+    cancelDisabledReason = 'Bookings with rent payments cannot be cancelled automatically.';
+  } else {
+    canCancel = true;
+  }
   return {
     key: `${normaliseAddress(listingAddress)}-${bookingId.toString()}`,
     listingAddress,
@@ -959,6 +989,9 @@ function buildBookingRecord(meta, data, listingInfo) {
     tenantLower: normaliseAddress(tenant),
     listingInfo: listingInfo || null,
     canPayRent: statusValue === 1 && rentDue > 0n,
+    isActive,
+    canCancel,
+    cancelDisabledReason,
   };
 }
 
@@ -1013,10 +1046,11 @@ function renderBookingCard(record) {
   }
   card.appendChild(outstandingLine);
 
-  if (record.canPayRent) {
-    const actions = document.createElement('div');
-    actions.className = 'booking-actions';
+  const actions = document.createElement('div');
+  actions.className = 'booking-actions';
+  let hasActions = false;
 
+  if (record.canPayRent) {
     const amountInput = document.createElement('input');
     amountInput.type = 'text';
     amountInput.inputMode = 'decimal';
@@ -1037,9 +1071,46 @@ function renderBookingCard(record) {
     payBtn.onclick = () => payRentForBooking(record.key, amountInput, payBtn);
     actions.appendChild(payBtn);
 
-    card.appendChild(actions);
+    hasActions = true;
   } else if (record.rentDue > 0n) {
     outstandingLine.textContent += ` (status ${record.statusLabel.toLowerCase()} — payments disabled)`;
+  }
+
+  const tenantConnected = addressesEqual(connectedAccount, record.tenantLower);
+  if (tenantConnected && record.canCancel) {
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel booking';
+    cancelBtn.onclick = () => cancelBookingForTenant(record.key, cancelBtn);
+    actions.appendChild(cancelBtn);
+
+    const cancelNote = document.createElement('div');
+    cancelNote.className = 'booking-helper-text';
+    cancelNote.textContent = record.deposit > 0n
+      ? `Cancel before the stay begins to automatically refund your ${formatUsdc(record.deposit)} USDC deposit.`
+      : 'Cancel before the stay begins to free up the calendar.';
+    actions.appendChild(cancelNote);
+
+    hasActions = true;
+  }
+
+  if (hasActions) {
+    card.appendChild(actions);
+  }
+
+  if (!(tenantConnected && record.canCancel)) {
+    let cancellationMessage = '';
+    if (!tenantConnected && record.canCancel) {
+      cancellationMessage = 'Connect with your tenant wallet to cancel this booking.';
+    } else if (record.cancelDisabledReason) {
+      cancellationMessage = record.cancelDisabledReason;
+    }
+    if (cancellationMessage) {
+      const cancelInfo = document.createElement('div');
+      cancelInfo.className = 'booking-helper-text';
+      cancelInfo.textContent = cancellationMessage;
+      card.appendChild(cancelInfo);
+    }
   }
 
   return card;
@@ -1195,6 +1266,175 @@ async function payRentForBooking(recordKey, amountInput, submitButton) {
     submitButton.disabled = false;
     amountInput.disabled = false;
     submitButton.textContent = originalText;
+  }
+}
+
+async function cancelBookingForTenant(recordKey, button) {
+  const record = bookingRecords.get(recordKey);
+  if (!record) {
+    notify({ message: 'Unable to find booking details for cancellation.', variant: 'error', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (!button) {
+    notify({ message: 'Cancellation controls unavailable for this booking.', variant: 'error', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  const tenantConnected = addressesEqual(connectedAccount, record.tenantLower);
+  if (!tenantConnected) {
+    const message = 'Connect with the tenant wallet to cancel this booking.';
+    els.status.textContent = message;
+    notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (!record.isActive) {
+    const message = record.cancelDisabledReason || 'This booking is not active anymore.';
+    els.status.textContent = message;
+    notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (!record.canCancel) {
+    const message = record.cancelDisabledReason || 'This booking cannot be cancelled right now.';
+    els.status.textContent = message;
+    notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+
+  const nowTs = BigInt(Math.floor(Date.now() / 1000));
+  if (record.start <= nowTs) {
+    const message = 'Cancellation window has passed because the stay has started.';
+    els.status.textContent = message;
+    notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (record.depositReleased) {
+    const message = 'Deposit already released — contact the landlord for assistance.';
+    els.status.textContent = message;
+    notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (record.rentPaid > 0n) {
+    const message = 'Bookings with rent payments cannot be cancelled automatically.';
+    els.status.textContent = message;
+    notify({ message, variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+
+  const confirmationMessage = record.deposit > 0n
+    ? `Cancel booking #${record.bookingIdText}? Your ${formatUsdc(record.deposit)} USDC deposit will be refunded automatically.`
+    : `Cancel booking #${record.bookingIdText}? This frees up the stay for other tenants.`;
+  const confirmed = window.confirm(confirmationMessage);
+  if (!confirmed) {
+    els.status.textContent = 'Cancellation dismissed.';
+    notify({ message: 'Cancellation dismissed.', variant: 'info', role: 'tenant', timeout: 4000 });
+    return;
+  }
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Cancelling…';
+
+  try {
+    const p = await getProvider();
+    const accounts = (await p.request({ method: 'eth_accounts' })) || [];
+    const [from] = accounts;
+    if (!from) {
+      throw new Error('No wallet account connected.');
+    }
+    if (!addressesEqual(from, record.tenantLower)) {
+      const message = 'Connected wallet does not match the booking tenant.';
+      els.status.textContent = message;
+      notify({ message, variant: 'error', role: 'tenant', timeout: 6000 });
+      return;
+    }
+    setConnectedAccount(from);
+    await ensureArbitrum(p);
+    await loadConfig();
+
+    try {
+      await pub.simulateContract({
+        address: record.listingAddress,
+        abi: LISTING_ABI,
+        functionName: 'cancelBooking',
+        args: [record.bookingId],
+        account: from,
+      });
+    } catch (err) {
+      console.error('Cancellation simulation failed', err);
+      const detail = extractErrorMessage(err) || 'Cancellation not available right now.';
+      const message = detail.toLowerCase().includes('not authorised')
+        ? 'Cancellation currently requires landlord or platform approval.'
+        : detail;
+      els.status.textContent = message;
+      notify({
+        message: message ? `Unable to cancel booking: ${message}` : 'Unable to cancel booking.',
+        variant: 'error',
+        role: 'tenant',
+        timeout: 6000,
+      });
+      return;
+    }
+
+    const cancelData = encodeFunctionData({
+      abi: LISTING_ABI,
+      functionName: 'cancelBooking',
+      args: [record.bookingId],
+    });
+
+    els.status.textContent = 'Submitting cancellation…';
+
+    let walletSendUnsupported = false;
+    let batchedSuccess = false;
+    try {
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls: [{ to: record.listingAddress, data: cancelData }],
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      walletSendUnsupported = unsupported;
+      batchedSuccess = !unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        els.status.textContent = 'Cancellation cancelled by user.';
+        notify({ message: 'Cancellation request cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+        return;
+      }
+      throw err;
+    }
+
+    if (!batchedSuccess && walletSendUnsupported) {
+      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: record.listingAddress, data: cancelData }] });
+      batchedSuccess = true;
+    }
+
+    els.status.textContent = 'Cancellation submitted.';
+    const successMessage = record.deposit > 0n
+      ? `Booking cancelled. Your ${formatUsdc(record.deposit)} USDC deposit will be returned.`
+      : 'Booking cancelled. No deposit was held.';
+    notify({
+      message: successMessage,
+      variant: 'success',
+      role: 'tenant',
+      timeout: 6000,
+    });
+    await loadTenantBookings(connectedAccount, { force: true });
+  } catch (err) {
+    console.error('Cancel booking failed', err);
+    if (isUserRejectedRequestError(err)) {
+      els.status.textContent = 'Cancellation cancelled by user.';
+      notify({ message: 'Cancellation request cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    } else {
+      const message = extractErrorMessage(err) || err?.message || err;
+      els.status.textContent = `Cancellation failed: ${message}`;
+      notify({
+        message: message ? `Cancellation failed: ${message}` : 'Cancellation failed.',
+        variant: 'error',
+        role: 'tenant',
+        timeout: 6000,
+      });
+    }
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
   }
 }
 
