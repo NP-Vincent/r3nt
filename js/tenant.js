@@ -39,6 +39,12 @@ const els = {
     total: document.querySelector('[data-summary-total]'),
     notice: document.querySelector('[data-summary-notice]'),
   },
+  bookings: {
+    section: document.getElementById('bookingsSection'),
+    list: document.getElementById('bookingsList'),
+    status: document.querySelector('[data-bookings-status]'),
+    refresh: document.getElementById('refreshBookings'),
+  },
 };
 
 let selectedListing = null;
@@ -50,6 +56,13 @@ let viewPassDuration;
 let configLoading;
 let viewPassRequired = false;
 let hasActiveViewPass = false;
+let connectedAccount = null;
+let bookingsLoading = null;
+let lastBookingsAccount = '';
+let bookingsRendered = false;
+
+const listingInfoCache = new Map();
+const bookingRecords = new Map();
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
 
@@ -95,6 +108,42 @@ const PERIOD_OPTIONS = {
   week: { label: 'Weekly', value: 2n, days: 7n },
   month: { label: 'Monthly', value: 3n, days: 30n },
 };
+const MULTICALL_CHUNK = 120;
+const BOOKING_STATUS_META = {
+  0: { label: 'Pending', className: 'pending' },
+  1: { label: 'Active', className: 'active' },
+  2: { label: 'Completed', className: 'completed' },
+  3: { label: 'Cancelled', className: 'cancelled' },
+  4: { label: 'Defaulted', className: 'defaulted' },
+};
+const BOOKING_PERIOD_LABELS = {
+  0: 'Unspecified',
+  1: 'Daily',
+  2: 'Weekly',
+  3: 'Monthly',
+};
+const BOOKING_INFO_FIELDS = [
+  'tenant',
+  'start',
+  'end',
+  'grossRent',
+  'expectedNetRent',
+  'rentPaid',
+  'deposit',
+  'status',
+  'tokenised',
+  'totalSqmu',
+  'soldSqmu',
+  'pricePerSqmu',
+  'feeBps',
+  'period',
+  'proposer',
+  'accRentPerSqmu',
+  'landlordAccrued',
+  'depositReleased',
+  'depositTenantBps',
+  'calendarReleased',
+];
 
 const supportsViewPassPurchase = PLATFORM_ABI.some(
   (item) => item?.type === 'function' && item?.name === 'buyViewPass'
@@ -165,6 +214,108 @@ function formatTimestamp(seconds) {
     return `Unix ${value}`;
   }
   return date.toUTCString();
+}
+
+function normaliseAddress(value) {
+  return typeof value === 'string' ? value.toLowerCase() : '';
+}
+
+function addressesEqual(a, b) {
+  return normaliseAddress(a) === normaliseAddress(b);
+}
+
+function setConnectedAccount(addr) {
+  const previous = normaliseAddress(connectedAccount);
+  const next = normaliseAddress(addr);
+  if (previous !== next) {
+    bookingsRendered = false;
+    lastBookingsAccount = '';
+  }
+  connectedAccount = addr || null;
+  if (els.bookings?.refresh) {
+    els.bookings.refresh.disabled = !next;
+  }
+}
+
+function toBigInt(value, fallback = 0n) {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Number.isNaN(value)) return fallback;
+    return BigInt(Math.trunc(value));
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    try {
+      return BigInt(trimmed);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+function formatDateLabel(seconds) {
+  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
+  if (value <= 0n) return '—';
+  let numeric;
+  try {
+    numeric = Number(value);
+  } catch {
+    return `Unix ${value}`;
+  }
+  if (!Number.isFinite(numeric) || Number.isNaN(numeric)) {
+    return `Unix ${value}`;
+  }
+  const date = new Date(numeric * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return `Unix ${value}`;
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function parseUsdcInput(raw) {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw.trim();
+  if (!cleaned) return null;
+  const normalised = cleaned.replace(/,/g, '');
+  if (!/^\d*(\.\d{0,6})?$/.test(normalised)) {
+    return null;
+  }
+  if (normalised === '.' || normalised === '') {
+    return null;
+  }
+  const [wholePart = '0', fractionalPart = ''] = normalised.split('.');
+  let whole;
+  try {
+    whole = BigInt(wholePart || '0');
+  } catch {
+    return null;
+  }
+  const fracPadded = (fractionalPart || '').padEnd(6, '0').slice(0, 6);
+  let fraction;
+  try {
+    fraction = BigInt(fracPadded || '0');
+  } catch {
+    return null;
+  }
+  return whole * USDC_SCALAR + fraction;
+}
+
+function normaliseBookingStruct(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const result = {};
+  for (let i = 0; i < BOOKING_INFO_FIELDS.length; i += 1) {
+    const key = BOOKING_INFO_FIELDS[i];
+    if (key in raw) {
+      result[key] = raw[key];
+    } else if (Array.isArray(raw)) {
+      result[key] = raw[i];
+    }
+  }
+  return result;
 }
 
 function calculateRent(baseDailyRate, startTs, endTs) {
@@ -524,6 +675,13 @@ async function fetchListingMetadataDetails(uri, fallbackAddress){
 }
 
 async function fetchListingInfo(listingAddr){
+  if (!listingAddr || typeof listingAddr !== 'string') {
+    return null;
+  }
+  const cacheKey = normaliseAddress(listingAddr);
+  if (listingInfoCache.has(cacheKey)) {
+    return listingInfoCache.get(cacheKey);
+  }
   if (!pub) {
     await loadConfig();
   }
@@ -584,7 +742,7 @@ async function fetchListingInfo(listingAddr){
         console.warn('Unable to decode geohash for listing', listingAddr, geohash, err);
       }
     }
-    return {
+    const info = {
       address: listingAddr,
       fid,
       castHash,
@@ -602,6 +760,8 @@ async function fetchListingInfo(listingAddr){
       lon,
       landlord,
     };
+    listingInfoCache.set(cacheKey, info);
+    return info;
   } catch (err) {
     console.error('Failed to load listing info', listingAddr, err);
     return null;
@@ -742,6 +902,497 @@ function renderListingCard(info){
   return card;
 }
 
+function createDetailElement(label, value) {
+  const wrapper = document.createElement('div');
+  const labelEl = document.createElement('div');
+  labelEl.className = 'booking-detail-label';
+  labelEl.textContent = label;
+  const valueEl = document.createElement('div');
+  valueEl.className = 'booking-detail-value';
+  valueEl.textContent = value;
+  wrapper.appendChild(labelEl);
+  wrapper.appendChild(valueEl);
+  return wrapper;
+}
+
+function buildBookingRecord(meta, data, listingInfo) {
+  const bookingId = typeof meta.bookingId === 'bigint' ? meta.bookingId : toBigInt(meta.bookingId, 0n);
+  const listingAddress = meta.listing;
+  const statusValue = Number(toBigInt(data.status, 0n));
+  const statusMeta = BOOKING_STATUS_META[statusValue] || { label: `Status ${statusValue}`, className: 'unknown' };
+  const grossRent = toBigInt(data.grossRent, 0n);
+  const rentPaid = toBigInt(data.rentPaid, 0n);
+  const deposit = toBigInt(data.deposit, 0n);
+  const periodValue = Number(toBigInt(data.period, 0n));
+  const periodLabel = BOOKING_PERIOD_LABELS[periodValue] || 'Custom';
+  const tenant = typeof data.tenant === 'string' ? data.tenant : '0x0000000000000000000000000000000000000000';
+  const rentDue = grossRent > rentPaid ? grossRent - rentPaid : 0n;
+  const listingTitle = listingInfo ? getListingTitle(listingInfo) : `Listing ${short(listingAddress)}`;
+  const start = toBigInt(data.start, 0n);
+  const end = toBigInt(data.end, 0n);
+  const expectedNetRent = toBigInt(data.expectedNetRent, 0n);
+  const depositReleased = Boolean(data.depositReleased);
+  const tokenised = Boolean(data.tokenised);
+  return {
+    key: `${normaliseAddress(listingAddress)}-${bookingId.toString()}`,
+    listingAddress,
+    listingTitle,
+    bookingId,
+    bookingIdText: bookingId.toString(),
+    statusValue,
+    statusLabel: statusMeta.label,
+    statusClass: statusMeta.className,
+    start,
+    end,
+    startLabel: formatDateLabel(start),
+    endLabel: formatDateLabel(end),
+    grossRent,
+    rentPaid,
+    rentDue,
+    deposit,
+    depositReleased,
+    expectedNetRent,
+    periodValue,
+    periodLabel,
+    tokenised,
+    tenant,
+    tenantLower: normaliseAddress(tenant),
+    listingInfo: listingInfo || null,
+    canPayRent: statusValue === 1 && rentDue > 0n,
+  };
+}
+
+function renderBookingCard(record) {
+  const card = document.createElement('div');
+  card.className = 'booking-entry';
+  card.dataset.bookingKey = record.key;
+
+  const header = document.createElement('div');
+  header.className = 'booking-entry-header';
+
+  const title = document.createElement('div');
+  title.className = 'booking-entry-title';
+  title.textContent = record.listingTitle;
+  header.appendChild(title);
+
+  const status = document.createElement('span');
+  const statusClass = record.statusClass ? ` booking-status-${record.statusClass}` : '';
+  status.className = `booking-status-badge${statusClass}`;
+  status.textContent = record.statusLabel;
+  header.appendChild(status);
+
+  card.appendChild(header);
+
+  const dates = document.createElement('div');
+  dates.className = 'booking-entry-dates';
+  dates.textContent = `Stay: ${record.startLabel} → ${record.endLabel}`;
+  card.appendChild(dates);
+
+  const details = document.createElement('div');
+  details.className = 'booking-details';
+  details.appendChild(createDetailElement('Booking ID', `#${record.bookingIdText}`));
+  details.appendChild(createDetailElement('Payment cadence', record.periodLabel));
+  details.appendChild(createDetailElement('Gross rent', `${formatUsdc(record.grossRent)} USDC`));
+  details.appendChild(createDetailElement('Paid so far', `${formatUsdc(record.rentPaid)} USDC`));
+  details.appendChild(createDetailElement('Outstanding rent', `${formatUsdc(record.rentDue)} USDC`));
+  const depositText = record.deposit > 0n
+    ? `${formatUsdc(record.deposit)} USDC${record.depositReleased ? ' · Released' : ' · Escrowed'}`
+    : 'No deposit';
+  details.appendChild(createDetailElement('Deposit', depositText));
+  if (record.tokenised) {
+    details.appendChild(createDetailElement('Tokenisation', 'Enabled'));
+  }
+  card.appendChild(details);
+
+  const outstandingLine = document.createElement('div');
+  outstandingLine.className = 'booking-helper-text';
+  if (record.rentDue > 0n) {
+    outstandingLine.textContent = `Outstanding rent: ${formatUsdc(record.rentDue)} USDC`;
+  } else {
+    outstandingLine.textContent = 'All rent settled.';
+  }
+  card.appendChild(outstandingLine);
+
+  if (record.canPayRent) {
+    const actions = document.createElement('div');
+    actions.className = 'booking-actions';
+
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    amountInput.inputMode = 'decimal';
+    amountInput.pattern = "\\d*(\\.\\d{0,6})?";
+    amountInput.placeholder = 'Amount in USDC';
+    amountInput.className = 'booking-amount-input';
+    amountInput.value = formatUsdc(record.rentDue);
+    actions.appendChild(amountInput);
+
+    const actionNote = document.createElement('div');
+    actionNote.className = 'booking-helper-text';
+    actionNote.textContent = `Enter the amount you want to pay (max ${formatUsdc(record.rentDue)} USDC).`;
+    actions.appendChild(actionNote);
+
+    const payBtn = document.createElement('button');
+    payBtn.type = 'button';
+    payBtn.textContent = 'Pay rent';
+    payBtn.onclick = () => payRentForBooking(record.key, amountInput, payBtn);
+    actions.appendChild(payBtn);
+
+    card.appendChild(actions);
+  } else if (record.rentDue > 0n) {
+    outstandingLine.textContent += ` (status ${record.statusLabel.toLowerCase()} — payments disabled)`;
+  }
+
+  return card;
+}
+
+async function payRentForBooking(recordKey, amountInput, submitButton) {
+  const record = bookingRecords.get(recordKey);
+  if (!record) {
+    notify({ message: 'Unable to find booking details for payment.', variant: 'error', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (!record.canPayRent) {
+    notify({ message: 'This booking is not accepting rent payments right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (!amountInput || !submitButton) {
+    notify({ message: 'Payment controls unavailable for this booking.', variant: 'error', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  const parsedAmount = parseUsdcInput(amountInput.value || '');
+  if (parsedAmount === null) {
+    notify({ message: 'Enter a valid USDC amount (up to 6 decimals).', variant: 'warning', role: 'tenant', timeout: 4500 });
+    amountInput.focus();
+    return;
+  }
+  if (parsedAmount <= 0n) {
+    notify({ message: 'Rent payments must be greater than 0 USDC.', variant: 'warning', role: 'tenant', timeout: 4500 });
+    amountInput.focus();
+    return;
+  }
+  if (record.rentDue > 0n && parsedAmount > record.rentDue) {
+    notify({
+      message: `You can pay at most ${formatUsdc(record.rentDue)} USDC right now.`,
+      variant: 'warning',
+      role: 'tenant',
+      timeout: 5000,
+    });
+    amountInput.focus();
+    return;
+  }
+
+  const originalText = submitButton.textContent;
+  submitButton.disabled = true;
+  amountInput.disabled = true;
+  submitButton.textContent = 'Paying…';
+
+  try {
+    const p = await getProvider();
+    const accounts = (await p.request({ method: 'eth_accounts' })) || [];
+    const [from] = accounts;
+    if (!from) {
+      throw new Error('No wallet account connected.');
+    }
+    if (!addressesEqual(from, record.tenantLower)) {
+      const message = 'Connected wallet does not match the booking tenant.';
+      els.status.textContent = message;
+      notify({ message, variant: 'error', role: 'tenant', timeout: 6000 });
+      return;
+    }
+    setConnectedAccount(from);
+    await ensureArbitrum(p);
+    await loadConfig();
+
+    let allowance = 0n;
+    try {
+      const allowanceRaw = await pub.readContract({
+        address: USDC_ADDRESS,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [from, record.listingAddress],
+      });
+      allowance = toBigInt(allowanceRaw, 0n);
+    } catch (err) {
+      console.warn('Failed to read USDC allowance before rent payment', err);
+      allowance = 0n;
+    }
+
+    const needsApproval = allowance < parsedAmount;
+    let approveData;
+    const calls = [];
+    if (needsApproval) {
+      approveData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [record.listingAddress, parsedAmount],
+      });
+      calls.push({ to: USDC_ADDRESS, data: approveData });
+    }
+    const payData = encodeFunctionData({
+      abi: LISTING_ABI,
+      functionName: 'payRent',
+      args: [record.bookingId, parsedAmount],
+    });
+    calls.push({ to: record.listingAddress, data: payData });
+
+    els.status.textContent = `Submitting rent payment (${formatUsdc(parsedAmount)} USDC)…`;
+
+    let walletSendUnsupported = false;
+    let batchedSuccess = false;
+    try {
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls,
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      batchedSuccess = !unsupported;
+      walletSendUnsupported = unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        els.status.textContent = 'Rent payment cancelled by user.';
+        notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+        return;
+      }
+      throw err;
+    }
+
+    if (!batchedSuccess && walletSendUnsupported) {
+      if (needsApproval && approveData) {
+        els.status.textContent = `Approve USDC, then confirm rent payment (${formatUsdc(parsedAmount)} USDC).`;
+        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+      } else {
+        els.status.textContent = `Confirm rent payment (${formatUsdc(parsedAmount)} USDC).`;
+      }
+      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: record.listingAddress, data: payData }] });
+      batchedSuccess = true;
+    }
+
+    els.status.textContent = 'Rent payment submitted.';
+    notify({
+      message: `Rent payment sent (${formatUsdc(parsedAmount)} USDC).`,
+      variant: 'success',
+      role: 'tenant',
+      timeout: 6000,
+    });
+    amountInput.value = '';
+    await loadTenantBookings(connectedAccount, { force: true });
+  } catch (err) {
+    console.error('Rent payment failed', err);
+    if (isUserRejectedRequestError(err)) {
+      els.status.textContent = 'Rent payment cancelled by user.';
+      notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    } else {
+      const message = err?.message || err;
+      els.status.textContent = `Rent payment failed: ${message}`;
+      notify({
+        message: message ? `Rent payment failed: ${message}` : 'Rent payment failed.',
+        variant: 'error',
+        role: 'tenant',
+        timeout: 6000,
+      });
+    }
+  } finally {
+    submitButton.disabled = false;
+    amountInput.disabled = false;
+    submitButton.textContent = originalText;
+  }
+}
+
+async function multicallChunks(contracts, chunkSize = MULTICALL_CHUNK) {
+  const results = [];
+  if (!Array.isArray(contracts) || contracts.length === 0) {
+    return results;
+  }
+  const size = Math.max(1, Number.isInteger(chunkSize) ? chunkSize : MULTICALL_CHUNK);
+  for (let i = 0; i < contracts.length; i += size) {
+    const chunk = contracts.slice(i, i + size);
+    try {
+      const response = await pub.multicall({ contracts: chunk, allowFailure: true });
+      results.push(...response);
+    } catch (err) {
+      console.error('Multicall chunk failed', err);
+      for (let j = 0; j < chunk.length; j += 1) {
+        results.push({ status: 'failure', result: null });
+      }
+    }
+  }
+  return results;
+}
+
+function renderBookings(records, emptyMessage = 'No bookings found for this wallet yet.') {
+  const listEl = els.bookings?.list;
+  const statusEl = els.bookings?.status;
+  if (!listEl) {
+    return;
+  }
+  bookingRecords.clear();
+  listEl.innerHTML = '';
+  if (!records || records.length === 0) {
+    if (statusEl) {
+      statusEl.textContent = emptyMessage;
+    }
+    return;
+  }
+  const sorted = [...records];
+  sorted.sort((a, b) => {
+    if (a.start === b.start) {
+      if (a.bookingId === b.bookingId) return 0;
+      return a.bookingId > b.bookingId ? -1 : 1;
+    }
+    return a.start > b.start ? -1 : 1;
+  });
+  for (const record of sorted) {
+    bookingRecords.set(record.key, record);
+    listEl.appendChild(renderBookingCard(record));
+  }
+  if (statusEl) {
+    statusEl.textContent = `Showing ${sorted.length} booking${sorted.length === 1 ? '' : 's'}.`;
+  }
+}
+
+async function loadTenantBookings(account, options = {}) {
+  const listEl = els.bookings?.list;
+  const statusEl = els.bookings?.status;
+  const refreshBtn = els.bookings?.refresh;
+  const normalized = normaliseAddress(account);
+
+  if (!listEl || !statusEl) {
+    return [];
+  }
+
+  if (!normalized) {
+    bookingRecords.clear();
+    listEl.innerHTML = '';
+    statusEl.textContent = 'Connect wallet to view bookings.';
+    if (refreshBtn) {
+      refreshBtn.disabled = true;
+    }
+    bookingsRendered = false;
+    lastBookingsAccount = '';
+    return [];
+  }
+
+  if (bookingsLoading) {
+    try {
+      await bookingsLoading;
+    } catch {}
+  }
+
+  if (!options.force && bookingsRendered && lastBookingsAccount === normalized) {
+    return [];
+  }
+
+  statusEl.textContent = 'Loading your bookings…';
+  if (options.clear !== false) {
+    listEl.innerHTML = '';
+  }
+
+  let refreshOriginalLabel;
+  if (refreshBtn) {
+    refreshOriginalLabel = refreshBtn.textContent;
+    refreshBtn.disabled = true;
+    if (options.showBusyLabel) {
+      refreshBtn.textContent = 'Refreshing…';
+    }
+  }
+
+  const loaderPromise = (async () => {
+    await loadConfig();
+    let addresses;
+    try {
+      const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allListings' });
+      addresses = Array.isArray(result) ? result : [];
+    } catch (err) {
+      throw new Error('Unable to load listing addresses.');
+    }
+    const cleaned = addresses.filter((addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr) && !/^0x0+$/.test(addr));
+    if (!cleaned.length) {
+      return { records: [], message: 'No listings available right now.' };
+    }
+
+    const nextCalls = cleaned.map((addr) => ({ address: addr, abi: LISTING_ABI, functionName: 'nextBookingId' }));
+    const nextResults = await multicallChunks(nextCalls);
+    const bookingMetas = [];
+    for (let i = 0; i < cleaned.length; i += 1) {
+      const entry = nextResults[i];
+      if (!entry || entry.status !== 'success') continue;
+      const nextId = toBigInt(entry.result, 0n);
+      if (nextId <= 1n) continue;
+      for (let id = 1n; id < nextId; id += 1n) {
+        bookingMetas.push({ listing: cleaned[i], bookingId: id });
+      }
+    }
+
+    if (!bookingMetas.length) {
+      return { records: [], message: 'No bookings found for this wallet yet.' };
+    }
+
+    const bookingCalls = bookingMetas.map((meta) => ({
+      address: meta.listing,
+      abi: LISTING_ABI,
+      functionName: 'bookingInfo',
+      args: [meta.bookingId],
+    }));
+    const bookingResults = await multicallChunks(bookingCalls);
+
+    const relevant = [];
+    const listingLookup = new Map();
+
+    for (let i = 0; i < bookingResults.length; i += 1) {
+      const entry = bookingResults[i];
+      if (!entry || entry.status !== 'success') continue;
+      const data = normaliseBookingStruct(entry.result);
+      if (!data) continue;
+      if (!addressesEqual(data.tenant, normalized)) continue;
+      const meta = bookingMetas[i];
+      const lower = normaliseAddress(meta.listing);
+      if (!listingLookup.has(lower)) {
+        listingLookup.set(lower, meta.listing);
+      }
+      relevant.push({ meta, data });
+    }
+
+    if (!relevant.length) {
+      return { records: [], message: 'No bookings found for this wallet yet.' };
+    }
+
+    const listingAddresses = Array.from(listingLookup.values());
+    await Promise.all(listingAddresses.map((addr) => fetchListingInfo(addr).catch(() => null)));
+
+    const records = [];
+    for (const item of relevant) {
+      const lower = normaliseAddress(item.meta.listing);
+      const info = listingInfoCache.get(lower) || null;
+      records.push(buildBookingRecord(item.meta, item.data, info));
+    }
+    return { records, message: '' };
+  })();
+
+  bookingsLoading = loaderPromise;
+  try {
+    const { records, message } = await loaderPromise;
+    renderBookings(records, message || 'No bookings found for this wallet yet.');
+    lastBookingsAccount = normalized;
+    bookingsRendered = true;
+    return records;
+  } catch (err) {
+    console.error('Failed to load tenant bookings', err);
+    bookingRecords.clear();
+    listEl.innerHTML = '';
+    statusEl.textContent = 'Unable to load bookings. Please try again.';
+    notify({ message: 'Unable to load bookings. Please try again.', variant: 'error', role: 'tenant', timeout: 6000 });
+    throw err;
+  } finally {
+    bookingsLoading = null;
+    if (refreshBtn) {
+      refreshBtn.disabled = !normalized;
+      if (options.showBusyLabel && refreshOriginalLabel !== undefined) {
+        refreshBtn.textContent = refreshOriginalLabel;
+      }
+    }
+  }
+}
+
 async function loadListings(){
   await loadConfig();
   els.listings.textContent = 'Loading listings…';
@@ -790,6 +1441,7 @@ async function bookListing(listing = selectedListing){
     const p = await getProvider();
     const [from] = (await p.request({ method: 'eth_accounts' })) || [];
     if (!from) throw new Error('No wallet account connected.');
+    setConnectedAccount(from);
     await ensureArbitrum(p);
     await loadConfig();
 
@@ -938,6 +1590,13 @@ async function bookListing(listing = selectedListing){
     els.status.textContent = 'Booking submitted.';
     notify({ message: 'Booking transaction sent.', variant: 'success', role: 'tenant', timeout: 6000 });
     updateSummary();
+    if (connectedAccount) {
+      try {
+        await loadTenantBookings(connectedAccount, { force: true });
+      } catch (err) {
+        console.warn('Failed to refresh bookings after booking', err);
+      }
+    }
   } catch (e) {
     console.error(e);
     if (isUserRejectedRequestError(e)) {
@@ -987,12 +1646,15 @@ async function checkViewPass(){
     const p = await getProvider();
     const [addr] = (await p.request({ method: 'eth_accounts' })) || [];
     if (!addr) {
+      setConnectedAccount(null);
       els.status.textContent = 'Connect wallet to verify your view pass status.';
       hasActiveViewPass = false;
       updateSummary();
       await loadListings();
+      await loadTenantBookings(null);
       return;
     }
+    setConnectedAccount(addr);
 
     const [expiryRaw, activeRaw] = await Promise.all([
       pub
@@ -1059,6 +1721,18 @@ if (els.confirmBooking) {
   els.confirmBooking.onclick = () => bookListing();
 }
 
+if (els.bookings?.refresh) {
+  els.bookings.refresh.onclick = () => {
+    if (!connectedAccount) {
+      notify({ message: 'Connect your wallet to refresh bookings.', variant: 'warning', role: 'tenant', timeout: 4200 });
+      return;
+    }
+    loadTenantBookings(connectedAccount, { force: true, showBusyLabel: true }).catch((err) => {
+      console.warn('Failed to refresh bookings', err);
+    });
+  };
+}
+
 els.connect.onclick = async () => {
   try {
     if (!inHost) { els.status.textContent = 'Open in Farcaster app to connect wallet.'; return; }
@@ -1067,6 +1741,7 @@ els.connect.onclick = async () => {
     await p.request({ method: 'eth_requestAccounts' });
     const [addr] = await p.request({ method: 'eth_accounts' });
     if (!addr) throw new Error('No account found.');
+    setConnectedAccount(addr);
     await ensureArbitrum(p);
     els.addr.textContent = `Connected: ${short(addr)}`;
     els.connect.textContent = `Connected ${short(addr)}`;
@@ -1074,6 +1749,13 @@ els.connect.onclick = async () => {
     els.buy.disabled = true;
     els.status.textContent = 'Ready.';
     await checkViewPass();
+    if (connectedAccount) {
+      try {
+        await loadTenantBookings(connectedAccount, { force: true });
+      } catch (err) {
+        console.warn('Failed to load bookings after connecting', err);
+      }
+    }
   } catch (e) { console.error(e); els.status.textContent = e?.message || 'Wallet connection failed.'; }
 };
 
@@ -1087,6 +1769,7 @@ els.buy.onclick = async () => {
     const p = await getProvider();
     const [from] = await p.request({ method: 'eth_accounts' }) || [];
     if (!from) throw new Error('No wallet account connected.');
+    setConnectedAccount(from);
     await ensureArbitrum(p);
     await loadConfig();
     const hasDurationValue = typeof viewPassDuration === 'bigint';
@@ -1137,6 +1820,13 @@ els.buy.onclick = async () => {
     els.status.textContent = 'Success. View pass purchased.';
     alert('View pass purchased!');
     await checkViewPass();
+    if (connectedAccount) {
+      try {
+        await loadTenantBookings(connectedAccount, { force: true });
+      } catch (err) {
+        console.warn('Failed to refresh bookings after purchasing view pass', err);
+      }
+    }
   } catch (err) {
     console.error(err);
     if (isUserRejectedRequestError(err)) {

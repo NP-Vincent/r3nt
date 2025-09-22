@@ -77,6 +77,27 @@
     .info-dot { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:#e0f2fe; color:#0369a1; font-size:.75rem; margin-left:6px; }
     .card.selected { border-color:#3b82f6; box-shadow:0 8px 20px rgba(59,130,246,0.18); }
     .listing-actions { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+    .bookings-card { margin-top:24px; padding:18px; border:1px solid #e2e8f0; border-radius:16px; background:#f1f5f9; display:flex; flex-direction:column; gap:16px; }
+    .bookings-header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .bookings-status { font-size:.9rem; color:#475569; }
+    .bookings-list { display:flex; flex-direction:column; gap:12px; }
+    .booking-entry { border:1px solid #cbd5f5; background:#eef2ff; border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:12px; }
+    .booking-entry-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+    .booking-entry-title { font-weight:600; font-size:1rem; }
+    .booking-status-badge { font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; padding:3px 10px; border-radius:999px; background:#e0e7ff; color:#312e81; }
+    .booking-status-active { background:#dcfce7; color:#166534; }
+    .booking-status-completed { background:#dbeafe; color:#1d4ed8; }
+    .booking-status-cancelled { background:#fee2e2; color:#991b1b; }
+    .booking-status-defaulted { background:#fef3c7; color:#92400e; }
+    .booking-entry-dates { font-size:.9rem; color:#334155; }
+    .booking-details { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px 16px; font-size:.9rem; }
+    .booking-detail-label { font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; color:#64748b; }
+    .booking-detail-value { font-weight:600; color:#0f172a; }
+    .booking-actions { display:flex; flex-direction:column; gap:8px; }
+    .booking-amount-input { width:100%; padding:10px 12px; border:1px solid #d0d7de; border-radius:8px; font-size:1rem; }
+    .booking-actions button { width:auto; background:#6366f1; color:#fff; }
+    .booking-helper-text { font-size:.8rem; color:#475569; }
+    button.inline-button.small { padding:6px 10px; font-size:.75rem; border-radius:8px; border:1px solid #cbd5f5; background:#e2e8f0; color:#1f2937; }
     footer { margin-top:32px; padding-top:12px; border-top:1px solid var(--stroke, #e2e8f0); font-size:.9rem; color:var(--muted, #475569); text-align:center; }
     @media (min-width: 640px) {
       .planner-grid { grid-template-columns: 1fr 1fr; }
@@ -149,6 +170,14 @@
       </div>
     </div>
   </div>
+  <section id="bookingsSection" class="bookings-card">
+    <div class="bookings-header">
+      <h2>Your bookings</h2>
+      <button type="button" id="refreshBookings" class="inline-button small" disabled>Refresh</button>
+    </div>
+    <div class="bookings-status" data-bookings-status>Connect wallet to view bookings.</div>
+    <div id="bookingsList" class="bookings-list"></div>
+  </section>
   <h2>Listings</h2>
   <div id="listings"></div>
   <footer>
