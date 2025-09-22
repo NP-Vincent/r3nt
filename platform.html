@@ -213,6 +213,28 @@
     <pre id="snapshotOutput">Loading current state…</pre>
   </section>
 
+  <section class="card" id="depositSection" data-owner-only hidden>
+    <h2>Deposit releases</h2>
+    <p class="muted">Review landlord proposals and confirm the final split using the platform owner wallet.</p>
+    <label>Listing ID (starts at 1)
+      <input id="depositListingId" inputmode="numeric" autocomplete="off" placeholder="1" />
+    </label>
+    <label>Booking ID
+      <input id="depositBookingId" inputmode="numeric" autocomplete="off" placeholder="1" />
+    </label>
+    <div class="button-row">
+      <button id="depositLoadBtn" type="button" class="secondary">Load booking</button>
+    </div>
+    <div class="note" id="depositInfo">Enter a listing &amp; booking ID, then load the booking to inspect its deposit status.</div>
+    <div class="muted" id="depositStatus"></div>
+    <form id="formConfirmDeposit" data-requires-signer>
+      <p class="inline-label">Enabled once a pending split exists and the owner wallet is connected.</p>
+      <div class="button-row">
+        <button id="confirmDepositBtn" type="submit" class="danger">Confirm deposit release</button>
+      </div>
+    </form>
+  </section>
+
   <section class="card" id="coreConfigSection" data-owner-only hidden>
     <h2>Core configuration</h2>
     <p class="muted">Addresses must be checksum formatted (0x-prefixed). Fees use basis points (1% = 100 bps). Totals cannot exceed 10,000 bps.</p>

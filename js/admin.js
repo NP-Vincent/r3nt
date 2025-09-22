@@ -16,7 +16,6 @@ const els = {
   tenantBps:  document.getElementById('tenantBps'),
   refresh:    document.getElementById('refresh'),
   propose:    document.getElementById('propose'),
-  confirm:    document.getElementById('confirm'),
   bookingInfo:document.getElementById('bookingInfo'),
   status:     document.getElementById('status'),
 };
@@ -210,24 +209,6 @@ els.propose.onclick = async () => {
   }
 };
 
-els.confirm.onclick = async () => {
-  try {
-    if (!provider) throw new Error('Connect wallet first.');
-    const [from] = await provider.request({ method:'eth_accounts' }) || [];
-    if (!from) throw new Error('No wallet account.');
-    await ensureArbitrum(provider);
-    const listingId = parseListingId();
-    const bookingId = parseBookingId();
-    const listingAddr = await getListingAddress(listingId);
-
-    const data = encodeFunctionData({ abi: LISTING_ABI, functionName:'confirmDepositSplit', args:[bookingId, '0x'] });
-    const txHash = await provider.request({ method:'eth_sendTransaction', params:[{ from, to: listingAddr, data }] });
-    updateStatus(`Confirm tx sent: ${txHash}`, 'success');
-  } catch (e) {
-    updateStatus(e?.message || 'Failed to confirm release.', 'error');
-  }
-};
-
 els.connect.onclick = async () => {
   try {
     provider = await sdk.wallet.getEthereumProvider();
@@ -236,7 +217,6 @@ els.connect.onclick = async () => {
     els.connect.textContent = 'Wallet Connected';
     els.connect.style.background = '#10b981';
     els.propose.disabled = false;
-    els.confirm.disabled = false;
     updateStatus('Wallet ready.', 'success');
   } catch (e) {
     updateStatus(e?.message || 'Wallet connection failed.', 'error');

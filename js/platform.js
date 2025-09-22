@@ -3,7 +3,7 @@ if (!ethersLib) {
   throw new Error('Ethers library not found. Ensure ethers UMD bundle is loaded before platform.js.');
 }
 
-import { PLATFORM_ADDRESS, PLATFORM_ABI, RPC_URL, APP_VERSION } from './config.js';
+import { PLATFORM_ADDRESS, PLATFORM_ABI, LISTING_ABI, RPC_URL, APP_VERSION } from './config.js';
 import { connectWallet, disconnectWallet } from './platform-only-metamask-wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 
@@ -25,6 +25,13 @@ const ownerGuardMessageEl = document.getElementById('ownerGuardMessage');
 const ownerOnlyNodes = document.querySelectorAll('[data-owner-only]');
 const devConsoleStatusEl = document.getElementById('devConsoleStatus');
 const toggleDevConsoleBtn = document.getElementById('toggleDevConsoleBtn');
+const depositListingIdInput = document.getElementById('depositListingId');
+const depositBookingIdInput = document.getElementById('depositBookingId');
+const depositLoadBtn = document.getElementById('depositLoadBtn');
+const depositInfoEl = document.getElementById('depositInfo');
+const depositStatusEl = document.getElementById('depositStatus');
+const depositConfirmForm = document.getElementById('formConfirmDeposit');
+const confirmDepositBtn = document.getElementById('confirmDepositBtn');
 
 const OWNER_REQUIREMENT_MESSAGE = 'Connect the platform owner wallet to unlock controls.';
 
@@ -32,6 +39,12 @@ let ownerAddress = null;
 let ownerAddressPromise = null;
 let ownerRequirementMessage = OWNER_REQUIREMENT_MESSAGE;
 let ownerAccessGranted = false;
+
+const STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
+const DEPOSIT_DEFAULT_MESSAGE =
+  'Enter a listing & booking ID, then load the booking to inspect its deposit status.';
+const DEPOSIT_DEFAULT_STATUS = 'Load a booking to view deposit proposal details.';
+let currentDepositContext = null;
 
 if (toggleDevConsoleBtn) {
   toggleDevConsoleBtn.disabled = true;
@@ -47,6 +60,8 @@ const navBadge = document.querySelector('nav .version-badge[data-version]');
 if (navBadge) {
   navBadge.textContent = `Build ${APP_VERSION}`;
 }
+
+resetDepositContext();
 
 function setActionStatus(message, type = 'info', toast = false) {
   actionStatusEl.textContent = message ?? '';
@@ -118,6 +133,7 @@ function setOwnerControlsEnabled(enabled) {
   } else if (toggleDevConsoleBtn) {
     toggleDevConsoleBtn.disabled = false;
   }
+  updateDepositControlsEnabled();
 }
 
 function updateDevConsoleStatus() {
@@ -321,12 +337,215 @@ function formatDuration(secondsValue) {
   return `${seconds} sec (~${hoursRounded} h)`;
 }
 
+function formatTimestamp(value) {
+  try {
+    const seconds = BigNumber.from(value || 0);
+    if (seconds.isZero()) {
+      return '-';
+    }
+    const millis = Number(seconds.toString()) * 1000;
+    if (!Number.isFinite(millis)) {
+      return seconds.toString();
+    }
+    const date = new Date(millis);
+    if (Number.isNaN(date.getTime())) {
+      return seconds.toString();
+    }
+    return `${date.toISOString().replace('T', ' ').slice(0, 16)} UTC`;
+  } catch (err) {
+    console.error('Failed to format timestamp', err);
+    return String(value ?? '');
+  }
+}
+
+function toBool(value) {
+  if (typeof value === 'boolean') return value;
+  if (value == null) return false;
+  if (BigNumber.isBigNumber(value)) return !value.isZero();
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') return value !== '' && value !== '0';
+  try {
+    return Boolean(value);
+  } catch (err) {
+    console.error('Failed to normalise boolean value', err);
+    return false;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function setDepositStatus(message, severity = 'info') {
+  if (!depositStatusEl) return;
+  depositStatusEl.textContent = message || '';
+  depositStatusEl.classList.remove('status-ok', 'status-error', 'status-warning');
+  if (!message) {
+    return;
+  }
+  if (severity === 'success') {
+    depositStatusEl.classList.add('status-ok');
+  } else if (severity === 'error') {
+    depositStatusEl.classList.add('status-error');
+  } else if (severity === 'warning') {
+    depositStatusEl.classList.add('status-warning');
+  }
+}
+
+function renderDepositInfo(context) {
+  if (!depositInfoEl) {
+    return;
+  }
+  if (!context) {
+    depositInfoEl.textContent = DEPOSIT_DEFAULT_MESSAGE;
+    return;
+  }
+
+  const { listingAddress, bookingId, booking, pending } = context;
+  const statusIndex = Number(BigNumber.from(booking.status || 0).toString());
+  const statusLabel = STATUS_LABELS[statusIndex] || `Unknown (${statusIndex})`;
+  const start = BigNumber.from(booking.start || 0);
+  const end = BigNumber.from(booking.end || 0);
+  const staySeconds = end.gt(start) ? end.sub(start) : BigNumber.from(0);
+  const depositReleased = toBool(booking.depositReleased);
+  const pendingExists = toBool(pending?.exists);
+  const tenantShareLabel = depositReleased ? ` · Tenant share: ${formatBps(booking.depositTenantBps || 0)}` : '';
+  const pendingLine = pendingExists
+    ? `Pending proposal: tenant ${formatBps(pending.tenantBps || 0)} · proposer ${
+        pending.proposer || constants.AddressZero
+      }`
+    : 'Pending proposal: none';
+
+  const lines = [
+    `Listing address: ${listingAddress}`,
+    `Booking ID: ${bookingId.toString()}`,
+    `Status: ${statusLabel}`,
+    `Tenant: ${booking.tenant}`,
+    `Range: ${formatTimestamp(booking.start)} → ${formatTimestamp(booking.end)} (${formatDuration(staySeconds)})`,
+    `Deposit held: ${formatUsdc(booking.deposit)} USDC`,
+    `Rent (gross/net): ${formatUsdc(booking.grossRent)} / ${formatUsdc(booking.expectedNetRent)} USDC`,
+    `Rent paid so far: ${formatUsdc(booking.rentPaid)} USDC`,
+    `Deposit released: ${depositReleased ? 'Yes' : 'No'}${tenantShareLabel}`,
+    pendingLine,
+  ];
+
+  depositInfoEl.innerHTML = lines.map(escapeHtml).join('<br>');
+}
+
+function updateDepositControlsEnabled() {
+  if (!confirmDepositBtn) {
+    return;
+  }
+  const hasPending = currentDepositContext ? toBool(currentDepositContext.pending?.exists) : false;
+  const alreadyReleased = currentDepositContext ? toBool(currentDepositContext.booking?.depositReleased) : false;
+  const walletReady = ownerAccessGranted && Boolean(platformWrite) && Boolean(signer);
+  confirmDepositBtn.disabled = !(walletReady && hasPending && !alreadyReleased);
+}
+
+function resetDepositContext() {
+  currentDepositContext = null;
+  renderDepositInfo(null);
+  setDepositStatus(DEPOSIT_DEFAULT_STATUS, 'info');
+  updateDepositControlsEnabled();
+}
+
+async function loadDepositDetails(options = {}) {
+  if (!depositListingIdInput || !depositBookingIdInput) {
+    return false;
+  }
+
+  const { quiet = false } = options;
+
+  try {
+    const listingId = parseListingId(depositListingIdInput.value);
+    const bookingId = parseBookingId(depositBookingIdInput.value);
+    const listingAddressRaw = await platformRead.listingById(listingId);
+    if (!listingAddressRaw || listingAddressRaw === constants.AddressZero) {
+      throw new Error('Listing not found for that ID.');
+    }
+    const listingAddress = utils.getAddress(listingAddressRaw);
+    const listingContract = new Contract(listingAddress, LISTING_ABI, readProvider);
+    const [bookingRaw, pendingRaw] = await Promise.all([
+      listingContract.bookingInfo(bookingId),
+      listingContract.pendingDepositSplit(bookingId),
+    ]);
+
+    const pendingData = pendingRaw?.viewData ?? pendingRaw ?? {};
+    let proposer = constants.AddressZero;
+    if (pendingData.proposer) {
+      try {
+        proposer = utils.getAddress(pendingData.proposer);
+      } catch (err) {
+        console.warn('Unable to normalise deposit proposer address', err);
+        proposer = pendingData.proposer;
+      }
+    }
+
+    const normalizedBooking = {
+      tenant: bookingRaw.tenant,
+      start: bookingRaw.start,
+      end: bookingRaw.end,
+      grossRent: bookingRaw.grossRent,
+      expectedNetRent: bookingRaw.expectedNetRent,
+      rentPaid: bookingRaw.rentPaid,
+      deposit: bookingRaw.deposit,
+      status: bookingRaw.status,
+      depositReleased: toBool(bookingRaw.depositReleased),
+      depositTenantBps: BigNumber.from(bookingRaw.depositTenantBps || 0),
+    };
+
+    const normalizedPending = {
+      exists: toBool(pendingData.exists),
+      tenantBps:
+        pendingData.tenantBps !== undefined ? BigNumber.from(pendingData.tenantBps) : BigNumber.from(0),
+      proposer,
+    };
+
+    currentDepositContext = {
+      listingId,
+      bookingId,
+      listingAddress,
+      booking: normalizedBooking,
+      pending: normalizedPending,
+    };
+
+    renderDepositInfo(currentDepositContext);
+    updateDepositControlsEnabled();
+
+    if (!quiet) {
+      const hasPending = toBool(normalizedPending.exists);
+      const alreadyReleased = toBool(normalizedBooking.depositReleased);
+      if (hasPending) {
+        setDepositStatus('Pending deposit split found. Review details before confirming.', 'success');
+      } else if (alreadyReleased) {
+        setDepositStatus('Deposit already released for this booking.', 'warning');
+      } else {
+        setDepositStatus('No pending deposit split for this booking.', 'warning');
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Failed to load deposit details', err);
+    currentDepositContext = null;
+    renderDepositInfo(null);
+    updateDepositControlsEnabled();
+    const { message, severity } = interpretError(err);
+    setDepositStatus(`Failed to load deposit details: ${message}`, severity);
+    return false;
+  }
+}
+
 function enableForms(enabled) {
   document.querySelectorAll('form[data-requires-signer]').forEach((form) => {
     Array.from(form.elements).forEach((control) => {
       control.disabled = !enabled;
     });
   });
+  updateDepositControlsEnabled();
 }
 
 enableForms(false);
@@ -405,9 +624,10 @@ async function refreshSnapshot() {
 async function withSigner(label, action, button) {
   if (!platformWrite || !signer) {
     setActionStatus('Connect your wallet before sending transactions.', 'error');
-    return;
+    return false;
   }
   if (button) button.disabled = true;
+  let success = false;
   try {
     setActionStatus(`${label}…`);
     const tx = await action();
@@ -415,6 +635,7 @@ async function withSigner(label, action, button) {
     await tx.wait();
     setActionStatus(`${label} confirmed.`, 'success', true);
     await refreshSnapshot();
+    success = true;
   } catch (err) {
     console.error(err);
     const { message, severity } = interpretError(err);
@@ -422,6 +643,7 @@ async function withSigner(label, action, button) {
   } finally {
     if (button) button.disabled = false;
   }
+  return success;
 }
 
 function normalizeAddress(value, label, { optional = false } = {}) {
@@ -460,6 +682,15 @@ function parseHours(value, label) {
   const hours = BigInt(raw);
   if (hours < 0n) throw new Error(`${label} cannot be negative.`);
   return BigNumber.from(hours * 3_600n);
+}
+
+function parseListingId(value) {
+  const raw = String(value ?? '').trim();
+  if (raw === '') throw new Error('Listing ID is required.');
+  if (!/^\d+$/.test(raw)) throw new Error('Listing ID must be an integer.');
+  const parsed = BigNumber.from(raw);
+  if (parsed.isZero()) throw new Error('Listing ID must be at least 1.');
+  return parsed;
 }
 
 function parseBookingId(value) {
@@ -539,6 +770,47 @@ disconnectBtn.addEventListener('click', async () => {
     setActionStatus('Disconnected.', 'info', true);
   }
 });
+
+if (depositLoadBtn) {
+  depositLoadBtn.addEventListener('click', () => {
+    loadDepositDetails();
+  });
+}
+
+if (depositConfirmForm && confirmDepositBtn) {
+  depositConfirmForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!currentDepositContext) {
+      setDepositStatus('Load a booking before confirming the deposit split.', 'error');
+      return;
+    }
+    const hasPending = toBool(currentDepositContext.pending?.exists);
+    if (!hasPending) {
+      setDepositStatus('No pending deposit split to confirm for this booking.', 'warning');
+      return;
+    }
+    if (toBool(currentDepositContext.booking?.depositReleased)) {
+      setDepositStatus('Deposit already released for this booking.', 'warning');
+      return;
+    }
+    try {
+      const listingWrite = new Contract(currentDepositContext.listingAddress, LISTING_ABI, signer);
+      const success = await withSigner(
+        'Confirming deposit release',
+        () => listingWrite.confirmDepositSplit(currentDepositContext.bookingId, '0x'),
+        confirmDepositBtn,
+      );
+      if (success) {
+        await loadDepositDetails({ quiet: true });
+        setDepositStatus('Deposit release confirmed on-chain.', 'success');
+      }
+    } catch (err) {
+      console.error('Failed to confirm deposit release', err);
+      const { message, severity } = interpretError(err);
+      setDepositStatus(`Failed to confirm deposit release: ${message}`, severity);
+    }
+  });
+}
 
 refreshSnapshotBtn.addEventListener('click', () => {
   refreshSnapshot();
