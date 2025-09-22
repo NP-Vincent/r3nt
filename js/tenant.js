@@ -854,11 +854,25 @@ async function bookListing(listing = selectedListing){
     const deposit = typeof listing.depositAmount === 'bigint' ? listing.depositAmount : BigInt(listing.depositAmount || 0);
     const installmentCap = calculateInstallmentCap(rent, startTs, endTs, selectedPeriod.days);
 
-    const calls = [];
     let approveData;
+    let needsApproval = false;
     if (deposit > 0n) {
-      approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [listing.address, deposit] });
-      calls.push({ to: USDC_ADDRESS, data: approveData });
+      try {
+        const allowanceRaw = await pub.readContract({
+          address: USDC_ADDRESS,
+          abi: erc20Abi,
+          functionName: 'allowance',
+          args: [from, listing.address],
+        });
+        const allowance = typeof allowanceRaw === 'bigint' ? allowanceRaw : BigInt(allowanceRaw || 0);
+        needsApproval = allowance < deposit;
+      } catch (err) {
+        console.warn('Failed to check USDC allowance before booking', err);
+        needsApproval = true;
+      }
+      if (needsApproval) {
+        approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [listing.address, deposit] });
+      }
     }
 
     const bookData = encodeFunctionData({
@@ -866,26 +880,37 @@ async function bookListing(listing = selectedListing){
       functionName: 'book',
       args: [startTs, endTs, selectedPeriod.value],
     });
-    calls.push({ to: listing.address, data: bookData });
+    const calls = [{ to: listing.address, data: bookData }];
+
+    const submitSequential = async () => {
+      if (needsApproval && approveData) {
+        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+      }
+      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: listing.address, data: bookData }] });
+    };
 
     const depositMsg = deposit > 0n ? `${formatUsdc(deposit)} USDC deposit` : 'no deposit';
     const rentMsg = rent > 0n ? `${formatUsdc(rent)} USDC rent` : '0 USDC rent';
     const cadenceMsg = installmentCap > 0n
       ? `${selectedPeriod.label} payments up to ${formatUsdc(installmentCap)} USDC`
       : `${selectedPeriod.label} payments`;
-    els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}; ${cadenceMsg}).`;
+    const approvalNotice = needsApproval
+      ? ' Approve the deposit when prompted, then confirm the booking.'
+      : '';
+    els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}; ${cadenceMsg}).${approvalNotice}`;
 
-    try {
-      await p.request({ method: 'wallet_sendCalls', params: [{ calls }] });
-    } catch {
+    if (!needsApproval && calls.length === 1) {
       try {
-        await p.request({ method: 'wallet_sendCalls', params: calls });
+        await p.request({ method: 'wallet_sendCalls', params: [{ calls }] });
       } catch {
-        if (deposit > 0n && approveData) {
-          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+        try {
+          await p.request({ method: 'wallet_sendCalls', params: calls });
+        } catch {
+          await submitSequential();
         }
-        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: listing.address, data: bookData }] });
       }
+    } else {
+      await submitSequential();
     }
 
     els.status.textContent = 'Booking submitted.';
