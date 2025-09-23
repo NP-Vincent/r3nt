@@ -51,6 +51,11 @@ interface IListingDeposits {
     function confirmDepositSplit(uint256 bookingId, bytes calldata signature) external;
 }
 
+/// @dev Minimal interface exposed by the listing for updating its cast hash reference.
+interface IListingCastHash {
+    function updateCastHash(bytes32 newCastHash) external;
+}
+
 /// @dev Minimal subset of the r3nt-SQMU manager interface used to grant minting rights.
 interface IR3ntSQMUManager {
     function grantListingMinter(address listing) external;
@@ -163,6 +168,12 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     event ListingPricingUpdated(uint256 listingCreationFee, uint256 viewPassPrice, uint64 viewPassDuration);
     event ListingRegistered(address indexed listing, address indexed landlord, uint256 indexed listingId);
     event ListingDeactivated(address indexed listing, uint256 indexed listingId);
+    event ListingCastHashUpdated(
+        uint256 indexed listingId,
+        address indexed listing,
+        bytes32 previousCastHash,
+        bytes32 newCastHash
+    );
     event ViewPassBought(address indexed buyer, uint256 expiry);
     event AgentImplementationUpdated(address indexed previousImplementation, address indexed newImplementation);
     event MaxAgentFeeUpdated(uint16 previousMaxFeeBps, uint16 newMaxFeeBps);
@@ -436,6 +447,24 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         require(listing != address(0), "listing not found");
 
         IListingDeposits(listing).confirmDepositSplit(bookingId, signature);
+    }
+
+    function updateListingCastHash(uint256 listingId, bytes32 newCastHash) external onlyOwner {
+        require(newCastHash != bytes32(0), "castHash=0");
+
+        address listing = listingById[listingId];
+        require(listing != address(0), "listing not found");
+        require(listingActive[listingId], "listing inactive");
+
+        (bool success, bytes memory data) = listing.staticcall(abi.encodeWithSignature("castHash()"));
+        require(success && data.length >= 32, "castHash read failed");
+        bytes32 previousCastHash = abi.decode(data, (bytes32));
+
+        require(previousCastHash != newCastHash, "castHash unchanged");
+
+        IListingCastHash(listing).updateCastHash(newCastHash);
+
+        emit ListingCastHashUpdated(listingId, listing, previousCastHash, newCastHash);
     }
 
     function _collectListingFee(address payer) internal {

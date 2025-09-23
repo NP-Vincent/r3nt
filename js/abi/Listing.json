@@ -523,6 +523,25 @@
       "type": "event"
     },
     {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "previousCastHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "newCastHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "CastHashUpdated",
+      "type": "event"
+    },
+    {
       "inputs": [
         {
           "internalType": "uint256",
@@ -611,6 +630,19 @@
         }
       ],
       "name": "registerAgent",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "newCastHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "updateCastHash",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"

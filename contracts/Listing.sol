@@ -219,6 +219,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     // -------------------------------------------------
 
     event ListingInitialized(address indexed landlord, address indexed platform, uint256 fid);
+    event CastHashUpdated(bytes32 previousCastHash, bytes32 newCastHash);
     event BookingCreated(
         uint256 indexed bookingId,
         address indexed tenant,
@@ -359,6 +360,25 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         metadataURI = metadataURI_;
 
         emit ListingInitialized(landlord_, platform_, fid_);
+    }
+
+    // -------------------------------------------------
+    // Platform-controlled metadata updates
+    // -------------------------------------------------
+
+    /**
+     * @notice Update the canonical Farcaster cast hash reference for the listing.
+     * @param newCastHash Canonical Farcaster cast hash (normalized bytes32 form).
+     */
+    function updateCastHash(bytes32 newCastHash) external onlyPlatform {
+        require(newCastHash != bytes32(0), "castHash=0");
+
+        bytes32 previousCastHash = castHash;
+        require(previousCastHash != newCastHash, "castHash unchanged");
+
+        castHash = newCastHash;
+
+        emit CastHashUpdated(previousCastHash, newCastHash);
     }
 
     // -------------------------------------------------
