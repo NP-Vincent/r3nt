@@ -4,44 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>r3nt — Deposit Admin</title>
-  <style>
-    :root { --fg:#0f172a; --bg:#ffffff; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 16px 16px 40px; background: var(--bg); color: var(--fg); }
-    header { margin-bottom: 16px; }
-    .brand { font-weight: 800; letter-spacing: .3px; font-size: 1.3rem; }
-    .beta-note { font-size: .9rem; margin: -12px 0 16px; }
-    h1 { font-size: 1.25rem; margin: 8px 0 12px; }
-    .row { display: flex; gap: 10px; }
-    label { display: block; font-size: .9rem; margin: 10px 0 6px; }
-    input, textarea { width: 100%; padding: 10px 12px; border: 1px solid #d0d7de; border-radius: 8px; font-size: .95rem; }
-    textarea { height: 80px; }
-    button { width: 100%; padding: 12px 16px; border: 0; border-radius: 10px; font-weight: 700; cursor: pointer; }
-    button:disabled { opacity: .6; cursor: not-allowed; }
-    #connect { background: #1f6feb; color:#fff; margin:8px 0; }
-    #refresh { background: #6366f1; color:#fff; margin:8px 0; }
-    #propose { background: #10b981; color:#fff; margin:8px 0; }
-    #status { min-height:22px; margin-top:10px; font-size:.95rem; color:#444; }
-    .muted { color:#666; font-size:0.9rem; }
-    nav { margin-bottom:16px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
-    nav a { color:#1f6feb; text-decoration:none; font-weight:600; }
-    .back-button { appearance:none; border:1px solid #d0d7de; background:#fff; color:#1f2937; padding:8px 12px; border-radius:999px; font-weight:600; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
-    .back-button span { font-size:1rem; line-height:1; }
-    .back-button[hidden] { display:none; }
-    .back-button:focus-visible { outline:2px solid #1f6feb; outline-offset:2px; }
-    .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
-    .notification-tray { position:sticky; top:0; display:flex; flex-direction:column; gap:8px; margin:0 0 12px; z-index:2; }
-    .notification { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:12px; border:1px solid #cbd5f5; background:#eef2ff; color:#1e3a8a; }
-    .notification.notification-success { border-color:#bbf7d0; background:#ecfdf5; color:#065f46; }
-    .notification.notification-error { border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
-    .notification.notification-warning { border-color:#fef08a; background:#fffbeb; color:#92400e; }
-    .notification-message { margin-right:12px; font-size:.9rem; }
-    .notification-close { background:transparent; border:0; color:inherit; font-size:1.1rem; cursor:pointer; padding:0 4px; }
-    footer { margin-top:32px; padding-top:12px; border-top:1px solid var(--stroke, #e2e8f0); font-size:.9rem; color:var(--muted, #475569); text-align:center; }
-  </style>
+  <link rel="stylesheet" href="./styles/theme.css" />
+
   <script src="./js/dev-settings.js"></script>
   <script src="./js/dev-error-console.js"></script>
 </head>
-<body>
+<body class="page-compact">
   <header>
     <div class="brand">r3nt by SQMU</div>
   </header>

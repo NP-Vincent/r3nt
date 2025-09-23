@@ -7,123 +7,12 @@
 
   <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://r3nt.sqmu.net/assets/icon.png","button":{"title":"Open r3nt","action":{"type":"launch_miniapp","name":"r3nt","url":"https://r3nt.sqmu.net/index.html","splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png","splashBackgroundColor":"#FFFFFF"}}}' />
 
-  <style>
-    :root { --fg:#0f172a; --bg:#ffffff; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 460px; margin: 0 auto; padding: 20px; background: var(--bg); color: var(--fg); }
-    header { margin-bottom: 16px; }
-    .brand { font-weight: 800; letter-spacing: .3px; font-size: 1.3rem; }
-    .beta-note { font-size: .9rem; margin: -12px 0 16px; }
-    .muted { color:#475569; }
-    button { width: 100%; padding: 12px 16px; border: 0; border-radius: 10px; font-weight: 700; cursor: pointer; }
-    button:disabled { opacity: .6; cursor: not-allowed; }
-    #connect { background: #1f6feb; color: #fff; }
-    #buy { background: #10b981; color: #fff; margin-top: 10px; }
-    #status { margin-top: 14px; min-height: 24px; font-size: 0.95rem; color: #444; line-height:1.4; word-break:break-word; }
-    #address { margin-top: 6px; font-family: ui-monospace, Menlo, monospace; color: #333; }
-    #listings { margin-top: 20px; display:flex; flex-direction:column; gap:12px; }
-    .card {
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      padding:12px;
-      margin-bottom:10px;
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-      line-height:1.4;
-      word-break:break-word;
-    }
-    .listing-title { font-weight:600; font-size:1rem; }
-    .listing-summary { color:#475569; }
-    .listing-geo { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-    button.inline-button { width:auto; padding:8px 12px; font-size:.8rem; border-radius:8px; border:1px solid #bfdbfe; background:#dbeafe; color:#1d4ed8; }
-    button.inline-button:disabled { opacity:.6; cursor:not-allowed; }
-    .geo-map-link { color:#0369a1; font-weight:600; text-decoration:none; }
-    .geo-map-link:hover { text-decoration:underline; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; }
-    nav { margin-bottom:16px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
-    nav a { color:#1f6feb; text-decoration:none; font-weight:600; }
-    .back-button { appearance:none; border:1px solid #d0d7de; background:#fff; color:#1f2937; padding:8px 12px; border-radius:999px; font-weight:600; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
-    .back-button span { font-size:1rem; line-height:1; }
-    .back-button[hidden] { display:none; }
-    .back-button:focus-visible { outline:2px solid #1f6feb; outline-offset:2px; }
-    .version-badge { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:8px; font-size:.65rem; letter-spacing:.08em; text-transform:uppercase; background:#e2e8f0; color:#475569; }
-    select { width:100%; padding:6px; margin:4px 0 8px; }
-    a.listing-link { display:inline-block; margin-top:8px; color:#1f6feb; font-weight:600; text-decoration:none; }
-    a.listing-link:hover { text-decoration:underline; }
-    .notification-tray { position: sticky; top: 0; display:flex; flex-direction:column; gap:8px; margin:0 0 12px; z-index:2; }
-    .notification { display:flex; align-items:flex-start; justify-content:flex-start; gap:8px; flex-wrap:wrap; padding:10px 12px; border-radius:12px; border:1px solid #cbd5f5; background:#eef2ff; color:#1e3a8a; }
-    .notification.notification-success { border-color:#bbf7d0; background:#ecfdf5; color:#065f46; }
-    .notification.notification-error { border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
-    .notification.notification-warning { border-color:#fef08a; background:#fffbeb; color:#92400e; }
-    .notification-message { flex:1 1 100%; margin:0; font-size:.9rem; line-height:1.4; word-break:break-word; }
-    .notification-close { background:transparent; border:0; color:inherit; font-size:1.1rem; cursor:pointer; padding:0 4px; margin-left:auto; }
-    .planner-card { margin-top:24px; padding:18px; border:1px solid #e2e8f0; border-radius:16px; background:#f8fafc; }
-    .planner-card h2 { margin:0 0 6px; font-size:1.2rem; }
-    .planner-card p { margin:0; font-size:.9rem; color:#475569; }
-    .planner-grid { display:grid; gap:18px; margin-top:16px; }
-    .planner-inputs label { display:block; font-size:.9rem; margin:10px 0 6px; }
-    .planner-inputs input, .planner-inputs select { width:100%; padding:10px 12px; border:1px solid #d0d7de; border-radius:8px; font-size:.95rem; }
-    .planner-summary { background:#fff; border:1px solid #e2e8f0; border-radius:16px; padding:16px; display:flex; flex-direction:column; gap:10px; }
-    .summary-header { display:flex; flex-direction:column; gap:4px; }
-    .summary-title { font-weight:700; font-size:1rem; }
-    .summary-subtitle { color:#475569; font-size:.9rem; }
-    .summary-breakdown { margin:0; padding:0; }
-    .summary-breakdown div { display:flex; justify-content:space-between; gap:12px; margin:6px 0; font-size:.95rem; }
-    .summary-breakdown dt { font-weight:600; }
-    .summary-breakdown dd { margin:0; font-variant-numeric:tabular-nums; }
-    #confirmBooking { background:#0ea5e9; color:#fff; margin-top:4px; }
-    #confirmBooking:disabled { opacity:.55; cursor:not-allowed; }
-    .summary-footnote { font-size:.85rem; color:#64748b; }
-    .info-dot { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:#e0f2fe; color:#0369a1; font-size:.75rem; margin-left:6px; }
-    .card.selected { border-color:#3b82f6; box-shadow:0 8px 20px rgba(59,130,246,0.18); }
-    .listing-actions { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
-    .bookings-card { margin-top:24px; padding:18px; border:1px solid #e2e8f0; border-radius:16px; background:#f1f5f9; display:flex; flex-direction:column; gap:16px; }
-    .bookings-header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
-    .bookings-status { font-size:.9rem; color:#475569; }
-    .bookings-list { display:flex; flex-direction:column; gap:12px; }
-    .booking-entry { border:1px solid #cbd5f5; background:#eef2ff; border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:12px; }
-    .booking-entry-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
-    .booking-entry-title { font-weight:600; font-size:1rem; }
-    .booking-status-badge { font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; padding:3px 10px; border-radius:999px; background:#e0e7ff; color:#312e81; }
-    .booking-status-active { background:#dcfce7; color:#166534; }
-    .booking-status-completed { background:#dbeafe; color:#1d4ed8; }
-    .booking-status-cancelled { background:#fee2e2; color:#991b1b; }
-    .booking-status-defaulted { background:#fef3c7; color:#92400e; }
-    .booking-entry-dates { font-size:.9rem; color:#334155; }
-    .booking-details { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px 16px; font-size:.9rem; }
-    .booking-detail-label { font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; color:#64748b; }
-    .booking-detail-value { font-weight:600; color:#0f172a; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-    .copy-button {
-      width:28px;
-      height:28px;
-      border-radius:50%;
-      border:1px solid #cbd5f5;
-      background:#eef2ff;
-      color:#1e3a8a;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      font-size:.85rem;
-      cursor:pointer;
-    }
-    .copy-button:hover { background:#e0e7ff; }
-    .copy-button:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }
-    .copy-button:disabled { opacity:.55; cursor:not-allowed; }
-    .booking-actions { display:flex; flex-direction:column; gap:8px; }
-    .booking-amount-input { width:100%; padding:10px 12px; border:1px solid #d0d7de; border-radius:8px; font-size:1rem; }
-    .booking-actions button { width:auto; background:#6366f1; color:#fff; }
-    .booking-helper-text { font-size:.8rem; color:#475569; }
-    button.inline-button.small { padding:6px 10px; font-size:.75rem; border-radius:8px; border:1px solid #cbd5f5; background:#e2e8f0; color:#1f2937; }
-    footer { margin-top:32px; padding-top:12px; border-top:1px solid var(--stroke, #e2e8f0); font-size:.9rem; color:var(--muted, #475569); text-align:center; }
-    @media (min-width: 640px) {
-      .planner-grid { grid-template-columns: 1fr 1fr; }
-      button { width:auto; }
-    }
-  </style>
+  <link rel="stylesheet" href="./styles/theme.css" />
+
   <script src="./js/dev-settings.js"></script>
   <script src="./js/dev-error-console.js"></script>
 </head>
-<body>
+<body class="page-compact">
   <header>
     <div class="brand">r3nt by SQMU</div>
   </header>
