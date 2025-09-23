@@ -25,6 +25,7 @@ let signer = null;
 let provider = null;
 let platformWrite = null;
 let bookingRegistryAddress = null;
+let bookingRegistryRead = null;
 let bookingRegistryWrite = null;
 let configuredRegistryAddress = null;
 try {
@@ -243,6 +244,18 @@ function interpretError(err) {
   const fallback = 'Unknown error';
   if (!err) {
     return { message: fallback, severity: 'error' };
+  }
+
+  if (typeof err === 'object') {
+    const potentialSeverity = err?.severity;
+    const potentialMessage = err?.message;
+    if (typeof potentialSeverity === 'string' && typeof potentialMessage === 'string') {
+      const cleaned = cleanErrorMessage(potentialMessage);
+      const normalizedSeverity = potentialSeverity.toLowerCase();
+      const allowedSeverities = ['error', 'warning', 'success', 'info'];
+      const severityValue = allowedSeverities.includes(normalizedSeverity) ? normalizedSeverity : 'error';
+      return { message: cleaned || potentialMessage || fallback, severity: severityValue };
+    }
   }
 
   const messages = [];
@@ -585,17 +598,33 @@ function resetDeregisterContext({ clearInputs = false } = {}) {
 }
 
 function updateBookingRegistryContract() {
-  if (!signer || !bookingRegistryAddress) {
+  if (!bookingRegistryAddress) {
+    bookingRegistryRead = null;
     bookingRegistryWrite = null;
     updateDeregisterControlsEnabled();
     return;
   }
+
+  try {
+    bookingRegistryRead = new Contract(bookingRegistryAddress, REGISTRY_ABI, readProvider);
+  } catch (err) {
+    console.error('Failed to create BookingRegistry read contract instance', err);
+    bookingRegistryRead = null;
+  }
+
+  if (!signer) {
+    bookingRegistryWrite = null;
+    updateDeregisterControlsEnabled();
+    return;
+  }
+
   try {
     bookingRegistryWrite = new Contract(bookingRegistryAddress, REGISTRY_ABI, signer);
   } catch (err) {
     console.error('Failed to create BookingRegistry contract instance', err);
     bookingRegistryWrite = null;
   }
+
   updateDeregisterControlsEnabled();
 }
 
@@ -1499,6 +1528,49 @@ bindForm(deregisterListingForm, 'Deregistering listing', async () => {
   updateDeregisterControlsEnabled();
 
   const targetAddress = listingAddress;
+  if (!bookingRegistryRead) {
+    const error = new Error('Booking registry contract unavailable.');
+    error.severity = 'error';
+    setDeregisterListingStatus('Booking registry contract unavailable. Reload and try again.', 'error');
+    throw error;
+  }
+
+  const contextRef =
+    deregisterContext || { listingId: null, address: targetAddress, resolvedFromId: false, loading: false };
+  contextRef.address = targetAddress;
+  contextRef.loading = true;
+  setDeregisterListingStatus(`Checking registration status for ${targetAddress}…`);
+  updateDeregisterControlsEnabled();
+
+  let isRegistered = false;
+  try {
+    isRegistered = await bookingRegistryRead.isListing(targetAddress);
+  } catch (err) {
+    console.error('Failed to check listing registration before deregistering', err);
+    const { message, severity } = interpretError(err);
+    setDeregisterListingStatus(`Failed to check listing registration: ${message}`, severity);
+    const forwarded = new Error(message);
+    forwarded.severity = severity;
+    throw forwarded;
+  } finally {
+    contextRef.loading = false;
+    deregisterContext = contextRef;
+    updateDeregisterControlsEnabled();
+  }
+
+  if (!isRegistered) {
+    const warningMessage = `Listing at ${targetAddress} is not registered in the booking registry.`;
+    const warningError = new Error(warningMessage);
+    warningError.severity = 'warning';
+    setDeregisterListingStatus(warningMessage, 'warning');
+    throw warningError;
+  }
+
+  setDeregisterListingStatus(
+    `Listing at ${targetAddress} is currently registered in the booking registry.`,
+    'success',
+  );
+
   return async () => bookingRegistryWrite.deregisterListing(targetAddress);
 });
 
