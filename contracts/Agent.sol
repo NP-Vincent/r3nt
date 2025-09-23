@@ -4,9 +4,9 @@ pragma solidity ^0.8.26;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 /// @notice Minimal interface for interacting with a listing clone.
 interface IListingLike {
@@ -103,7 +103,7 @@ interface IR3ntSQMU {
  *      protocol modules.
  */
 contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
-    using SafeERC20 for IERC20;
+    using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @notice Precision used for rent accumulator calculations.
     uint256 private constant RENT_PRECISION = 1e18;
@@ -383,7 +383,7 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
         totalCost = pricePerSqmu * sqmuAmount;
         require(totalCost > 0, "cost=0");
 
-        IERC20 token = IERC20(usdc);
+        IERC20Upgradeable token = IERC20Upgradeable(usdc);
         token.safeTransferFrom(msg.sender, address(this), totalCost);
 
         uint256 platformFee = (totalCost * fundraisingFeeBps) / BPS_DENOMINATOR;
@@ -540,7 +540,7 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
         investorDebt[msg.sender] = accumulated;
 
         address to = recipient == address(0) ? msg.sender : recipient;
-        IERC20(usdc).safeTransfer(to, amount);
+        IERC20Upgradeable(usdc).safeTransfer(to, amount);
 
         emit Claimed(bookingId, msg.sender, to, amount);
     }
@@ -582,7 +582,7 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
         agentFeesAccrued = 0;
 
         address to = recipient == address(0) ? agentFeeRecipient : recipient;
-        IERC20(usdc).safeTransfer(to, amount);
+        IERC20Upgradeable(usdc).safeTransfer(to, amount);
 
         emit AgentFeesWithdrawn(to, amount);
     }
@@ -628,7 +628,7 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
         require(grossAmount > 0, "amount=0");
         require(soldSqmu > 0, "no investors");
 
-        IERC20 token = IERC20(usdc);
+        IERC20Upgradeable token = IERC20Upgradeable(usdc);
         token.safeTransferFrom(payer, address(this), grossAmount);
 
         uint256 agentFee = (grossAmount * agentFeeBps) / BPS_DENOMINATOR;
