@@ -4,8 +4,8 @@ pragma solidity ^0.8.26;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /// @dev Minimal interface exposed by the listing factory.
@@ -63,7 +63,7 @@ interface IR3ntSQMUManager {
  *      multi-sig which controls configuration updates and authorises upgrades.
  */
 contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
-    using SafeERC20 for IERC20;
+    using SafeERC20Upgradeable for IERC20Upgradeable;
 
     /// @dev Basis points denominator used for fee calculations.
     uint16 public constant BPS_DENOMINATOR = 10_000;
@@ -450,7 +450,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         require(treasury_ != address(0), "treasury=0");
         require(payer != address(0), "payer=0");
 
-        IERC20(usdc_).safeTransferFrom(payer, treasury_, fee);
+        IERC20Upgradeable(usdc_).safeTransferFrom(payer, treasury_, fee);
     }
 
     // -------------------------------------------------
@@ -591,7 +591,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             address treasury_ = treasury;
             require(usdc_ != address(0), "usdc=0");
             require(treasury_ != address(0), "treasury=0");
-            IERC20(usdc_).safeTransferFrom(buyer, treasury_, price);
+            IERC20Upgradeable(usdc_).safeTransferFrom(buyer, treasury_, price);
         }
 
         uint256 currentExpiry = viewPassExpiry[buyer];
