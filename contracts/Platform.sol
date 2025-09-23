@@ -115,6 +115,9 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /// @dev Reverse lookup from listing address to its sequential identifier.
     mapping(address => uint256) public listingIds;
 
+    /// @notice Tracks whether a listing id remains active.
+    mapping(uint256 => bool) public listingActive;
+
     /// @notice Timestamp when each listing was registered (unix epoch seconds).
     /// Listings created before this upgrade will return zero until manually backfilled.
     mapping(uint256 => uint256) public listingCreated;
@@ -154,6 +157,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     event FeesUpdated(uint16 tenantFeeBps, uint16 landlordFeeBps);
     event ListingPricingUpdated(uint256 listingCreationFee, uint256 viewPassPrice, uint64 viewPassDuration);
     event ListingRegistered(address indexed listing, address indexed landlord, uint256 indexed listingId);
+    event ListingDeactivated(address indexed listing, uint256 indexed listingId);
     event ViewPassBought(address indexed buyer, uint256 expiry);
     event AgentImplementationUpdated(address indexed previousImplementation, address indexed newImplementation);
     event MaxAgentFeeUpdated(uint16 previousMaxFeeBps, uint16 newMaxFeeBps);
@@ -343,10 +347,21 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         isListing[listing] = true;
         listingById[listingId] = listing;
         listingIds[listing] = listingId;
+        listingActive[listingId] = true;
         _listings.push(listing);
         listingCreated[listingId] = block.timestamp;
 
         emit ListingRegistered(listing, landlord, listingId);
+    }
+
+    function deactivateListing(uint256 listingId) external onlyOwner {
+        address listing = listingById[listingId];
+        require(listing != address(0), "unknown listing");
+        require(listingActive[listingId], "already inactive");
+
+        listingActive[listingId] = false;
+
+        emit ListingDeactivated(listing, listingId);
     }
 
     function createAgent(
@@ -436,8 +451,38 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         return (listingFactory, bookingRegistry, sqmuToken);
     }
 
-    function allListings() external view returns (address[] memory) {
-        return _listings;
+    function allListings() external view returns (address[] memory activeListings) {
+        uint256 totalListings = _listings.length;
+        uint256 activeCount;
+
+        for (uint256 i = 0; i < totalListings; i++) {
+            address listing = _listings[i];
+            if (listing == address(0)) {
+                continue;
+            }
+            uint256 listingId = listingIds[listing];
+            if (listingId != 0 && listingActive[listingId]) {
+                activeCount++;
+            }
+        }
+
+        activeListings = new address[](activeCount);
+        if (activeCount == 0) {
+            return activeListings;
+        }
+
+        uint256 index;
+        for (uint256 i = 0; i < totalListings; i++) {
+            address listing = _listings[i];
+            if (listing == address(0)) {
+                continue;
+            }
+            uint256 listingId = listingIds[listing];
+            if (listingId != 0 && listingActive[listingId]) {
+                activeListings[index] = listing;
+                index++;
+            }
+        }
     }
 
     /**
