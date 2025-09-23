@@ -562,6 +562,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         if (deposit > 0) {
             booking.deposit = 0;
             _depositReleased[bookingId] = true;
+            delete _depositSplitProposals[bookingId];
             _confirmedDepositTenantBps[bookingId] = BPS_DENOMINATOR;
             IERC20Upgradeable(usdc).safeTransfer(booking.tenant, deposit);
             emit DepositReleased(bookingId, msg.sender, deposit, 0);
@@ -587,6 +588,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             if (deposit > 0) {
                 booking.deposit = 0;
                 _depositReleased[bookingId] = true;
+                delete _depositSplitProposals[bookingId];
                 _confirmedDepositTenantBps[bookingId] = 0;
                 _handleLandlordIncome(bookingId, deposit);
                 emit DepositReleased(bookingId, msg.sender, 0, deposit);
