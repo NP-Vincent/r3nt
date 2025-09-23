@@ -1247,16 +1247,26 @@ dl.summary-breakdown dd {
   font-size: 0.95rem;
 }
 
+.status.status-info,
+.status-info {
+  color: var(--color-muted-strong);
+}
+
+.status.status-success,
+.status-success,
 .status-ok {
-  color: var(--color-success-text);
+  color: var(--color-heading);
 }
 
+.status.status-error,
 .status-error {
-  color: var(--color-danger-text);
+  color: var(--color-heading);
+  font-weight: 600;
 }
 
+.status.status-warning,
 .status-warning {
-  color: var(--color-warning-text);
+  color: var(--color-muted);
 }
 
 .note {

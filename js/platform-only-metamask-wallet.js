@@ -21,10 +21,38 @@ const ARBITRUM_PARAMS = {
   blockExplorerUrls: ['https://arbiscan.io'],
 };
 
+const STATUS_CLASS_MAP = {
+  info: 'status-info',
+  success: 'status-success',
+  warning: 'status-warning',
+  error: 'status-error',
+};
+
+const STATUS_CLASSES = Object.values(STATUS_CLASS_MAP);
+
+function applyStatus(statusNode, message, variant = 'info') {
+  if (!statusNode) {
+    return;
+  }
+  statusNode.textContent = message;
+  statusNode.classList.add('status');
+  STATUS_CLASSES.forEach((className) => {
+    statusNode.classList.remove(className);
+  });
+  statusNode.classList.remove('status-ok');
+  const className = STATUS_CLASS_MAP[variant] || null;
+  if (className) {
+    statusNode.classList.add(className);
+  }
+}
+
 export async function connectWallet(statusId) {
   const ethereum = MMSDK.getProvider();
   const statusDiv = document.getElementById(statusId);
-  statusDiv.innerText = 'Connecting to MetaMask...';
+  if (!statusDiv) {
+    throw new Error(`Status element with id "${statusId}" not found.`);
+  }
+  applyStatus(statusDiv, 'Connecting to MetaMask...');
 
   try {
     const accounts = await MMSDK.connect();
@@ -53,8 +81,11 @@ export async function connectWallet(statusId) {
           const unsupportedMethod =
             switchErr.code === 4200 || switchErr.code === -32601;
           if (isWalletConnect && unsupportedMethod) {
-            statusDiv.innerHTML =
-              '<span style="color:red;">Please switch to the Arbitrum One network manually in MetaMask Mobile.</span>';
+            applyStatus(
+              statusDiv,
+              'Please switch to the Arbitrum One network manually in MetaMask Mobile.',
+              'warning',
+            );
             switchErr.handled = true;
             throw switchErr;
           }
@@ -67,16 +98,14 @@ export async function connectWallet(statusId) {
     const provider = new ethers.providers.Web3Provider(ethereum);
     const signer = provider.getSigner();
 
-    statusDiv.innerHTML =
-      '<span style="color:green;">Connected to Arbitrum One</span>';
+    applyStatus(statusDiv, 'Connected to Arbitrum One', 'success');
     return { provider, signer };
   } catch (err) {
     if (!err.handled) {
       if (err.code === -32002) {
-        statusDiv.innerHTML =
-          '<span style="color:red;">Request already pending. Check MetaMask.</span>';
+        applyStatus(statusDiv, 'Request already pending. Check MetaMask.', 'warning');
       } else {
-        statusDiv.innerHTML = `<span style="color:red;">${err.message}</span>`;
+        applyStatus(statusDiv, err?.message || 'MetaMask connection failed.', 'error');
       }
     }
     throw err;
@@ -86,6 +115,9 @@ export async function connectWallet(statusId) {
 export async function disconnectWallet(statusId) {
   const ethereum = MMSDK.getProvider();
   const statusDiv = document.getElementById(statusId);
+  if (!statusDiv) {
+    throw new Error(`Status element with id "${statusId}" not found.`);
+  }
   try {
     await ethereum.request({
       method: 'wallet_revokePermissions',
@@ -93,8 +125,8 @@ export async function disconnectWallet(statusId) {
     });
     // Terminate the MetaMask SDK connection so the dapp fully disconnects
     MMSDK.terminate();
-    statusDiv.innerHTML = '<span style="color:orange;">Disconnected</span>';
+    applyStatus(statusDiv, 'Disconnected', 'info');
   } catch (err) {
-    statusDiv.innerHTML = `<span style="color:red;">${err.message}</span>`;
+    applyStatus(statusDiv, err?.message || 'Failed to disconnect MetaMask.', 'error');
   }
 }
