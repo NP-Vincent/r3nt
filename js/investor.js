@@ -26,6 +26,13 @@ const els = {
   rentDashboard: document.getElementById('rentDashboard'),
 };
 
+if (els.connect && !els.connect.dataset.defaultLabel) {
+  const initialLabel = (els.connect.textContent || '').trim();
+  if (initialLabel) {
+    els.connect.dataset.defaultLabel = initialLabel;
+  }
+}
+
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'investor' });
 
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
@@ -112,6 +119,33 @@ function setVersionBadge() {
 function setStatus(message) {
   if (els.status) {
     els.status.textContent = message;
+  }
+}
+
+function updateConnectedAccount(addr) {
+  const value = typeof addr === 'string' ? addr : null;
+  state.account = value;
+  if (els.connect) {
+    if (!els.connect.dataset.defaultLabel) {
+      const initialLabel = (els.connect.textContent || '').trim();
+      if (initialLabel) {
+        els.connect.dataset.defaultLabel = initialLabel;
+      }
+    }
+    els.connect.classList.toggle('is-connected', Boolean(value));
+    if (value) {
+      els.connect.textContent = 'Wallet Connected';
+    } else {
+      const fallback = els.connect.dataset.defaultLabel || 'Connect wallet';
+      els.connect.textContent = fallback;
+    }
+  }
+  if (els.walletAddress) {
+    if (value) {
+      els.walletAddress.textContent = `Connected: ${shortAddress(value)}`;
+    } else {
+      els.walletAddress.textContent = 'Not connected';
+    }
   }
 }
 
@@ -513,17 +547,12 @@ els.connect?.addEventListener('click', async () => {
     await ensureArbitrum(provider);
     const [addr] = (await provider.request({ method: 'eth_accounts' })) || [];
     if (!addr) throw new Error('No wallet account connected.');
-    state.account = addr;
-    els.connect.textContent = 'Wallet Connected';
-    els.connect.style.background = '#10b981';
-    if (els.walletAddress) {
-      els.walletAddress.textContent = `Connected: ${shortAddress(addr)}`;
-    }
+    updateConnectedAccount(addr);
     notify({ message: 'Wallet connected.', variant: 'success', role: 'investor', timeout: 5000 });
     await loadInvestorData(addr);
   } catch (err) {
     console.error('Wallet connection failed', err);
-    state.account = null;
+    updateConnectedAccount(null);
     setStatus(err?.message || 'Wallet connection failed.');
     notify({ message: err?.message || 'Wallet connection failed.', variant: 'error', role: 'investor', timeout: 6000 });
   }

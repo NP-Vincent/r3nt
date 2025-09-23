@@ -56,6 +56,13 @@ const els = {
   collectSubComplete: document.getElementById('collectSubComplete'),
 };
 
+if (els.connect && !els.connect.dataset.defaultLabel) {
+  const initialLabel = (els.connect.textContent || '').trim();
+  if (initialLabel) {
+    els.connect.dataset.defaultLabel = initialLabel;
+  }
+}
+
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'agent' });
 
 if (els.fundraisingPeriod && !els.fundraisingPeriod.value) {
@@ -91,6 +98,33 @@ function shortAddress(value) {
   if (typeof value !== 'string') return '';
   if (!value.startsWith('0x') || value.length < 10) return value;
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function updateConnectedAccount(addr) {
+  const value = typeof addr === 'string' ? addr : null;
+  state.account = value;
+  if (els.connect) {
+    if (!els.connect.dataset.defaultLabel) {
+      const initialLabel = (els.connect.textContent || '').trim();
+      if (initialLabel) {
+        els.connect.dataset.defaultLabel = initialLabel;
+      }
+    }
+    els.connect.classList.toggle('is-connected', Boolean(value));
+    if (value) {
+      els.connect.textContent = 'Wallet connected';
+    } else {
+      const fallback = els.connect.dataset.defaultLabel || 'Connect wallet';
+      els.connect.textContent = fallback;
+    }
+  }
+  if (els.walletAddress) {
+    if (value) {
+      els.walletAddress.textContent = `Connected: ${shortAddress(value)}`;
+    } else {
+      els.walletAddress.textContent = 'Not connected';
+    }
+  }
 }
 
 function formatUsdc(amount) {
@@ -686,19 +720,14 @@ if (els.connect) {
       await ensureArbitrum(provider);
       const [addr] = (await provider.request({ method: 'eth_accounts' })) || [];
       if (!addr) throw new Error('No wallet account connected.');
-      state.account = addr;
-      if (els.walletAddress) {
-        els.walletAddress.textContent = `Connected: ${shortAddress(addr)}`;
-      }
-      els.connect.textContent = 'Wallet connected';
-      els.connect.style.background = '#10b981';
+      updateConnectedAccount(addr);
       notify({ message: 'Wallet connected.', variant: 'success', role: 'agent', timeout: 5000 });
       if (state.agent) {
         await loadAgentData(state.agent);
       }
     } catch (err) {
       console.error('Wallet connection failed', err);
-      state.account = null;
+      updateConnectedAccount(null);
       setStatus(err?.message || 'Wallet connection failed.');
       notify({ message: err?.message || 'Wallet connection failed.', variant: 'error', role: 'agent', timeout: 6000 });
     }

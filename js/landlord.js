@@ -64,6 +64,13 @@ const els = {
   listingLocationFilter: document.getElementById('listingLocationFilter'),
   listingLocationClear: document.getElementById('listingLocationClear'),
 };
+
+if (els.connect && !els.connect.dataset.defaultLabel) {
+  const initialLabel = (els.connect.textContent || '').trim();
+  if (initialLabel) {
+    els.connect.dataset.defaultLabel = initialLabel;
+  }
+}
 const depositEls = {
   section: document.getElementById('depositTools'),
   listingId: document.getElementById('depositListingId'),
@@ -1567,6 +1574,26 @@ async function ensureArbitrum(p) {
   }
 }
 
+function setConnectButtonState(connected, label) {
+  if (!els.connect) return;
+  if (!els.connect.dataset.defaultLabel) {
+    const initialLabel = (els.connect.textContent || '').trim();
+    if (initialLabel) {
+      els.connect.dataset.defaultLabel = initialLabel;
+    }
+  }
+  if (connected) {
+    if (label) {
+      els.connect.textContent = label;
+    }
+    els.connect.classList.add('is-connected');
+  } else {
+    const fallback = els.connect.dataset.defaultLabel || 'Connect Wallet';
+    els.connect.textContent = fallback;
+    els.connect.classList.remove('is-connected');
+  }
+}
+
 els.connect.onclick = async () => {
   try {
     provider = await sdk.wallet.getEthereumProvider();
@@ -1575,8 +1602,7 @@ els.connect.onclick = async () => {
     const [from] = (await provider.request({ method: 'eth_accounts' })) || [];
     if (!from) throw new Error('No wallet account connected.');
     const landlordAddr = getAddress(from);
-    els.connect.textContent = 'Wallet Connected';
-    els.connect.style.background = '#10b981';
+    setConnectButtonState(true, 'Wallet Connected');
     walletConnected = true;
     if (depositEls.propose) {
       depositEls.propose.disabled = false;
@@ -1592,6 +1618,7 @@ els.connect.onclick = async () => {
     }
   } catch (e) {
     walletConnected = false;
+    setConnectButtonState(false);
     if (depositEls.propose) {
       depositEls.propose.disabled = true;
     }
