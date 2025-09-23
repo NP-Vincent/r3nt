@@ -4,7 +4,7 @@ pragma solidity ^0.8.26;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {ClonesUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/ClonesUpgradeable.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 import {Platform} from "./Platform.sol";
 
@@ -35,7 +35,7 @@ interface IListing {
  *      may update the Listing implementation or the authorised platform caller.
  */
 contract ListingFactory is Initializable, UUPSUpgradeable, OwnableUpgradeable {
-    using ClonesUpgradeable for address;
+    using Clones for address;
 
     // -------------------------------------------------
     // Storage
