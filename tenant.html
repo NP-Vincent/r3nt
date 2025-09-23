@@ -92,7 +92,23 @@
     .booking-entry-dates { font-size:.9rem; color:#334155; }
     .booking-details { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px 16px; font-size:.9rem; }
     .booking-detail-label { font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; color:#64748b; }
-    .booking-detail-value { font-weight:600; color:#0f172a; }
+    .booking-detail-value { font-weight:600; color:#0f172a; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .copy-button {
+      width:28px;
+      height:28px;
+      border-radius:50%;
+      border:1px solid #cbd5f5;
+      background:#eef2ff;
+      color:#1e3a8a;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:.85rem;
+      cursor:pointer;
+    }
+    .copy-button:hover { background:#e0e7ff; }
+    .copy-button:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }
+    .copy-button:disabled { opacity:.55; cursor:not-allowed; }
     .booking-actions { display:flex; flex-direction:column; gap:8px; }
     .booking-amount-input { width:100%; padding:10px 12px; border:1px solid #d0d7de; border-radius:8px; font-size:1rem; }
     .booking-actions button { width:auto; background:#6366f1; color:#fff; }

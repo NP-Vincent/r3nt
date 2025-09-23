@@ -22,6 +22,10 @@ const USDC_DECIMALS = 6;
 const USDC_SCALAR = 1_000_000n;
 const GEOHASH_PRECISION = 7;
 const MANUAL_COORDS_HINT = 'Right-click → “What’s here?” in Google Maps to copy coordinates.';
+const LOCATION_FILTER_PRECISION = 5;
+const GEOHASH_ALLOWED_PATTERN = /^[0-9bcdefghjkmnpqrstuvwxyz]+$/;
+const LAT_LON_FILTER_PATTERN = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
+const DEFAULT_SORT_MODE = 'created-desc';
 
 const UINT64_MAX = (1n << 64n) - 1n;
 const utf8Encoder = new TextEncoder();
@@ -54,6 +58,10 @@ const els = {
   landlordListings: document.getElementById('landlordListings'),
   onboardingHints: document.getElementById('onboardingHints'),
   onboardingChecklist: document.getElementById('onboardingChecklist'),
+  listingControls: document.getElementById('listingControls'),
+  listingSort: document.getElementById('listingSort'),
+  listingLocationFilter: document.getElementById('listingLocationFilter'),
+  listingLocationClear: document.getElementById('listingLocationClear'),
 };
 const info = (t) => (els.status.textContent = t);
 
@@ -86,6 +94,10 @@ const checkpointState = {
 
 let lastAllComplete = false;
 let walletConnected = false;
+
+let landlordListingRecords = [];
+let listingSortMode = DEFAULT_SORT_MODE;
+let listingLocationFilterValue = '';
 
 const onboardingFields = [
   'title',
@@ -125,6 +137,33 @@ if (els.geohash) {
 }
 initGeolocationButton();
 
+if (els.listingSort) {
+  els.listingSort.value = listingSortMode;
+  els.listingSort.addEventListener('change', () => {
+    listingSortMode = els.listingSort.value || DEFAULT_SORT_MODE;
+    renderLandlordListingView();
+  });
+}
+
+if (els.listingLocationFilter) {
+  els.listingLocationFilter.addEventListener('input', () => {
+    listingLocationFilterValue = els.listingLocationFilter.value || '';
+    renderLandlordListingView();
+  });
+}
+
+if (els.listingLocationClear) {
+  els.listingLocationClear.disabled = true;
+  els.listingLocationClear.addEventListener('click', () => {
+    listingLocationFilterValue = '';
+    if (els.listingLocationFilter) {
+      els.listingLocationFilter.value = '';
+      els.listingLocationFilter.focus();
+    }
+    renderLandlordListingView();
+  });
+}
+
 function formatUsdc(amount) {
   const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
   const negative = value < 0n;
@@ -153,6 +192,39 @@ function formatDuration(seconds) {
   }
   const hoursOnly = Math.max(1, Math.round(totalSeconds / 3600));
   return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
+}
+
+function decodeBytes32ToString(value, precision) {
+  const hex = typeof value === 'string' ? value : '';
+  if (!hex || hex === '0x' || /^0x0+$/i.test(hex)) {
+    return '';
+  }
+  let out = '';
+  for (let i = 2; i < hex.length; i += 2) {
+    const byte = parseInt(hex.slice(i, i + 2), 16);
+    if (!Number.isFinite(byte) || byte <= 0) break;
+    out += String.fromCharCode(byte);
+  }
+  const limit = typeof precision === 'number' && Number.isFinite(precision) ? precision : undefined;
+  if (limit && limit > 0 && out.length > limit) {
+    return out.slice(0, limit);
+  }
+  return out;
+}
+
+function toIsoString(seconds) {
+  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
+  if (value <= 0n) return '';
+  let asNumber;
+  try {
+    asNumber = Number(value);
+  } catch {
+    return '';
+  }
+  if (!Number.isFinite(asNumber)) return '';
+  const date = new Date(asNumber * 1000);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString();
 }
 
 function shortAddress(addr) {
@@ -580,8 +652,13 @@ async function refreshListingPriceDisplay() {
   }
 }
 
-async function fetchListingInfo(listingAddr) {
+async function fetchListingInfo(listingAddr, orderIndex = 0) {
   try {
+    const abi = await loadPlatformAbi();
+    if (!Array.isArray(abi) || abi.length === 0) {
+      throw new Error('Platform ABI unavailable.');
+    }
+
     const responses = await pub.multicall({
       contracts: [
         { address: listingAddr, abi: LISTING_ABI, functionName: 'baseDailyRate' },
@@ -591,9 +668,13 @@ async function fetchListingInfo(listingAddr) {
         { address: listingAddr, abi: LISTING_ABI, functionName: 'maxBookingWindow' },
         { address: listingAddr, abi: LISTING_ABI, functionName: 'areaSqm' },
         { address: listingAddr, abi: LISTING_ABI, functionName: 'landlord' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'geohash' },
+        { address: listingAddr, abi: LISTING_ABI, functionName: 'geohashPrecision' },
+        { address: PLATFORM_ADDRESS, abi, functionName: 'listingIds', args: [listingAddr] },
       ],
       allowFailure: true,
     });
+
     const getBig = (idx, fallback = 0n) => {
       const entry = responses[idx];
       if (!entry || entry.status !== 'success') return fallback;
@@ -609,6 +690,52 @@ async function fetchListingInfo(listingAddr) {
       if (!entry || entry.status !== 'success') return fallback;
       return typeof entry.result === 'string' ? entry.result : fallback;
     };
+
+    const geohashHex = getString(7, '0x');
+    const geohashPrecision = Number(getBig(8));
+    const listingId = getBig(9);
+
+    let createdAt = 0n;
+    if (listingId > 0n) {
+      try {
+        const createdRaw = await pub.readContract({
+          address: PLATFORM_ADDRESS,
+          abi,
+          functionName: 'listingCreated',
+          args: [listingId],
+        });
+        if (typeof createdRaw === 'bigint') {
+          createdAt = createdRaw;
+        } else if (typeof createdRaw === 'number') {
+          createdAt = BigInt(createdRaw);
+        } else if (typeof createdRaw === 'string' && createdRaw) {
+          createdAt = BigInt(createdRaw);
+        }
+      } catch (err) {
+        console.warn('Unable to read listingCreated for listing', listingAddr, listingId.toString(), err);
+      }
+    }
+
+    const geohash = decodeBytes32ToString(
+      geohashHex,
+      Number.isFinite(geohashPrecision) ? geohashPrecision : undefined
+    );
+    let lat = null;
+    let lon = null;
+    if (geohash) {
+      try {
+        const coords = geohashToLatLon(geohash);
+        if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
+          lat = coords.lat;
+          lon = coords.lon;
+        }
+      } catch (err) {
+        console.warn('Failed to decode geohash for listing', listingAddr, geohash, err);
+      }
+    }
+
+    const createdAtIso = toIsoString(createdAt);
+
     return {
       address: listingAddr,
       baseDailyRate: getBig(0),
@@ -618,6 +745,16 @@ async function fetchListingInfo(listingAddr) {
       maxBookingWindow: getBig(4),
       areaSqm: getBig(5),
       landlord: getString(6, '0x0000000000000000000000000000000000000000'),
+      geohash: geohash ? geohash.toLowerCase() : '',
+      geohashPrecision: Number.isFinite(geohashPrecision) ? geohashPrecision : null,
+      lat,
+      lon,
+      listingId,
+      listingIdText: listingId > 0n ? listingId.toString() : '',
+      createdAt,
+      createdAtIso,
+      createdAtLabel: createdAtIso || (createdAt > 0n ? `Unix ${createdAt.toString()}` : ''),
+      order: Number.isFinite(orderIndex) ? orderIndex : 0,
     };
   } catch (err) {
     console.error('Failed to load listing info', listingAddr, err);
@@ -628,28 +765,109 @@ async function fetchListingInfo(listingAddr) {
 function renderLandlordListingCard(listing) {
   const card = document.createElement('div');
   card.className = 'landlord-card';
+  card.dataset.expanded = 'false';
 
-  const title = document.createElement('div');
-  title.className = 'landlord-card-title';
-  title.textContent = `Listing ${shortAddress(listing.address)}`;
-  card.appendChild(title);
+  const baseId = (listing?.listingIdText || listing?.address || `listing-${listing?.order ?? 0}`).toString();
+  const sanitizedId = baseId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const detailsId = `listing-details-${sanitizedId || `listing-${listing?.order ?? 0}`}`;
+
+  const summary = document.createElement('div');
+  summary.className = 'landlord-card-summary';
+
+  const summaryMain = document.createElement('div');
+  summaryMain.className = 'landlord-card-summary-main';
+  summaryMain.tabIndex = 0;
+  summaryMain.setAttribute('role', 'button');
+  summaryMain.setAttribute('aria-controls', detailsId);
+  summaryMain.setAttribute('aria-expanded', 'false');
+
+  const idLine = document.createElement('div');
+  idLine.className = 'landlord-card-id';
+  idLine.textContent = listing.listingIdText ? `Listing #${listing.listingIdText}` : 'Listing';
+  summaryMain.appendChild(idLine);
+
+  const metaLine = document.createElement('div');
+  metaLine.className = 'landlord-card-meta';
+  const addressSpan = document.createElement('span');
+  addressSpan.textContent = shortAddress(listing.address);
+  if (listing.address) {
+    addressSpan.title = listing.address;
+  }
+  metaLine.appendChild(addressSpan);
+
+  const priceSpan = document.createElement('span');
+  priceSpan.textContent = `${formatUsdc(listing.baseDailyRate)} USDC / day`;
+  metaLine.appendChild(priceSpan);
+
+  summaryMain.appendChild(metaLine);
+
+  const summaryActions = document.createElement('div');
+  summaryActions.className = 'landlord-card-summary-actions';
+
+  if (navigator?.clipboard?.writeText && listing.address) {
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'icon-button';
+    copyBtn.title = 'Copy listing address';
+    copyBtn.setAttribute('aria-label', 'Copy listing address');
+    copyBtn.textContent = '⧉';
+    copyBtn.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(listing.address);
+        notify({
+          message: 'Listing address copied to clipboard.',
+          variant: 'success',
+          role: 'landlord',
+          timeout: 4000,
+        });
+      } catch (err) {
+        console.error('Failed to copy listing address', err);
+        notify({
+          message: 'Unable to copy listing address.',
+          variant: 'error',
+          role: 'landlord',
+          timeout: 5000,
+        });
+      }
+    });
+    summaryActions.appendChild(copyBtn);
+  }
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'icon-button landlord-card-toggle';
+  toggleBtn.textContent = '▸';
+  toggleBtn.setAttribute('aria-label', 'Expand listing details');
+  toggleBtn.setAttribute('aria-controls', detailsId);
+  toggleBtn.setAttribute('aria-expanded', 'false');
+  summaryActions.appendChild(toggleBtn);
+
+  summary.appendChild(summaryMain);
+  summary.appendChild(summaryActions);
+  card.appendChild(summary);
+
+  const details = document.createElement('div');
+  details.className = 'landlord-card-details';
+  details.id = detailsId;
+  details.hidden = true;
 
   const rateLine = document.createElement('div');
   rateLine.className = 'landlord-card-detail';
   rateLine.textContent = `Base rate: ${formatUsdc(listing.baseDailyRate)} USDC / day`;
-  card.appendChild(rateLine);
+  details.appendChild(rateLine);
 
   const depositLine = document.createElement('div');
   depositLine.className = 'landlord-card-detail';
   depositLine.textContent = `Deposit: ${formatUsdc(listing.depositAmount)} USDC`;
-  card.appendChild(depositLine);
+  details.appendChild(depositLine);
 
   const areaValue = Number(listing.areaSqm ?? 0n);
   if (Number.isFinite(areaValue) && areaValue > 0) {
     const areaLine = document.createElement('div');
     areaLine.className = 'landlord-card-detail';
     areaLine.textContent = `Area: ${areaValue} m²`;
-    card.appendChild(areaLine);
+    details.appendChild(areaLine);
   }
 
   const minNoticeText = formatDuration(listing.minBookingNotice);
@@ -657,7 +875,45 @@ function renderLandlordListingCard(listing) {
   const windowLine = document.createElement('div');
   windowLine.className = 'landlord-card-detail';
   windowLine.textContent = `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`;
-  card.appendChild(windowLine);
+  details.appendChild(windowLine);
+
+  const idDetail = document.createElement('div');
+  idDetail.className = 'landlord-card-detail';
+  idDetail.textContent = listing.listingIdText ? `Listing ID: ${listing.listingIdText}` : 'Listing ID: (not assigned)';
+  details.appendChild(idDetail);
+
+  const createdDetail = document.createElement('div');
+  createdDetail.className = 'landlord-card-detail';
+  const createdLabel = listing.createdAtIso || (listing.createdAt > 0n ? `Unix ${listing.createdAt.toString()}` : '(not recorded)');
+  createdDetail.textContent = `Created: ${createdLabel}`;
+  details.appendChild(createdDetail);
+
+  const addressContainer = document.createElement('div');
+  addressContainer.className = 'landlord-card-detail';
+  const addressLabel = document.createElement('div');
+  addressLabel.textContent = 'Listing address:';
+  const addressValue = document.createElement('div');
+  addressValue.className = 'landlord-card-address';
+  addressValue.textContent = listing.address || '—';
+  addressContainer.appendChild(addressLabel);
+  addressContainer.appendChild(addressValue);
+  details.appendChild(addressContainer);
+
+  if (listing.geohash) {
+    const geohashLine = document.createElement('div');
+    geohashLine.className = 'landlord-card-detail';
+    geohashLine.textContent = `Geohash: ${listing.geohash}`;
+    details.appendChild(geohashLine);
+  }
+
+  if (Number.isFinite(listing.lat) && Number.isFinite(listing.lon)) {
+    const coordsLine = document.createElement('div');
+    coordsLine.className = 'landlord-card-detail';
+    const latText = Number(listing.lat).toFixed(5);
+    const lonText = Number(listing.lon).toFixed(5);
+    coordsLine.textContent = `Coordinates: ${latText}°, ${lonText}°`;
+    details.appendChild(coordsLine);
+  }
 
   if (listing.metadataURI) {
     const metaLink = document.createElement('a');
@@ -666,7 +922,7 @@ function renderLandlordListingCard(listing) {
     metaLink.rel = 'noopener';
     metaLink.textContent = 'Metadata';
     metaLink.className = 'listing-link';
-    card.appendChild(metaLink);
+    details.appendChild(metaLink);
   }
 
   const dateRow = document.createElement('div');
@@ -686,17 +942,17 @@ function renderLandlordListingCard(listing) {
   endLabel.appendChild(endInput);
   dateRow.appendChild(endLabel);
 
-  card.appendChild(dateRow);
+  details.appendChild(dateRow);
 
   const checkBtn = document.createElement('button');
   checkBtn.textContent = 'Check availability';
   checkBtn.className = 'check-availability';
-  card.appendChild(checkBtn);
+  details.appendChild(checkBtn);
 
   const result = document.createElement('div');
   result.className = 'availability-result muted';
   result.textContent = 'Select dates to check availability.';
-  card.appendChild(result);
+  details.appendChild(result);
 
   checkBtn.onclick = () =>
     disableWhile(checkBtn, async () => {
@@ -735,7 +991,226 @@ function renderLandlordListingCard(listing) {
       }
     });
 
+  card.appendChild(details);
+
+  let expanded = false;
+  const setExpanded = (value) => {
+    expanded = Boolean(value);
+    details.hidden = !expanded;
+    card.dataset.expanded = expanded ? 'true' : 'false';
+    const label = expanded ? 'Collapse listing details' : 'Expand listing details';
+    toggleBtn.textContent = expanded ? '▾' : '▸';
+    toggleBtn.setAttribute('aria-label', label);
+    toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    summaryMain.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  };
+
+  const toggle = () => {
+    setExpanded(!expanded);
+  };
+
+  summaryMain.addEventListener('click', toggle);
+  summaryMain.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggle();
+    }
+  });
+  toggleBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggle();
+  });
+
   return card;
+}
+
+function toBigIntOrZero(value) {
+  if (typeof value === 'bigint') return value;
+  try {
+    return BigInt(value || 0);
+  } catch {
+    return 0n;
+  }
+}
+
+function compareBigIntAsc(a, b) {
+  const left = toBigIntOrZero(a);
+  const right = toBigIntOrZero(b);
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function compareBigIntDesc(a, b) {
+  return -compareBigIntAsc(a, b);
+}
+
+function toNumberOr(value, fallback = 0) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function compareNumber(a, b) {
+  const left = toNumberOr(a);
+  const right = toNumberOr(b);
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function compareAddress(a, b) {
+  const left = typeof a === 'string' ? a.toLowerCase() : '';
+  const right = typeof b === 'string' ? b.toLowerCase() : '';
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function parseLocationFilter(rawValue) {
+  const raw = typeof rawValue === 'string' ? rawValue.trim() : '';
+  if (!raw) {
+    return { typed: false, applied: false, invalid: false, prefix: '', derivedFrom: null };
+  }
+  const latLonMatch = raw.match(LAT_LON_FILTER_PATTERN);
+  if (latLonMatch) {
+    try {
+      const { lat, lon } = parseLatLon(latLonMatch[1], latLonMatch[3]);
+      const geohash = latLonToGeohash(lat, lon, GEOHASH_PRECISION);
+      const prefix = geohash.slice(0, Math.min(LOCATION_FILTER_PRECISION, geohash.length)).toLowerCase();
+      return { typed: true, applied: true, invalid: false, prefix, derivedFrom: 'latlon' };
+    } catch (err) {
+      console.warn('Invalid latitude/longitude filter input', raw, err);
+      return { typed: true, applied: false, invalid: true, prefix: '', derivedFrom: 'latlon' };
+    }
+  }
+  const normalized = raw.toLowerCase();
+  if (!GEOHASH_ALLOWED_PATTERN.test(normalized)) {
+    return { typed: true, applied: false, invalid: true, prefix: '', derivedFrom: 'geohash' };
+  }
+  return { typed: true, applied: true, invalid: false, prefix: normalized, derivedFrom: 'geohash' };
+}
+
+function sortListings(listings) {
+  const arr = Array.isArray(listings) ? [...listings] : [];
+  arr.sort((a, b) => {
+    switch (listingSortMode) {
+      case 'created-asc':
+        return (
+          compareBigIntAsc(a?.createdAt, b?.createdAt) ||
+          compareNumber(a?.order, b?.order) ||
+          compareAddress(a?.address, b?.address)
+        );
+      case 'price-asc':
+        return (
+          compareBigIntAsc(a?.baseDailyRate, b?.baseDailyRate) ||
+          compareBigIntDesc(a?.createdAt, b?.createdAt) ||
+          compareNumber(a?.order, b?.order)
+        );
+      case 'price-desc':
+        return (
+          compareBigIntDesc(a?.baseDailyRate, b?.baseDailyRate) ||
+          compareBigIntDesc(a?.createdAt, b?.createdAt) ||
+          compareNumber(a?.order, b?.order)
+        );
+      case 'created-desc':
+      default:
+        return (
+          compareBigIntDesc(a?.createdAt, b?.createdAt) ||
+          compareNumber(a?.order, b?.order) ||
+          compareAddress(a?.address, b?.address)
+        );
+    }
+  });
+  return arr;
+}
+
+function applyListingFilters(records) {
+  const list = Array.isArray(records) ? records : [];
+  const filterInfo = parseLocationFilter(listingLocationFilterValue);
+  let filtered = list;
+  if (filterInfo.applied && filterInfo.prefix) {
+    const prefix = filterInfo.prefix;
+    filtered = list.filter((entry) => {
+      const geohash = typeof entry?.geohash === 'string' ? entry.geohash.toLowerCase() : '';
+      return geohash.startsWith(prefix);
+    });
+  }
+  const sorted = sortListings(filtered);
+  return { entries: sorted, total: list.length, filterInfo };
+}
+
+function updateListingControlsVisibility(visible) {
+  if (!els.listingControls) return;
+  els.listingControls.hidden = !visible;
+}
+
+function renderLandlordListingView() {
+  const container = els.landlordListings;
+  if (!container) return;
+
+  const { entries, total, filterInfo } = applyListingFilters(landlordListingRecords);
+
+  updateListingControlsVisibility(total > 0);
+
+  if (els.listingSort && els.listingSort.value !== listingSortMode) {
+    els.listingSort.value = listingSortMode;
+  }
+
+  if (els.listingLocationClear) {
+    const hasFilterText = typeof listingLocationFilterValue === 'string' && listingLocationFilterValue.trim().length > 0;
+    els.listingLocationClear.disabled = !hasFilterText;
+  }
+
+  container.innerHTML = '';
+
+  if (total === 0) {
+    container.classList.add('muted');
+    container.textContent = 'No listings yet';
+    info('No listings yet.');
+    return;
+  }
+
+  if (filterInfo.applied && filterInfo.prefix && entries.length === 0) {
+    container.classList.add('muted');
+    container.textContent = 'No listings match the current filters.';
+  } else {
+    container.classList.remove('muted');
+    for (const listing of entries) {
+      container.appendChild(renderLandlordListingCard(listing));
+    }
+  }
+
+  if (filterInfo.invalid && filterInfo.typed) {
+    info(`Location filter not recognised — showing all ${total} listing${total === 1 ? '' : 's'}.`);
+  } else if (filterInfo.applied && filterInfo.prefix) {
+    if (entries.length === 0) {
+      info('No listings match the current filters.');
+    } else if (entries.length === total) {
+      info(`Showing all ${total} listing${total === 1 ? '' : 's'} (filters applied).`);
+    } else {
+      info(`Showing ${entries.length} of ${total} listing${total === 1 ? '' : 's'} after filters.`);
+    }
+  } else {
+    info(`Loaded ${total} listing${total === 1 ? '' : 's'}.`);
+  }
+}
+
+function setLandlordListingRecords(records) {
+  const normalized = [];
+  if (Array.isArray(records)) {
+    for (let i = 0; i < records.length; i++) {
+      const entry = records[i];
+      if (!entry) continue;
+      const copy = { ...entry };
+      if (!Number.isFinite(copy.order)) {
+        copy.order = i;
+      }
+      if (typeof copy.geohash === 'string') {
+        copy.geohash = copy.geohash.toLowerCase();
+      }
+      normalized.push(copy);
+    }
+  }
+  landlordListingRecords = normalized;
+  renderLandlordListingView();
 }
 
 let landlordListingsLoading;
@@ -798,31 +1273,22 @@ async function loadLandlordListings(landlordAddr) {
     );
 
     if (!cleaned.length) {
-      setMessage('No listings yet');
-      info('No listings yet.');
+      setLandlordListingRecords([]);
       notify({ message: 'No listings yet — create your first property.', variant: 'info', role: 'landlord', timeout: 5000 });
       return;
     }
 
-    const infos = await Promise.all(cleaned.map((addr) => fetchListingInfo(addr)));
+    const infos = await Promise.all(cleaned.map((addr, index) => fetchListingInfo(addr, index)));
     const valid = infos.filter((entry) => entry && typeof entry.landlord === 'string');
     const matches = valid.filter((entry) => entry.landlord.toLowerCase() === normalized);
 
     if (!matches.length) {
-      setMessage('No listings yet');
-      info('No listings yet.');
+      setLandlordListingRecords([]);
       notify({ message: 'No listings yet — create your first property.', variant: 'info', role: 'landlord', timeout: 5000 });
       return;
     }
 
-    container.classList.remove('muted');
-    container.innerHTML = '';
-
-    for (const listing of matches) {
-      container.appendChild(renderLandlordListingCard(listing));
-    }
-
-    info(`Loaded ${matches.length} listing${matches.length === 1 ? '' : 's'}.`);
+    setLandlordListingRecords(matches);
     notify({
       message: `Loaded ${matches.length} listing${matches.length === 1 ? '' : 's'}.`,
       variant: 'success',

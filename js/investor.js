@@ -62,6 +62,48 @@ function percentOf(numerator, denominator) {
   return Number(scaled) / 100;
 }
 
+function createCopyButton(text, { label = 'Copy', successMessage = 'Copied to clipboard.', errorMessage = 'Unable to copy.' } = {}) {
+  const trimmed = typeof text === 'string' ? text.trim() : String(text ?? '').trim();
+  if (!trimmed || !navigator?.clipboard?.writeText) {
+    return null;
+  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'copy-button';
+  button.textContent = '⧉';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(trimmed);
+      notify({ message: successMessage, variant: 'success', role: 'investor', timeout: 4000 });
+    } catch (err) {
+      console.error('Failed to copy value', err);
+      notify({ message: errorMessage, variant: 'error', role: 'investor', timeout: 5000 });
+    }
+  });
+  return button;
+}
+
+function createBookingBadge(bookingId) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'badge-with-copy';
+  const badge = document.createElement('span');
+  badge.className = 'badge';
+  badge.textContent = `Booking #${bookingId}`;
+  wrapper.appendChild(badge);
+  const copyBtn = createCopyButton(bookingId, {
+    label: 'Copy booking ID',
+    successMessage: 'Booking ID copied to clipboard.',
+    errorMessage: 'Unable to copy booking ID.',
+  });
+  if (copyBtn) {
+    wrapper.appendChild(copyBtn);
+  }
+  return wrapper;
+}
+
 function setVersionBadge() {
   const badge = document.querySelector('[data-version]');
   if (badge) badge.textContent = `Build ${APP_VERSION}`;
@@ -169,10 +211,7 @@ function renderHoldings(entries) {
     const title = document.createElement('strong');
     title.textContent = shortAddress(entry.listingAddress);
     header.appendChild(title);
-    const badge = document.createElement('span');
-    badge.className = 'badge';
-    badge.textContent = `Booking #${entry.bookingId}`;
-    header.appendChild(badge);
+    header.appendChild(createBookingBadge(entry.bookingId));
     card.appendChild(header);
 
     const metrics = document.createElement('div');
@@ -252,10 +291,7 @@ function renderTokenisation(entries) {
     const title = document.createElement('strong');
     title.textContent = shortAddress(entry.listingAddress);
     header.appendChild(title);
-    const badge = document.createElement('span');
-    badge.className = 'badge';
-    badge.textContent = `Booking #${entry.bookingId}`;
-    header.appendChild(badge);
+    header.appendChild(createBookingBadge(entry.bookingId));
     card.appendChild(header);
 
     const metrics = document.createElement('div');
@@ -310,10 +346,7 @@ function renderRent(entries) {
     const title = document.createElement('strong');
     title.textContent = shortAddress(entry.listingAddress);
     header.appendChild(title);
-    const badge = document.createElement('span');
-    badge.className = 'badge';
-    badge.textContent = `Booking #${entry.bookingId}`;
-    header.appendChild(badge);
+    header.appendChild(createBookingBadge(entry.bookingId));
     card.appendChild(header);
 
     const metric = document.createElement('div');

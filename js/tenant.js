@@ -916,7 +916,31 @@ function renderListingCard(info){
   return card;
 }
 
-function createDetailElement(label, value) {
+function createCopyButton(text, { label = 'Copy', successMessage = 'Copied to clipboard.', errorMessage = 'Unable to copy.', role = 'tenant' } = {}) {
+  const trimmed = typeof text === 'string' ? text.trim() : String(text ?? '').trim();
+  if (!trimmed || !navigator?.clipboard?.writeText) {
+    return null;
+  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'copy-button';
+  button.textContent = '⧉';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(trimmed);
+      notify({ message: successMessage, variant: 'success', role, timeout: 4000 });
+    } catch (err) {
+      console.error('Failed to copy text', err);
+      notify({ message: errorMessage, variant: 'error', role, timeout: 5000 });
+    }
+  });
+  return button;
+}
+
+function createDetailElement(label, value, options = {}) {
   const wrapper = document.createElement('div');
   const labelEl = document.createElement('div');
   labelEl.className = 'booking-detail-label';
@@ -924,6 +948,17 @@ function createDetailElement(label, value) {
   const valueEl = document.createElement('div');
   valueEl.className = 'booking-detail-value';
   valueEl.textContent = value;
+  if (options && options.copyText) {
+    const copyBtn = createCopyButton(options.copyText, {
+      label: options.copyLabel || 'Copy',
+      successMessage: options.copySuccessMessage || 'Copied to clipboard.',
+      errorMessage: options.copyErrorMessage || 'Unable to copy.',
+      role: options.role || 'tenant',
+    });
+    if (copyBtn) {
+      valueEl.appendChild(copyBtn);
+    }
+  }
   wrapper.appendChild(labelEl);
   wrapper.appendChild(valueEl);
   return wrapper;
@@ -1023,7 +1058,14 @@ function renderBookingCard(record) {
 
   const details = document.createElement('div');
   details.className = 'booking-details';
-  details.appendChild(createDetailElement('Booking ID', `#${record.bookingIdText}`));
+  details.appendChild(
+    createDetailElement('Booking ID', `#${record.bookingIdText}`, {
+      copyText: record.bookingIdText,
+      copyLabel: 'Copy booking ID',
+      copySuccessMessage: 'Booking ID copied to clipboard.',
+      copyErrorMessage: 'Unable to copy booking ID.',
+    })
+  );
   details.appendChild(createDetailElement('Payment cadence', record.periodLabel));
   details.appendChild(createDetailElement('Gross rent', `${formatUsdc(record.grossRent)} USDC`));
   details.appendChild(createDetailElement('Paid so far', `${formatUsdc(record.rentPaid)} USDC`));
