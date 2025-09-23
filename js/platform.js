@@ -81,7 +81,13 @@ const DEACTIVATE_DEFAULT_STATUS = 'Enter a listing ID to verify availability.';
 const DEREGISTER_DEFAULT_STATUS = 'Enter a listing address or lookup by ID.';
 const DEREGISTER_REGISTRY_WARNING =
   'Booking registry not configured. Update module addresses before deregistering listings.';
-let deactivateListingContext = { listingId: null, listingAddress: null, exists: false, loading: false };
+let deactivateListingContext = {
+  listingId: null,
+  listingAddress: null,
+  exists: false,
+  loading: false,
+  active: false,
+};
 let deactivateLookupCounter = 0;
 let deactivateLookupTimeout = null;
 let deregisterContext = { listingId: null, address: null, resolvedFromId: false, loading: false };
@@ -530,12 +536,18 @@ function updateDeactivateControlsEnabled() {
   }
   const walletReady = ownerAccessGranted && Boolean(platformWrite) && Boolean(signer);
   const context = deactivateListingContext;
-  const ready = walletReady && context && context.exists && !context.loading;
+  const ready = walletReady && context && context.exists && context.active && !context.loading;
   deactivateListingSubmitBtn.disabled = !ready;
 }
 
 function resetDeactivateContext() {
-  deactivateListingContext = { listingId: null, listingAddress: null, exists: false, loading: false };
+  deactivateListingContext = {
+    listingId: null,
+    listingAddress: null,
+    exists: false,
+    loading: false,
+    active: false,
+  };
   deactivateLookupCounter = 0;
   if (deactivateLookupTimeout) {
     clearTimeout(deactivateLookupTimeout);
@@ -630,7 +642,13 @@ async function evaluateDeactivateListingId() {
   const rawValue = deactivateListingIdInput.value;
   const trimmed = String(rawValue ?? '').trim();
   if (!trimmed) {
-    deactivateListingContext = { listingId: null, listingAddress: null, exists: false, loading: false };
+    deactivateListingContext = {
+      listingId: null,
+      listingAddress: null,
+      exists: false,
+      loading: false,
+      active: false,
+    };
     setDeactivateListingStatus(DEACTIVATE_DEFAULT_STATUS, 'info');
     updateDeactivateControlsEnabled();
     return;
@@ -639,14 +657,26 @@ async function evaluateDeactivateListingId() {
   try {
     listingId = parseListingId(trimmed);
   } catch (err) {
-    deactivateListingContext = { listingId: null, listingAddress: null, exists: false, loading: false };
+    deactivateListingContext = {
+      listingId: null,
+      listingAddress: null,
+      exists: false,
+      loading: false,
+      active: false,
+    };
     setDeactivateListingStatus(err.message, 'warning');
     updateDeactivateControlsEnabled();
     return;
   }
 
   const requestId = ++deactivateLookupCounter;
-  deactivateListingContext = { listingId, listingAddress: null, exists: false, loading: true };
+  deactivateListingContext = {
+    listingId,
+    listingAddress: null,
+    exists: false,
+    loading: true,
+    active: false,
+  };
   setDeactivateListingStatus('Checking listing…');
   updateDeactivateControlsEnabled();
 
@@ -656,12 +686,46 @@ async function evaluateDeactivateListingId() {
       return;
     }
     if (!listingAddressRaw || listingAddressRaw === constants.AddressZero) {
-      deactivateListingContext = { listingId, listingAddress: null, exists: false, loading: false };
+      deactivateListingContext = {
+        listingId,
+        listingAddress: null,
+        exists: false,
+        loading: false,
+        active: false,
+      };
       setDeactivateListingStatus('Listing not found for that ID.', 'error');
     } else {
       const listingAddress = utils.getAddress(listingAddressRaw);
-      deactivateListingContext = { listingId, listingAddress, exists: true, loading: false };
-      setDeactivateListingStatus(`Listing found at ${listingAddress}.`, 'success');
+      let isActive = false;
+      try {
+        const activeRaw = await platformRead.listingActive(listingId);
+        isActive = toBool(activeRaw);
+      } catch (err) {
+        console.error('Failed to load listing active status before deactivation', err);
+        const { message, severity } = interpretError(err);
+        deactivateListingContext = {
+          listingId,
+          listingAddress,
+          exists: true,
+          loading: false,
+          active: false,
+        };
+        setDeactivateListingStatus(`Failed to load listing status: ${message}`, severity);
+        updateDeactivateControlsEnabled();
+        return;
+      }
+      deactivateListingContext = {
+        listingId,
+        listingAddress,
+        exists: true,
+        loading: false,
+        active: isActive,
+      };
+      if (isActive) {
+        setDeactivateListingStatus(`Listing at ${listingAddress} is active.`, 'success');
+      } else {
+        setDeactivateListingStatus(`Listing at ${listingAddress} is already inactive.`, 'warning');
+      }
     }
   } catch (err) {
     if (requestId !== deactivateLookupCounter) {
@@ -669,7 +733,13 @@ async function evaluateDeactivateListingId() {
     }
     console.error('Failed to check listing before deactivation', err);
     const { message, severity } = interpretError(err);
-    deactivateListingContext = { listingId, listingAddress: null, exists: false, loading: false };
+    deactivateListingContext = {
+      listingId,
+      listingAddress: null,
+      exists: false,
+      loading: false,
+      active: false,
+    };
     setDeactivateListingStatus(`Failed to load listing: ${message}`, severity);
   } finally {
     if (requestId === deactivateLookupCounter) {
@@ -1306,14 +1376,58 @@ bindForm(deactivateListingForm, 'Deactivating listing', async () => {
 
   if (!listingAddressRaw || listingAddressRaw === constants.AddressZero) {
     setDeactivateListingStatus('Listing not found for that ID.', 'error');
-    deactivateListingContext = { listingId, listingAddress: null, exists: false, loading: false };
+    deactivateListingContext = {
+      listingId,
+      listingAddress: null,
+      exists: false,
+      loading: false,
+      active: false,
+    };
     updateDeactivateControlsEnabled();
     throw new Error('Listing not found for that ID.');
   }
 
   const listingAddress = utils.getAddress(listingAddressRaw);
-  deactivateListingContext = { listingId, listingAddress, exists: true, loading: false };
-  setDeactivateListingStatus(`Listing found at ${listingAddress}.`, 'success');
+  let isActive = false;
+  try {
+    const activeRaw = await platformRead.listingActive(listingId);
+    isActive = toBool(activeRaw);
+  } catch (err) {
+    console.error('Failed to load listing active status before deactivation', err);
+    const { message, severity } = interpretError(err);
+    deactivateListingContext = {
+      listingId,
+      listingAddress,
+      exists: true,
+      loading: false,
+      active: false,
+    };
+    setDeactivateListingStatus(`Failed to load listing status: ${message}`, severity);
+    updateDeactivateControlsEnabled();
+    throw new Error(message);
+  }
+
+  if (!isActive) {
+    deactivateListingContext = {
+      listingId,
+      listingAddress,
+      exists: true,
+      loading: false,
+      active: false,
+    };
+    setDeactivateListingStatus(`Listing at ${listingAddress} is already inactive.`, 'warning');
+    updateDeactivateControlsEnabled();
+    throw new Error('Listing already inactive.');
+  }
+
+  deactivateListingContext = {
+    listingId,
+    listingAddress,
+    exists: true,
+    loading: false,
+    active: true,
+  };
+  setDeactivateListingStatus(`Listing at ${listingAddress} is active.`, 'success');
   updateDeactivateControlsEnabled();
 
   return async () => platformWrite.deactivateListing(listingId);
