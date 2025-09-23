@@ -43,7 +43,6 @@
     <a href="./landlord.html">Landlord</a>
     <a href="./investor.html">Investor</a>
     <a href="./agent.html">Agent</a>
-    <a href="./admin.html">Admin</a>
     <span class="version-badge" data-version></span>
   </nav>
   <div id="notificationTray" class="notification-tray"></div>
@@ -263,6 +262,45 @@
     <button type="button" id="listingLocationClear" class="inline-button">Clear</button>
   </div>
   <div id="landlordListings" class="muted">Connect wallet to load your listings.</div>
+
+  <div class="divider"></div>
+  <section id="depositTools" class="guided-section">
+    <h2>Deposit split proposals</h2>
+    <p class="section-subtext">Propose how deposits should be split after checkout. Platform owners confirm the final release.</p>
+
+    <div class="field-grid columns-3">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Listing ID (starts at 1)</span>
+          <span class="field-hint">Use the ID shown above the listing address.</span>
+          <input id="depositListingId" inputmode="numeric" placeholder="1">
+        </div>
+      </label>
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Booking ID</span>
+          <span class="field-hint">Enter the booking you want to review.</span>
+          <input id="depositBookingId" inputmode="numeric" placeholder="1">
+        </div>
+      </label>
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Tenant share (basis points)</span>
+          <span class="field-hint">0–10000 bps (5000 = 50%)</span>
+          <input id="depositTenantBps" inputmode="numeric" value="5000">
+        </div>
+      </label>
+    </div>
+
+    <button id="depositLoad" type="button" disabled>Load Booking Details</button>
+    <button id="depositPropose" type="button" disabled>Propose Deposit Split</button>
+    <p class="muted">Deposit releases must now be confirmed from the Platform Owner Console using MetaMask.</p>
+    <div id="depositStatus" class="muted"></div>
+    <div id="depositBookingInfo" class="muted"></div>
+  </section>
 
   <footer>
     r3nt by SQMU. USDC. Arbitrum.

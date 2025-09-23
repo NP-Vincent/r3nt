@@ -26,6 +26,7 @@ const LOCATION_FILTER_PRECISION = 5;
 const GEOHASH_ALLOWED_PATTERN = /^[0-9bcdefghjkmnpqrstuvwxyz]+$/;
 const LAT_LON_FILTER_PATTERN = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 const DEFAULT_SORT_MODE = 'created-desc';
+const BOOKING_STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
 
 const UINT64_MAX = (1n << 64n) - 1n;
 const utf8Encoder = new TextEncoder();
@@ -63,9 +64,29 @@ const els = {
   listingLocationFilter: document.getElementById('listingLocationFilter'),
   listingLocationClear: document.getElementById('listingLocationClear'),
 };
+const depositEls = {
+  section: document.getElementById('depositTools'),
+  listingId: document.getElementById('depositListingId'),
+  bookingId: document.getElementById('depositBookingId'),
+  tenantBps: document.getElementById('depositTenantBps'),
+  load: document.getElementById('depositLoad'),
+  propose: document.getElementById('depositPropose'),
+  bookingInfo: document.getElementById('depositBookingInfo'),
+  status: document.getElementById('depositStatus'),
+};
 const info = (t) => (els.status.textContent = t);
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'landlord' });
+
+if (depositEls.status) {
+  setDepositStatus('Sign in with Farcaster to manage deposit splits.');
+}
+if (depositEls.load) {
+  depositEls.load.disabled = true;
+}
+if (depositEls.propose) {
+  depositEls.propose.disabled = true;
+}
 
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
@@ -192,6 +213,28 @@ function formatDuration(seconds) {
   }
   const hoursOnly = Math.max(1, Math.round(totalSeconds / 3600));
   return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
+}
+
+function formatTimestamp(ts) {
+  const value = typeof ts === 'bigint' ? ts : BigInt(ts || 0);
+  if (value === 0n) return '-';
+  let asNumber;
+  try {
+    asNumber = Number(value);
+  } catch {
+    return '-';
+  }
+  if (!Number.isFinite(asNumber)) return '-';
+  const date = new Date(asNumber * 1000);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function decodeBytes32ToString(value, precision) {
@@ -1304,11 +1347,171 @@ async function loadLandlordListings(landlordAddr) {
   }
 }
 
-// -------------------- Boot --------------------
 let fidBig; // bigint from QuickAuth
 let provider; // EIP-1193
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 
+// -------------------- Deposit split tools --------------------
+function setDepositStatus(message) {
+  if (depositEls.status) {
+    depositEls.status.textContent = message || '';
+  }
+}
+
+function updateDepositStatus(message, variant = 'info') {
+  setDepositStatus(message);
+  if (message) {
+    notify({ message, variant, role: 'landlord', timeout: variant === 'error' ? 7000 : 5000 });
+  }
+}
+
+function clearDepositBookingInfo() {
+  if (depositEls.bookingInfo) {
+    depositEls.bookingInfo.innerHTML = '';
+  }
+}
+
+function parseDepositListingId() {
+  if (!depositEls.listingId) throw new Error('Listing ID input missing.');
+  const raw = depositEls.listingId.value.trim();
+  if (!/^\d+$/.test(raw)) throw new Error('Listing ID must be a whole number.');
+  const id = BigInt(raw);
+  if (id === 0n) throw new Error('Listing ID must be at least 1.');
+  return id;
+}
+
+function parseDepositBookingId() {
+  if (!depositEls.bookingId) throw new Error('Booking ID input missing.');
+  const raw = depositEls.bookingId.value.trim();
+  if (!/^\d+$/.test(raw)) throw new Error('Booking ID must be a whole number.');
+  return BigInt(raw);
+}
+
+function parseDepositTenantBps() {
+  if (!depositEls.tenantBps) throw new Error('Tenant share input missing.');
+  const raw = depositEls.tenantBps.value.trim();
+  if (!/^\d+$/.test(raw)) throw new Error('Tenant share must be whole basis points.');
+  const bps = Number(raw);
+  if (!Number.isFinite(bps) || bps < 0 || bps > 10_000) {
+    throw new Error('Basis points must be between 0 and 10000.');
+  }
+  return bps;
+}
+
+async function getListingAddressById(listingId) {
+  const abi = await loadPlatformAbi();
+  if (!Array.isArray(abi) || abi.length === 0) {
+    throw new Error('Platform ABI unavailable.');
+  }
+  const addr = await pub.readContract({
+    address: PLATFORM_ADDRESS,
+    abi,
+    functionName: 'listingById',
+    args: [listingId],
+  });
+  if (
+    typeof addr !== 'string' ||
+    !/^0x[0-9a-fA-F]{40}$/.test(addr) ||
+    /^0x0+$/i.test(addr)
+  ) {
+    throw new Error('Listing not found.');
+  }
+  return addr;
+}
+
+function renderDepositBookingInfo(listingAddr, bookingId, booking, pending) {
+  if (!depositEls.bookingInfo) return;
+  const statusIndex = Number(booking.status || 0n);
+  const statusLabel = BOOKING_STATUS_LABELS[statusIndex] || `Unknown (${statusIndex})`;
+  const durationSeconds = (booking.end || 0n) - (booking.start || 0n);
+  const depositShareText = booking.depositReleased
+    ? ` · Tenant share: ${(Number(booking.depositTenantBps || 0n) / 100).toFixed(2)}%`
+    : '';
+  const lines = [
+    `Listing: ${listingAddr}`,
+    `Booking ID: ${bookingId.toString()}`,
+    `Status: ${statusLabel}`,
+    `Tenant: ${booking.tenant}`,
+    `Range: ${formatTimestamp(booking.start)} → ${formatTimestamp(booking.end)} (${formatDuration(durationSeconds)})`,
+    `Deposit held: ${formatUsdc(booking.deposit)} USDC`,
+    `Rent (gross/net): ${formatUsdc(booking.grossRent)} / ${formatUsdc(booking.expectedNetRent)} USDC`,
+    `Rent paid so far: ${formatUsdc(booking.rentPaid)} USDC`,
+    `Deposit released: ${booking.depositReleased ? 'Yes' : 'No'}${depositShareText}`,
+    pending?.exists
+      ? `Pending proposal: tenant ${(Number(pending.tenantBps || 0n) / 100).toFixed(2)}% · proposer ${pending.proposer}`
+      : 'Pending proposal: none',
+  ];
+  depositEls.bookingInfo.innerHTML = lines.map((line) => escapeHtml(line)).join('<br>');
+}
+
+async function loadDepositBooking() {
+  if (!depositEls.load) return;
+  setDepositStatus('Loading booking details…');
+  try {
+    const listingId = parseDepositListingId();
+    const bookingId = parseDepositBookingId();
+    const listingAddr = await getListingAddressById(listingId);
+    const [bookingRaw, pending] = await Promise.all([
+      pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'bookingInfo', args: [bookingId] }),
+      pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'pendingDepositSplit', args: [bookingId] }),
+    ]);
+
+    const booking = {
+      tenant: bookingRaw.tenant,
+      start: bookingRaw.start,
+      end: bookingRaw.end,
+      grossRent: bookingRaw.grossRent,
+      expectedNetRent: bookingRaw.expectedNetRent,
+      rentPaid: bookingRaw.rentPaid,
+      deposit: bookingRaw.deposit,
+      status: bookingRaw.status,
+      depositReleased: bookingRaw.depositReleased,
+      depositTenantBps: bookingRaw.depositTenantBps,
+    };
+
+    renderDepositBookingInfo(listingAddr, bookingId, booking, pending);
+    updateDepositStatus('Booking details loaded.', 'success');
+  } catch (err) {
+    clearDepositBookingInfo();
+    updateDepositStatus(err?.message || 'Unable to load booking details.', 'error');
+  }
+}
+
+if (depositEls.load) {
+  depositEls.load.addEventListener('click', () => {
+    loadDepositBooking();
+  });
+}
+
+if (depositEls.propose) {
+  depositEls.propose.addEventListener('click', async () => {
+    try {
+      if (!provider) throw new Error('Connect wallet first.');
+      const accounts = await provider.request({ method: 'eth_accounts' });
+      const [from] = Array.isArray(accounts) ? accounts : [];
+      if (!from) throw new Error('No wallet account.');
+      await ensureArbitrum(provider);
+      const listingId = parseDepositListingId();
+      const bookingId = parseDepositBookingId();
+      const tenantBps = parseDepositTenantBps();
+      const listingAddr = await getListingAddressById(listingId);
+      const data = encodeFunctionData({
+        abi: LISTING_ABI,
+        functionName: 'proposeDepositSplit',
+        args: [bookingId, BigInt(tenantBps)],
+      });
+      const txHash = await provider.request({
+        method: 'eth_sendTransaction',
+        params: [{ from, to: listingAddr, data }],
+      });
+      updateDepositStatus(`Proposal tx sent: ${txHash}`, 'success');
+    } catch (err) {
+      updateDepositStatus(err?.message || 'Failed to propose split.', 'error');
+    }
+  });
+}
+
+// -------------------- Boot --------------------
 (async () => {
   try {
     await sdk.actions.ready();
@@ -1326,9 +1529,17 @@ const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'ht
   } catch (e) {
     els.contextBar.textContent = 'QuickAuth failed. Open this inside a Farcaster client.';
     notify({ message: 'QuickAuth failed. Open inside a Farcaster client.', variant: 'error', role: 'landlord', timeout: 6000 });
+    if (depositEls.load) {
+      depositEls.load.disabled = true;
+    }
+    setDepositStatus('QuickAuth failed. Open inside a Farcaster client.');
     return;
   }
 
+  if (depositEls.load) {
+    depositEls.load.disabled = false;
+  }
+  setDepositStatus('Connect wallet to manage deposit splits.');
   els.connect.disabled = false;
   updateOnboardingProgress();
 })();
@@ -1367,6 +1578,10 @@ els.connect.onclick = async () => {
     els.connect.textContent = 'Wallet Connected';
     els.connect.style.background = '#10b981';
     walletConnected = true;
+    if (depositEls.propose) {
+      depositEls.propose.disabled = false;
+    }
+    setDepositStatus('Wallet connected. Load a booking to review its deposit.');
     updateOnboardingProgress();
     info('Wallet ready. Loading your listings…');
     notify({ message: 'Wallet connected — ready to deploy.', variant: 'success', role: 'landlord', timeout: 5000 });
@@ -1377,6 +1592,12 @@ els.connect.onclick = async () => {
     }
   } catch (e) {
     walletConnected = false;
+    if (depositEls.propose) {
+      depositEls.propose.disabled = true;
+    }
+    if (depositEls.load && depositEls.load.disabled === false) {
+      setDepositStatus(e?.message || 'Wallet connection failed.');
+    }
     info(e?.message || 'Wallet connection failed.');
     notify({ message: e?.message || 'Wallet connection failed.', variant: 'error', role: 'landlord', timeout: 6000 });
     updateOnboardingProgress();
