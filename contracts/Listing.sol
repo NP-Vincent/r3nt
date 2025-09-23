@@ -2,9 +2,9 @@
 pragma solidity ^0.8.26;
 
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {Platform} from "./Platform.sol";
 
@@ -34,7 +34,7 @@ interface IR3ntSQMU {
  *         and rent streaming for the r3nt platform.
  */
 contract Listing is Initializable, ReentrancyGuardUpgradeable {
-    using SafeERC20Upgradeable for IERC20Upgradeable;
+    using SafeERC20 for IERC20;
 
     /// @notice Booking lifecycle statuses.
     enum Status {
@@ -412,7 +412,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
 
         uint256 deposit = depositAmount;
         if (deposit > 0) {
-            IERC20Upgradeable(usdc).safeTransferFrom(msg.sender, address(this), deposit);
+            IERC20(usdc).safeTransferFrom(msg.sender, address(this), deposit);
         }
 
         IBookingRegistry(bookingRegistry).reserve(start, end);
@@ -488,7 +488,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         uint256 landlordFee = (grossAmount * landlordFeeBps) / BPS_DENOMINATOR;
         netAmount = grossAmount - landlordFee;
 
-        IERC20Upgradeable token = IERC20Upgradeable(usdc);
+        IERC20 token = IERC20(usdc);
         uint256 totalTransfer = grossAmount + tenantFee;
         token.safeTransferFrom(msg.sender, address(this), totalTransfer);
 
@@ -542,8 +542,9 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         if (deposit > 0) {
             booking.deposit = 0;
             _depositReleased[bookingId] = true;
+            delete _depositSplitProposals[bookingId];
             _confirmedDepositTenantBps[bookingId] = BPS_DENOMINATOR;
-            IERC20Upgradeable(usdc).safeTransfer(booking.tenant, deposit);
+            IERC20(usdc).safeTransfer(booking.tenant, deposit);
             emit DepositReleased(bookingId, msg.sender, deposit, 0);
         }
 
@@ -567,6 +568,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             if (deposit > 0) {
                 booking.deposit = 0;
                 _depositReleased[bookingId] = true;
+                delete _depositSplitProposals[bookingId];
                 _confirmedDepositTenantBps[bookingId] = 0;
                 _handleLandlordIncome(bookingId, deposit);
                 emit DepositReleased(bookingId, msg.sender, 0, deposit);
@@ -632,7 +634,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         _confirmedDepositTenantBps[bookingId] = tenantBps;
         delete _depositSplitProposals[bookingId];
 
-        IERC20Upgradeable token = IERC20Upgradeable(usdc);
+        IERC20 token = IERC20(usdc);
         if (tenantAmount > 0) {
             token.safeTransfer(booking.tenant, tenantAmount);
         }
@@ -752,7 +754,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         totalCost = booking.pricePerSqmu * sqmuAmount;
         require(totalCost > 0, "cost=0");
 
-        IERC20Upgradeable token = IERC20Upgradeable(usdc);
+        IERC20 token = IERC20(usdc);
         token.safeTransferFrom(msg.sender, address(this), totalCost);
 
         uint256 platformFee = (totalCost * booking.feeBps) / BPS_DENOMINATOR;
@@ -806,7 +808,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         amount = accumulated - debt;
         booking.userDebt[msg.sender] = accumulated;
 
-        IERC20Upgradeable(usdc).safeTransfer(msg.sender, amount);
+        IERC20(usdc).safeTransfer(msg.sender, amount);
 
         emit Claimed(bookingId, msg.sender, amount);
     }
@@ -859,7 +861,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         _landlordAccruals[bookingId] = 0;
 
         address to = recipient == address(0) ? landlord : recipient;
-        IERC20Upgradeable(usdc).safeTransfer(to, amount);
+        IERC20(usdc).safeTransfer(to, amount);
 
         emit LandlordWithdrawal(bookingId, to, amount);
     }

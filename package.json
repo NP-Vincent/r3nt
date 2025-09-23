@@ -1,0 +1,22 @@
+{
+  "name": "r3nt",
+  "version": "1.0.0",
+  "description": "The **Clean-Slate** rebuild of r3nt replaces the legacy split between booking, deposits and SQMU tokenisation with a single, modular suite of Solidity contracts. The goal is to deliver a unified booking flow for Farcaster Mini App users while keeping deposits transparent, rent streams scalable and investor tokenisation optional on every stay. All value transfers are settled in canonical **USDC (6 decimals)** and every upgradeable module relies on the OpenZeppelin UUPS pattern.",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@openzeppelin/hardhat-upgrades": "^3.9.1",
+    "hardhat": "^2.26.2"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "@openzeppelin/contracts-upgradeable": "^5.0.2"
+  }
+}
