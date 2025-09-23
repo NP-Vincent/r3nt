@@ -3,7 +3,15 @@ if (!ethersLib) {
   throw new Error('Ethers library not found. Ensure ethers UMD bundle is loaded before platform.js.');
 }
 
-import { PLATFORM_ADDRESS, PLATFORM_ABI, LISTING_ABI, RPC_URL, APP_VERSION } from './config.js';
+import {
+  PLATFORM_ADDRESS,
+  PLATFORM_ABI,
+  LISTING_ABI,
+  REGISTRY_ABI,
+  REGISTRY_ADDRESS,
+  RPC_URL,
+  APP_VERSION,
+} from './config.js';
 import { connectWallet, disconnectWallet } from './platform-only-metamask-wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { normalizeCastInputToBytes32 } from './tools.js';
@@ -16,6 +24,19 @@ const platformRead = new Contract(PLATFORM_ADDRESS, PLATFORM_ABI, readProvider);
 let signer = null;
 let provider = null;
 let platformWrite = null;
+let bookingRegistryAddress = null;
+let bookingRegistryWrite = null;
+let configuredRegistryAddress = null;
+try {
+  if (REGISTRY_ADDRESS) {
+    const normalizedRegistry = utils.getAddress(REGISTRY_ADDRESS);
+    if (normalizedRegistry !== constants.AddressZero) {
+      configuredRegistryAddress = normalizedRegistry;
+    }
+  }
+} catch (err) {
+  console.warn('Invalid BookingRegistry address configured in config.js', err);
+}
 const connectBtn = document.getElementById('connectBtn');
 const disconnectBtn = document.getElementById('disconnectBtn');
 const refreshSnapshotBtn = document.getElementById('refreshSnapshotBtn');
@@ -33,6 +54,16 @@ const depositInfoEl = document.getElementById('depositInfo');
 const depositStatusEl = document.getElementById('depositStatus');
 const depositConfirmForm = document.getElementById('formConfirmDeposit');
 const confirmDepositBtn = document.getElementById('confirmDepositBtn');
+const deactivateListingForm = document.getElementById('formDeactivateListing');
+const deactivateListingIdInput = document.getElementById('deactivateListingId');
+const deactivateListingStatusEl = document.getElementById('deactivateListingStatus');
+const deactivateListingSubmitBtn = document.getElementById('deactivateListingSubmit');
+const deregisterListingForm = document.getElementById('formDeregisterListing');
+const deregisterListingIdInput = document.getElementById('deregisterListingId');
+const deregisterListingAddressInput = document.getElementById('deregisterListingAddress');
+const deregisterLookupBtn = document.getElementById('deregisterLookupBtn');
+const deregisterListingStatusEl = document.getElementById('deregisterListingStatus');
+const deregisterSubmitBtn = document.getElementById('deregisterListingSubmit');
 
 const OWNER_REQUIREMENT_MESSAGE = 'Connect the platform owner wallet to unlock controls.';
 
@@ -46,6 +77,15 @@ const DEPOSIT_DEFAULT_MESSAGE =
   'Enter a listing & booking ID, then load the booking to inspect its deposit status.';
 const DEPOSIT_DEFAULT_STATUS = 'Load a booking to view deposit proposal details.';
 let currentDepositContext = null;
+const DEACTIVATE_DEFAULT_STATUS = 'Enter a listing ID to verify availability.';
+const DEREGISTER_DEFAULT_STATUS = 'Enter a listing address or lookup by ID.';
+const DEREGISTER_REGISTRY_WARNING =
+  'Booking registry not configured. Update module addresses before deregistering listings.';
+let deactivateListingContext = { listingId: null, listingAddress: null, exists: false, loading: false };
+let deactivateLookupCounter = 0;
+let deactivateLookupTimeout = null;
+let deregisterContext = { listingId: null, address: null, resolvedFromId: false, loading: false };
+let deregisterLookupCounter = 0;
 
 if (toggleDevConsoleBtn) {
   toggleDevConsoleBtn.disabled = true;
@@ -63,6 +103,9 @@ if (navBadge) {
 }
 
 resetDepositContext();
+resetDeactivateContext();
+resetDeregisterContext();
+setBookingRegistryAddress(configuredRegistryAddress);
 
 function setActionStatus(message, type = 'info', toast = false) {
   actionStatusEl.textContent = message ?? '';
@@ -135,6 +178,8 @@ function setOwnerControlsEnabled(enabled) {
     toggleDevConsoleBtn.disabled = false;
   }
   updateDepositControlsEnabled();
+  updateDeactivateControlsEnabled();
+  updateDeregisterControlsEnabled();
 }
 
 function updateDevConsoleStatus() {
@@ -380,6 +425,32 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;');
 }
 
+function setStatusNode(node, message, severity = 'info') {
+  if (!node) return;
+  node.textContent = message || '';
+  node.classList.remove('status-ok', 'status-error', 'status-warning', 'status-info');
+  if (!message) {
+    return;
+  }
+  if (severity === 'success') {
+    node.classList.add('status-ok');
+  } else if (severity === 'error') {
+    node.classList.add('status-error');
+  } else if (severity === 'warning') {
+    node.classList.add('status-warning');
+  } else {
+    node.classList.add('status-info');
+  }
+}
+
+function setDeactivateListingStatus(message, severity = 'info') {
+  setStatusNode(deactivateListingStatusEl, message, severity);
+}
+
+function setDeregisterListingStatus(message, severity = 'info') {
+  setStatusNode(deregisterListingStatusEl, message, severity);
+}
+
 function setDepositStatus(message, severity = 'info') {
   if (!depositStatusEl) return;
   depositStatusEl.textContent = message || '';
@@ -451,6 +522,257 @@ function resetDepositContext() {
   renderDepositInfo(null);
   setDepositStatus(DEPOSIT_DEFAULT_STATUS, 'info');
   updateDepositControlsEnabled();
+}
+
+function updateDeactivateControlsEnabled() {
+  if (!deactivateListingSubmitBtn) {
+    return;
+  }
+  const walletReady = ownerAccessGranted && Boolean(platformWrite) && Boolean(signer);
+  const context = deactivateListingContext;
+  const ready = walletReady && context && context.exists && !context.loading;
+  deactivateListingSubmitBtn.disabled = !ready;
+}
+
+function resetDeactivateContext() {
+  deactivateListingContext = { listingId: null, listingAddress: null, exists: false, loading: false };
+  deactivateLookupCounter = 0;
+  if (deactivateLookupTimeout) {
+    clearTimeout(deactivateLookupTimeout);
+    deactivateLookupTimeout = null;
+  }
+  setDeactivateListingStatus(DEACTIVATE_DEFAULT_STATUS, 'info');
+  updateDeactivateControlsEnabled();
+}
+
+function updateDeregisterControlsEnabled() {
+  if (!deregisterSubmitBtn) {
+    return;
+  }
+  const walletReady = ownerAccessGranted && Boolean(platformWrite) && Boolean(signer);
+  const registryReady = walletReady && Boolean(bookingRegistryWrite) && Boolean(bookingRegistryAddress);
+  const context = deregisterContext;
+  const addressReady = Boolean(context && context.address);
+  const loading = Boolean(context && context.loading);
+  deregisterSubmitBtn.disabled = !(registryReady && addressReady && !loading);
+}
+
+function resetDeregisterContext({ clearInputs = false } = {}) {
+  deregisterContext = { listingId: null, address: null, resolvedFromId: false, loading: false };
+  deregisterLookupCounter = 0;
+  if (clearInputs) {
+    if (deregisterListingIdInput) deregisterListingIdInput.value = '';
+    if (deregisterListingAddressInput) deregisterListingAddressInput.value = '';
+  }
+  if (!bookingRegistryAddress) {
+    setDeregisterListingStatus(DEREGISTER_REGISTRY_WARNING, 'warning');
+  } else {
+    setDeregisterListingStatus(DEREGISTER_DEFAULT_STATUS, 'info');
+  }
+  updateDeregisterControlsEnabled();
+}
+
+function updateBookingRegistryContract() {
+  if (!signer || !bookingRegistryAddress) {
+    bookingRegistryWrite = null;
+    updateDeregisterControlsEnabled();
+    return;
+  }
+  try {
+    bookingRegistryWrite = new Contract(bookingRegistryAddress, REGISTRY_ABI, signer);
+  } catch (err) {
+    console.error('Failed to create BookingRegistry contract instance', err);
+    bookingRegistryWrite = null;
+  }
+  updateDeregisterControlsEnabled();
+}
+
+function setBookingRegistryAddress(nextAddress) {
+  let normalized = null;
+  if (nextAddress) {
+    try {
+      const formatted = utils.getAddress(nextAddress);
+      if (formatted !== constants.AddressZero) {
+        normalized = formatted;
+      }
+    } catch (err) {
+      console.warn('Ignoring invalid BookingRegistry address', nextAddress, err);
+    }
+  }
+  bookingRegistryAddress = normalized;
+  updateBookingRegistryContract();
+  if (!bookingRegistryAddress) {
+    setDeregisterListingStatus(DEREGISTER_REGISTRY_WARNING, 'warning');
+  } else if (!deregisterContext.address) {
+    setDeregisterListingStatus(DEREGISTER_DEFAULT_STATUS, 'info');
+  }
+  updateDeregisterControlsEnabled();
+}
+
+function scheduleDeactivateListingCheck() {
+  if (deactivateLookupTimeout) {
+    clearTimeout(deactivateLookupTimeout);
+  }
+  deactivateLookupTimeout = setTimeout(() => {
+    deactivateLookupTimeout = null;
+    evaluateDeactivateListingId();
+  }, 400);
+}
+
+async function evaluateDeactivateListingId() {
+  if (!deactivateListingIdInput) {
+    return;
+  }
+  if (deactivateLookupTimeout) {
+    clearTimeout(deactivateLookupTimeout);
+    deactivateLookupTimeout = null;
+  }
+  const rawValue = deactivateListingIdInput.value;
+  const trimmed = String(rawValue ?? '').trim();
+  if (!trimmed) {
+    deactivateListingContext = { listingId: null, listingAddress: null, exists: false, loading: false };
+    setDeactivateListingStatus(DEACTIVATE_DEFAULT_STATUS, 'info');
+    updateDeactivateControlsEnabled();
+    return;
+  }
+  let listingId;
+  try {
+    listingId = parseListingId(trimmed);
+  } catch (err) {
+    deactivateListingContext = { listingId: null, listingAddress: null, exists: false, loading: false };
+    setDeactivateListingStatus(err.message, 'warning');
+    updateDeactivateControlsEnabled();
+    return;
+  }
+
+  const requestId = ++deactivateLookupCounter;
+  deactivateListingContext = { listingId, listingAddress: null, exists: false, loading: true };
+  setDeactivateListingStatus('Checking listing…');
+  updateDeactivateControlsEnabled();
+
+  try {
+    const listingAddressRaw = await platformRead.listingById(listingId);
+    if (requestId !== deactivateLookupCounter) {
+      return;
+    }
+    if (!listingAddressRaw || listingAddressRaw === constants.AddressZero) {
+      deactivateListingContext = { listingId, listingAddress: null, exists: false, loading: false };
+      setDeactivateListingStatus('Listing not found for that ID.', 'error');
+    } else {
+      const listingAddress = utils.getAddress(listingAddressRaw);
+      deactivateListingContext = { listingId, listingAddress, exists: true, loading: false };
+      setDeactivateListingStatus(`Listing found at ${listingAddress}.`, 'success');
+    }
+  } catch (err) {
+    if (requestId !== deactivateLookupCounter) {
+      return;
+    }
+    console.error('Failed to check listing before deactivation', err);
+    const { message, severity } = interpretError(err);
+    deactivateListingContext = { listingId, listingAddress: null, exists: false, loading: false };
+    setDeactivateListingStatus(`Failed to load listing: ${message}`, severity);
+  } finally {
+    if (requestId === deactivateLookupCounter) {
+      updateDeactivateControlsEnabled();
+    }
+  }
+}
+
+function evaluateDeregisterAddressInput({ silent = false } = {}) {
+  if (!deregisterListingAddressInput) {
+    return;
+  }
+  const rawValue = deregisterListingAddressInput.value;
+  const trimmed = String(rawValue ?? '').trim();
+  if (!trimmed) {
+    deregisterContext.address = null;
+    deregisterContext.resolvedFromId = false;
+    if (!silent) {
+      if (!bookingRegistryAddress) {
+        setDeregisterListingStatus(DEREGISTER_REGISTRY_WARNING, 'warning');
+      } else {
+        setDeregisterListingStatus(DEREGISTER_DEFAULT_STATUS, 'info');
+      }
+    }
+    updateDeregisterControlsEnabled();
+    return;
+  }
+
+  try {
+    const normalized = normalizeAddress(trimmed, 'Listing address');
+    deregisterContext.address = normalized;
+    deregisterContext.resolvedFromId = false;
+    if (!silent) {
+      setDeregisterListingStatus(`Listing address ready: ${normalized}.`, 'success');
+    }
+  } catch (err) {
+    deregisterContext.address = null;
+    deregisterContext.resolvedFromId = false;
+    if (!silent) {
+      setDeregisterListingStatus(err.message, 'error');
+    }
+  }
+  updateDeregisterControlsEnabled();
+}
+
+async function lookupDeregisterListingById() {
+  if (!deregisterListingIdInput) {
+    return;
+  }
+  const rawValue = deregisterListingIdInput.value;
+  const trimmed = String(rawValue ?? '').trim();
+  if (!trimmed) {
+    setDeregisterListingStatus('Enter a listing ID to lookup its address.', 'warning');
+    return;
+  }
+  let listingId;
+  try {
+    listingId = parseListingId(trimmed);
+  } catch (err) {
+    setDeregisterListingStatus(err.message, 'error');
+    return;
+  }
+
+  const requestId = ++deregisterLookupCounter;
+  deregisterContext.listingId = listingId;
+  deregisterContext.loading = true;
+  setDeregisterListingStatus('Looking up listing address…');
+  updateDeregisterControlsEnabled();
+
+  try {
+    const listingAddressRaw = await platformRead.listingById(listingId);
+    if (requestId !== deregisterLookupCounter) {
+      return;
+    }
+    if (!listingAddressRaw || listingAddressRaw === constants.AddressZero) {
+      deregisterContext.address = null;
+      deregisterContext.resolvedFromId = false;
+      setDeregisterListingStatus('Listing not found for that ID.', 'error');
+      if (deregisterListingAddressInput) {
+        deregisterListingAddressInput.value = '';
+      }
+    } else {
+      const listingAddress = utils.getAddress(listingAddressRaw);
+      deregisterContext.address = listingAddress;
+      deregisterContext.resolvedFromId = true;
+      setDeregisterListingStatus(`Listing resolved to ${listingAddress}.`, 'success');
+      if (deregisterListingAddressInput) {
+        deregisterListingAddressInput.value = listingAddress;
+      }
+    }
+  } catch (err) {
+    if (requestId !== deregisterLookupCounter) {
+      return;
+    }
+    console.error('Failed to lookup listing address', err);
+    const { message, severity } = interpretError(err);
+    setDeregisterListingStatus(`Failed to lookup listing: ${message}`, severity);
+  } finally {
+    if (requestId === deregisterLookupCounter) {
+      deregisterContext.loading = false;
+      updateDeregisterControlsEnabled();
+    }
+  }
 }
 
 async function loadDepositDetails(options = {}) {
@@ -547,6 +869,8 @@ function enableForms(enabled) {
     });
   });
   updateDepositControlsEnabled();
+  updateDeactivateControlsEnabled();
+  updateDeregisterControlsEnabled();
 }
 
 enableForms(false);
@@ -588,6 +912,8 @@ async function refreshSnapshot() {
 
     const [listingFactory, bookingRegistry, sqmuToken] = modules;
     const [tenantFeeBps, landlordFeeBps] = fees;
+
+    setBookingRegistryAddress(bookingRegistry);
 
     const lines = [
       `Owner:           ${owner}`,
@@ -717,6 +1043,7 @@ connectBtn.addEventListener('click', async () => {
       platformWrite = null;
       provider = null;
       signer = null;
+      bookingRegistryWrite = null;
       connectedAccountEl.textContent = `Connected as ${normalizedAccount} (not owner)`;
       if (ownerGuardMessageEl) {
         ownerGuardMessageEl.textContent =
@@ -724,11 +1051,14 @@ connectBtn.addEventListener('click', async () => {
       }
       setOwnerControlsEnabled(false);
       enableForms(false);
+      updateDeregisterControlsEnabled();
+      updateDeactivateControlsEnabled();
       setActionStatus('Connected wallet is not the platform owner. Switch wallets to continue.', 'error', true);
       return;
     }
 
     platformWrite = new Contract(PLATFORM_ADDRESS, PLATFORM_ABI, signer);
+    updateBookingRegistryContract();
     setOwnerControlsEnabled(true);
     enableForms(true);
     if (ownerGuardMessageEl) {
@@ -745,7 +1075,10 @@ connectBtn.addEventListener('click', async () => {
     signer = null;
     provider = null;
     platformWrite = null;
+    bookingRegistryWrite = null;
     disconnectBtn.disabled = true;
+    updateDeregisterControlsEnabled();
+    updateDeactivateControlsEnabled();
   } finally {
     if (!platformWrite) {
       connectBtn.disabled = false;
@@ -763,14 +1096,38 @@ disconnectBtn.addEventListener('click', async () => {
     signer = null;
     provider = null;
     platformWrite = null;
+    bookingRegistryWrite = null;
     connectedAccountEl.textContent = '';
     setOwnerControlsEnabled(false);
     enableForms(false);
+    updateDeregisterControlsEnabled();
+    updateDeactivateControlsEnabled();
     resetOwnerGuardMessage();
     connectBtn.disabled = false;
     setActionStatus('Disconnected.', 'info', true);
   }
 });
+
+if (deactivateListingIdInput) {
+  deactivateListingIdInput.addEventListener('input', () => {
+    scheduleDeactivateListingCheck();
+  });
+  deactivateListingIdInput.addEventListener('blur', () => {
+    evaluateDeactivateListingId();
+  });
+}
+
+if (deregisterListingAddressInput) {
+  deregisterListingAddressInput.addEventListener('input', () => {
+    evaluateDeregisterAddressInput();
+  });
+}
+
+if (deregisterLookupBtn) {
+  deregisterLookupBtn.addEventListener('click', () => {
+    lookupDeregisterListingById();
+  });
+}
 
 if (depositLoadBtn) {
   depositLoadBtn.addEventListener('click', () => {
@@ -923,6 +1280,112 @@ bindForm(document.getElementById('formAgentOperator'), 'Updating operator access
   const account = normalizeAddress(document.getElementById('agentOperatorAddress').value, 'Operator address');
   const flag = document.getElementById('agentOperatorFlag').value === 'true';
   return async () => platformWrite.setAgentOperator(account, flag);
+});
+
+bindForm(deactivateListingForm, 'Deactivating listing', async () => {
+  if (!deactivateListingIdInput) {
+    throw new Error('Listing ID input unavailable.');
+  }
+  let listingId;
+  try {
+    listingId = parseListingId(deactivateListingIdInput.value);
+  } catch (err) {
+    setDeactivateListingStatus(err.message, 'error');
+    throw err;
+  }
+
+  let listingAddressRaw;
+  try {
+    listingAddressRaw = await platformRead.listingById(listingId);
+  } catch (err) {
+    console.error('Failed to load listing before deactivation', err);
+    const { message, severity } = interpretError(err);
+    setDeactivateListingStatus(`Failed to load listing: ${message}`, severity);
+    throw new Error(message);
+  }
+
+  if (!listingAddressRaw || listingAddressRaw === constants.AddressZero) {
+    setDeactivateListingStatus('Listing not found for that ID.', 'error');
+    deactivateListingContext = { listingId, listingAddress: null, exists: false, loading: false };
+    updateDeactivateControlsEnabled();
+    throw new Error('Listing not found for that ID.');
+  }
+
+  const listingAddress = utils.getAddress(listingAddressRaw);
+  deactivateListingContext = { listingId, listingAddress, exists: true, loading: false };
+  setDeactivateListingStatus(`Listing found at ${listingAddress}.`, 'success');
+  updateDeactivateControlsEnabled();
+
+  return async () => platformWrite.deactivateListing(listingId);
+});
+
+bindForm(deregisterListingForm, 'Deregistering listing', async () => {
+  if (!bookingRegistryAddress || !bookingRegistryWrite) {
+    setDeregisterListingStatus(DEREGISTER_REGISTRY_WARNING, 'warning');
+    throw new Error('Booking registry is not configured.');
+  }
+
+  let listingAddress = null;
+  const addressValue = deregisterListingAddressInput ? deregisterListingAddressInput.value : '';
+  const trimmedAddress = String(addressValue ?? '').trim();
+  if (trimmedAddress) {
+    try {
+      listingAddress = normalizeAddress(trimmedAddress, 'Listing address');
+      deregisterContext.address = listingAddress;
+      deregisterContext.resolvedFromId = false;
+    } catch (err) {
+      setDeregisterListingStatus(err.message, 'error');
+      throw err;
+    }
+  }
+
+  let listingId = null;
+  if (!listingAddress) {
+    const idValue = deregisterListingIdInput ? deregisterListingIdInput.value : '';
+    try {
+      listingId = parseListingId(idValue);
+    } catch (err) {
+      setDeregisterListingStatus(err.message, 'error');
+      throw err;
+    }
+
+    let listingAddressRaw;
+    try {
+      listingAddressRaw = await platformRead.listingById(listingId);
+    } catch (err) {
+      console.error('Failed to resolve listing before deregistering', err);
+      const { message, severity } = interpretError(err);
+      setDeregisterListingStatus(`Failed to resolve listing: ${message}`, severity);
+      throw new Error(message);
+    }
+    if (!listingAddressRaw || listingAddressRaw === constants.AddressZero) {
+      setDeregisterListingStatus('Listing not found for that ID.', 'error');
+      deregisterContext.address = null;
+      deregisterContext.resolvedFromId = false;
+      updateDeregisterControlsEnabled();
+      throw new Error('Listing not found for that ID.');
+    }
+    listingAddress = utils.getAddress(listingAddressRaw);
+    deregisterContext = { listingId, address: listingAddress, resolvedFromId: true, loading: false };
+    if (deregisterListingAddressInput) {
+      deregisterListingAddressInput.value = listingAddress;
+    }
+    setDeregisterListingStatus(`Listing resolved to ${listingAddress}.`, 'success');
+  } else {
+    if (!deregisterContext) {
+      deregisterContext = { listingId: null, address: listingAddress, resolvedFromId: false, loading: false };
+    } else {
+      deregisterContext.listingId = null;
+      deregisterContext.address = listingAddress;
+      deregisterContext.resolvedFromId = false;
+      deregisterContext.loading = false;
+    }
+  }
+
+  updateDeregisterControlsEnabled();
+
+  const targetAddress = listingAddress;
+  return async () => bookingRegistryWrite.deregisterListing(targetAddress);
 });
 
 bindForm(document.getElementById('formUpdateCastHash'), 'Updating listing cast hash', () => {

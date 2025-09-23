@@ -74,6 +74,41 @@
     </form>
   </section>
 
+  <section class="card" id="listingLifecycleSection" data-owner-only hidden>
+    <h2>Listing lifecycle</h2>
+    <p class="muted">Emergency owner controls for managing live listings.</p>
+
+    <form id="formDeactivateListing" data-requires-signer>
+      <h3>Deactivate listing</h3>
+      <p class="inline-label">Confirms the listing exists before submitting the owner-only transaction.</p>
+      <label>Listing ID (starts at 1)
+        <input id="deactivateListingId" inputmode="numeric" autocomplete="off" placeholder="1" required />
+      </label>
+      <div class="button-row">
+        <button id="deactivateListingSubmit" type="submit" class="danger">Deactivate listing</button>
+      </div>
+      <div class="note status status-info" id="deactivateListingStatus">Enter a listing ID to verify availability.</div>
+    </form>
+
+    <hr class="section-divider" />
+
+    <form id="formDeregisterListing" data-requires-signer>
+      <h3>Deregister listing</h3>
+      <p class="inline-label">Removes a listing from the BookingRegistry. Provide an address or look it up by ID.</p>
+      <label>Listing ID (optional)
+        <input id="deregisterListingId" inputmode="numeric" autocomplete="off" placeholder="1" />
+      </label>
+      <label>Listing address
+        <input id="deregisterListingAddress" placeholder="0x…" autocomplete="off" />
+      </label>
+      <div class="button-row">
+        <button id="deregisterLookupBtn" type="button" class="secondary">Lookup address</button>
+        <button id="deregisterListingSubmit" type="submit" class="danger">Deregister listing</button>
+      </div>
+      <div class="note status status-info" id="deregisterListingStatus">Enter an address or lookup by ID.</div>
+    </form>
+  </section>
+
   <section class="card" id="castHashSection" data-owner-only hidden>
     <h2>Listing cast hash</h2>
     <p class="muted">Update the stored Farcaster cast hash for an active listing. Accepts a Warpcast URL or raw 0x hash.</p>
