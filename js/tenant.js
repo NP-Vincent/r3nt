@@ -47,6 +47,13 @@ const els = {
   },
 };
 
+if (els.connect && !els.connect.dataset.defaultLabel) {
+  const initialLabel = (els.connect.textContent || '').trim();
+  if (initialLabel) {
+    els.connect.dataset.defaultLabel = initialLabel;
+  }
+}
+
 let selectedListing = null;
 let selectedCard = null;
 let selectedListingTitle = '';
@@ -245,9 +252,32 @@ function setConnectedAccount(addr) {
     bookingsRendered = false;
     lastBookingsAccount = '';
   }
-  connectedAccount = addr || null;
+  const original = typeof addr === 'string' ? addr : '';
+  connectedAccount = original || null;
   if (els.bookings?.refresh) {
     els.bookings.refresh.disabled = !next;
+  }
+  if (els.connect) {
+    if (!els.connect.dataset.defaultLabel) {
+      const initialLabel = (els.connect.textContent || '').trim();
+      if (initialLabel) {
+        els.connect.dataset.defaultLabel = initialLabel;
+      }
+    }
+    els.connect.classList.toggle('is-connected', Boolean(next));
+    if (next) {
+      els.connect.textContent = `Connected ${short(original)}`;
+    } else {
+      const fallback = els.connect.dataset.defaultLabel || 'Connect Wallet';
+      els.connect.textContent = fallback;
+    }
+  }
+  if (els.addr) {
+    if (next) {
+      els.addr.textContent = `Connected: ${short(original)}`;
+    } else {
+      els.addr.textContent = 'Not connected';
+    }
   }
 }
 
@@ -2023,11 +2053,8 @@ els.connect.onclick = async () => {
     await p.request({ method: 'eth_requestAccounts' });
     const [addr] = await p.request({ method: 'eth_accounts' });
     if (!addr) throw new Error('No account found.');
-    setConnectedAccount(addr);
     await ensureArbitrum(p);
-    els.addr.textContent = `Connected: ${short(addr)}`;
-    els.connect.textContent = `Connected ${short(addr)}`;
-    els.connect.style.background = '#10b981';
+    setConnectedAccount(addr);
     els.buy.disabled = true;
     els.status.textContent = 'Ready.';
     await checkViewPass();
