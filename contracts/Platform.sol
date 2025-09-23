@@ -115,6 +115,10 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /// @dev Reverse lookup from listing address to its sequential identifier.
     mapping(address => uint256) public listingIds;
 
+    /// @notice Timestamp when each listing was registered (unix epoch seconds).
+    /// Listings created before this upgrade will return zero until manually backfilled.
+    mapping(uint256 => uint256) public listingCreated;
+
     /// @dev Storage for iterating listings off-chain when necessary.
     address[] private _listings;
 
@@ -340,6 +344,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         listingById[listingId] = listing;
         listingIds[listing] = listingId;
         _listings.push(listing);
+        listingCreated[listingId] = block.timestamp;
 
         emit ListingRegistered(listing, landlord, listingId);
     }
@@ -433,6 +438,14 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     function allListings() external view returns (address[] memory) {
         return _listings;
+    }
+
+    /**
+     * @notice Returns the block timestamp when a listing was registered.
+     * @dev Listings that pre-date this helper will return zero until backfilled off-chain.
+     */
+    function listingRegisteredAt(uint256 listingId) external view returns (uint256) {
+        return listingCreated[listingId];
     }
 
     function allAgents() external view returns (address[] memory) {
