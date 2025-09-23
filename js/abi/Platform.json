@@ -259,6 +259,24 @@
     {
       "inputs": [
         {
+          "internalType": "uint256",
+          "name": "listingId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "newCastHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "updateListingCastHash",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "address",
           "name": "landlord",
           "type": "address"
@@ -468,6 +486,37 @@
         }
       ],
       "name": "ListingRegistered",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "listingId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "listing",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "previousCastHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "newCastHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "ListingCastHashUpdated",
       "type": "event"
     },
     {

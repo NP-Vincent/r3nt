@@ -6,6 +6,7 @@ if (!ethersLib) {
 import { PLATFORM_ADDRESS, PLATFORM_ABI, LISTING_ABI, RPC_URL, APP_VERSION } from './config.js';
 import { connectWallet, disconnectWallet } from './platform-only-metamask-wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
+import { normalizeCastInputToBytes32 } from './tools.js';
 
 const { BigNumber, constants, utils, providers, Contract } = ethersLib;
 
@@ -922,6 +923,13 @@ bindForm(document.getElementById('formAgentOperator'), 'Updating operator access
   const account = normalizeAddress(document.getElementById('agentOperatorAddress').value, 'Operator address');
   const flag = document.getElementById('agentOperatorFlag').value === 'true';
   return async () => platformWrite.setAgentOperator(account, flag);
+});
+
+bindForm(document.getElementById('formUpdateCastHash'), 'Updating listing cast hash', () => {
+  const listingId = parseListingId(document.getElementById('castHashListingId').value);
+  const castInput = document.getElementById('castHashInput').value;
+  const castHash = normalizeCastInputToBytes32(castInput);
+  return async () => platformWrite.updateListingCastHash(listingId, castHash);
 });
 
 bindForm(document.getElementById('formCreateAgent'), 'Creating agent', () => {
