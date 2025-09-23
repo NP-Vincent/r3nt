@@ -46,6 +46,11 @@ interface IListingWithAgents {
     function registerAgent(uint256 bookingId, address agent) external;
 }
 
+/// @dev Minimal interface exposed by the listing for deposit confirmations.
+interface IListingDeposits {
+    function confirmDepositSplit(uint256 bookingId, bytes calldata signature) external;
+}
+
 /// @dev Minimal subset of the r3nt-SQMU manager interface used to grant minting rights.
 interface IR3ntSQMUManager {
     function grantListingMinter(address listing) external;
@@ -414,6 +419,23 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         address resolvedRecipient = agentFeeRecipient == address(0) ? agentWallet : agentFeeRecipient;
 
         emit AgentRegistered(listing, bookingId, agentProxy, agentWallet, agentFeeBps, resolvedRecipient);
+    }
+
+    /**
+     * @notice Confirm a landlord-proposed deposit split for a specific booking.
+     * @param listingId Identifier of the listing that holds the booking escrow.
+     * @param bookingId Identifier of the booking whose deposit is being released.
+     * @param signature Optional future-proofing for signature validation (currently unused).
+     */
+    function confirmDepositSplit(
+        uint256 listingId,
+        uint256 bookingId,
+        bytes calldata signature
+    ) external onlyOwner {
+        address listing = listingById[listingId];
+        require(listing != address(0), "listing not found");
+
+        IListingDeposits(listing).confirmDepositSplit(bookingId, signature);
     }
 
     function _collectListingFee(address payer) internal {

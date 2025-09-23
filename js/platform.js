@@ -794,10 +794,14 @@ if (depositConfirmForm && confirmDepositBtn) {
       return;
     }
     try {
-      const listingWrite = new Contract(currentDepositContext.listingAddress, LISTING_ABI, signer);
       const success = await withSigner(
         'Confirming deposit release',
-        () => listingWrite.confirmDepositSplit(currentDepositContext.bookingId, '0x'),
+        () =>
+          platformWrite.confirmDepositSplit(
+            currentDepositContext.listingId,
+            currentDepositContext.bookingId,
+            '0x',
+          ),
         confirmDepositBtn,
       );
       if (success) {
