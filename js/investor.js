@@ -16,6 +16,15 @@ import createBackController from './back-navigation.js';
 
 const ARBITRUM_HEX = '0xa4b1';
 const USDC_SCALAR = 1_000_000n;
+const IPFS_PREFIX = 'ipfs://';
+const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+const listingDescriptorCache = new Map();
+const PERIOD_LABELS = {
+  0: 'Unspecified',
+  1: 'Daily',
+  2: 'Weekly',
+  3: 'Monthly',
+};
 
 const els = {
   connect: document.getElementById('connect'),
@@ -59,6 +68,132 @@ function shortAddress(addr) {
   if (typeof addr !== 'string') return '';
   if (!addr.startsWith('0x') || addr.length < 10) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function normaliseMetadataUrl(uri) {
+  if (!uri || typeof uri !== 'string') return '';
+  if (uri.startsWith(IPFS_PREFIX)) {
+    const path = uri.slice(IPFS_PREFIX.length);
+    return `${IPFS_GATEWAY}${path.replace(/^\//, '')}`;
+  }
+  return uri;
+}
+
+function decodeDataUri(uri) {
+  const match = /^data:([^;,]*)(;charset=[^;,]*)?(;base64)?,([\s\S]*)$/i.exec(uri || '');
+  if (!match) return null;
+  const isBase64 = Boolean(match[3]);
+  const payload = match[4] || '';
+  try {
+    if (isBase64) {
+      const cleaned = payload.replace(/\s/g, '');
+      const atobFn = typeof globalThis !== 'undefined' && typeof globalThis.atob === 'function'
+        ? (value) => globalThis.atob(value)
+        : null;
+      if (!atobFn) return null;
+      return atobFn(cleaned);
+    }
+    return decodeURIComponent(payload);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchListingMetadataDetails(uri, fallbackAddress) {
+  const fallbackText = typeof fallbackAddress === 'string' ? fallbackAddress : '';
+  const result = { title: fallbackText, description: fallbackText };
+  if (!uri || typeof uri !== 'string') {
+    return result;
+  }
+  let raw;
+  try {
+    if (uri.startsWith('data:')) {
+      raw = decodeDataUri(uri);
+    } else {
+      const normalised = normaliseMetadataUrl(uri);
+      if (!normalised) {
+        return result;
+      }
+      const response = await fetch(normalised, { method: 'GET' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      raw = await response.text();
+    }
+  } catch (err) {
+    console.warn('Failed to retrieve listing metadata', uri, err);
+    return result;
+  }
+  if (!raw) {
+    return result;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.name === 'string' && parsed.name.trim()) {
+        result.title = parsed.name.trim();
+      }
+      if (typeof parsed.description === 'string' && parsed.description.trim()) {
+        result.description = parsed.description.trim();
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to parse listing metadata JSON', uri, err);
+  }
+  return result;
+}
+
+async function loadListingDescriptor(listingAddress) {
+  const fallbackTitle = shortAddress(listingAddress);
+  const fallbackResult = { metadataURI: '', title: fallbackTitle, description: '' };
+  if (!listingAddress || typeof listingAddress !== 'string') {
+    return fallbackResult;
+  }
+  const cacheKey = listingAddress.toLowerCase();
+  if (listingDescriptorCache.has(cacheKey)) {
+    return listingDescriptorCache.get(cacheKey);
+  }
+  let metadataURI = '';
+  try {
+    const raw = await pub.readContract({ address: listingAddress, abi: LISTING_ABI, functionName: 'metadataURI' });
+    if (typeof raw === 'string') {
+      metadataURI = raw;
+    }
+  } catch (err) {
+    console.warn('Failed to load listing metadataURI', listingAddress, err);
+  }
+  const details = await fetchListingMetadataDetails(metadataURI, fallbackTitle);
+  const descriptor = {
+    metadataURI,
+    title: details.title && details.title.trim() ? details.title.trim() : fallbackTitle,
+    description: details.description && details.description.trim() ? details.description.trim() : '',
+  };
+  if (descriptor.description === descriptor.title) {
+    descriptor.description = '';
+  }
+  listingDescriptorCache.set(cacheKey, descriptor);
+  return descriptor;
+}
+
+function formatPeriodLabel(periodValue) {
+  let numeric = 0;
+  if (typeof periodValue === 'bigint') {
+    numeric = Number(periodValue);
+  } else if (typeof periodValue === 'number') {
+    numeric = periodValue;
+  } else if (typeof periodValue === 'string' && periodValue.trim()) {
+    const parsed = Number.parseInt(periodValue, 10);
+    if (Number.isFinite(parsed)) {
+      numeric = parsed;
+    }
+  }
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    numeric = 0;
+  }
+  if (Object.prototype.hasOwnProperty.call(PERIOD_LABELS, numeric)) {
+    return PERIOD_LABELS[numeric];
+  }
+  return numeric > 0 ? 'Custom cadence' : PERIOD_LABELS[0];
 }
 
 function percentOf(numerator, denominator) {
@@ -185,6 +320,7 @@ async function loadListingBookings(listingAddress, account) {
   if (!Number.isFinite(max) || max <= 0) {
     return entries;
   }
+  const descriptor = await loadListingDescriptor(listingAddress);
   for (let id = 1; id <= max; id++) {
     const bookingId = BigInt(id);
     let info;
@@ -200,6 +336,13 @@ async function loadListingBookings(listingAddress, account) {
     const soldSqmu = BigInt(info.soldSqmu ?? 0);
     const pricePerSqmu = BigInt(info.pricePerSqmu ?? 0);
     const feeBps = Number(info.feeBps ?? 0);
+    let period = 0n;
+    try {
+      period = typeof info.period === 'bigint' ? info.period : BigInt(info.period ?? 0);
+    } catch {
+      period = 0n;
+    }
+    const periodLabel = formatPeriodLabel(period);
     let balance = 0n;
     let claimable = 0n;
     try {
@@ -209,6 +352,9 @@ async function loadListingBookings(listingAddress, account) {
       try {
         claimable = await pub.readContract({ address: listingAddress, abi: LISTING_ABI, functionName: 'previewClaim', args: [bookingId, account] });
       } catch {}
+    }
+    if (totalSqmu > 0n && soldSqmu >= totalSqmu && balance === 0n) {
+      continue;
     }
     entries.push({
       listingAddress,
@@ -220,6 +366,11 @@ async function loadListingBookings(listingAddress, account) {
       feeBps,
       balance,
       claimable,
+      period,
+      periodLabel,
+      metadataURI: descriptor.metadataURI,
+      propertyTitle: descriptor.title,
+      propertyDescription: descriptor.description,
     });
   }
   return entries;
@@ -312,7 +463,7 @@ function renderTokenisation(entries) {
   if (!entries.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = 'No tokenised bookings yet.';
+    empty.textContent = 'No in-progress tokenisation raises right now.';
     container.appendChild(empty);
     return;
   }
@@ -322,11 +473,31 @@ function renderTokenisation(entries) {
 
     const header = document.createElement('div');
     header.className = 'data-card-header';
-    const title = document.createElement('strong');
-    title.textContent = shortAddress(entry.listingAddress);
+    const propertyTitle = (entry.propertyTitle || '').trim() || shortAddress(entry.listingAddress);
+    const title = document.createElement('div');
+    title.className = 'listing-title';
+    title.textContent = propertyTitle;
     header.appendChild(title);
     header.appendChild(createBookingBadge(entry.bookingId));
     card.appendChild(header);
+
+    const descriptionText = (() => {
+      const trimmed = (entry.propertyDescription || '').trim();
+      if (trimmed && trimmed !== propertyTitle) {
+        return trimmed;
+      }
+      const fallback = shortAddress(entry.listingAddress);
+      if (fallback && fallback !== propertyTitle) {
+        return fallback;
+      }
+      return '';
+    })();
+    if (descriptionText) {
+      const description = document.createElement('div');
+      description.className = 'listing-summary';
+      description.textContent = descriptionText;
+      card.appendChild(description);
+    }
 
     const metrics = document.createElement('div');
     metrics.className = 'metric-row';
@@ -354,6 +525,15 @@ function renderTokenisation(entries) {
     feeValue.textContent = `${entry.feeBps} bps`;
     feeMetric.appendChild(feeValue);
     metrics.appendChild(feeMetric);
+
+    const cadenceMetric = document.createElement('div');
+    cadenceMetric.className = 'metric';
+    cadenceMetric.innerHTML = '<label>Rent cadence</label>';
+    const cadenceValue = document.createElement('span');
+    const cadenceLabel = (entry.periodLabel || '').trim() || formatPeriodLabel(entry.period);
+    cadenceValue.textContent = cadenceLabel;
+    cadenceMetric.appendChild(cadenceValue);
+    metrics.appendChild(cadenceMetric);
 
     card.appendChild(metrics);
     container.appendChild(card);
@@ -409,7 +589,12 @@ function renderRent(entries) {
 
 function renderDashboards(results) {
   const holdings = results.filter((entry) => entry.balance > 0n);
-  const tokenised = results.filter((entry) => entry.tokenised);
+  const tokenised = results.filter((entry) => {
+    if (!entry.tokenised) return false;
+    const total = typeof entry.totalSqmu === 'bigint' ? entry.totalSqmu : BigInt(entry.totalSqmu || 0);
+    const sold = typeof entry.soldSqmu === 'bigint' ? entry.soldSqmu : BigInt(entry.soldSqmu || 0);
+    return total <= 0n || sold < total;
+  });
   const rentClaims = holdings.filter((entry) => entry.claimable > 0n);
 
   renderHoldings(holdings);
