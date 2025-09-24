@@ -1731,7 +1731,7 @@ function applyBookingToTokenForm(booking) {
 }
 
 function renderTokenBookingInfo(listingAddr, bookingId, booking, pending) {
-  if (!tokenEls.bookingInfo) return;
+  if (!tokenEls.bookingInfo) return false;
   const statusIndex = Number(booking.status || 0n);
   const statusLabel = BOOKING_STATUS_LABELS[statusIndex] || `Unknown (${statusIndex})`;
   const durationSeconds = (booking.end || 0n) - (booking.start || 0n);
@@ -1766,7 +1766,40 @@ function renderTokenBookingInfo(listingAddr, bookingId, booking, pending) {
   } else {
     lines.push('Pending proposal: none');
   }
-  tokenEls.bookingInfo.innerHTML = lines.map((line) => escapeHtml(line)).join('<br>');
+
+  const awaitingApproval = Boolean(pending?.exists) && !booking.tokenised;
+  const container = tokenEls.bookingInfo;
+  container.innerHTML = '';
+  if (awaitingApproval) {
+    const alert = document.createElement('div');
+    alert.className = 'booking-tokenisation-alert';
+    alert.textContent = 'Waiting for platform approval';
+    container.appendChild(alert);
+  }
+  for (const line of lines) {
+    const row = document.createElement('div');
+    row.textContent = line;
+    container.appendChild(row);
+  }
+  return awaitingApproval;
+}
+
+function syncTokenProposalState(booking, pending, { preserveStatus = false } = {}) {
+  const awaitingApproval = Boolean(pending?.exists) && !booking?.tokenised;
+  if (tokenEls.propose) {
+    const shouldDisable = awaitingApproval || !walletConnected;
+    tokenEls.propose.disabled = shouldDisable;
+  }
+  if (!preserveStatus) {
+    if (awaitingApproval) {
+      updateTokenStatus('Booking details loaded — waiting for platform approval before new proposals.', 'info');
+    } else if (walletConnected) {
+      updateTokenStatus('Booking details loaded. Adjust parameters and submit to propose tokenisation.', 'success');
+    } else {
+      updateTokenStatus('Booking details loaded. Connect wallet to submit proposals.', 'info');
+    }
+  }
+  return awaitingApproval;
 }
 
 async function fetchTokenBookingDetails(listingAddr, bookingId) {
@@ -1828,7 +1861,7 @@ async function loadTokenBookingDetails() {
     renderTokenBookingInfo(listingAddr, bookingId, booking, pending);
     applyBookingToTokenForm(booking);
     tokenToolContext = { listingId, listingAddr, bookingId };
-    updateTokenStatus('Booking details loaded.', 'success');
+    syncTokenProposalState(booking, pending);
   } catch (err) {
     clearTokenBookingInfo();
     updateTokenStatus(err?.message || 'Unable to load booking details.', 'error');
@@ -1944,6 +1977,7 @@ async function proposeTokenisationForLandlord() {
       renderTokenBookingInfo(listingAddr, bookingId, booking, pending);
       applyBookingToTokenForm(booking);
       tokenToolContext = { listingId, listingAddr, bookingId };
+      syncTokenProposalState(booking, pending, { preserveStatus: true });
     } catch (err) {
       console.error('Failed to refresh token booking details after proposal', err);
     }

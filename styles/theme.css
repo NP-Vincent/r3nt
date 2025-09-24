@@ -1201,6 +1201,15 @@ dl.summary-breakdown dd {
   font-weight: 500;
 }
 
+.booking-tokenisation-alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .booking-detail-label {
   font-size: 0.72rem;
   text-transform: uppercase;

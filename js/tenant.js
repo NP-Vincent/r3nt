@@ -201,6 +201,14 @@ const BOOKING_INFO_FIELDS = [
   'depositTenantBps',
   'calendarReleased',
 ];
+const TOKENISATION_VIEW_FIELDS = [
+  'exists',
+  'proposer',
+  'totalSqmu',
+  'pricePerSqmu',
+  'feeBps',
+  'period',
+];
 
 const supportsViewPassPurchase = PLATFORM_ABI.some(
   (item) => item?.type === 'function' && item?.name === 'buyViewPass'
@@ -456,6 +464,22 @@ function normaliseBookingStruct(raw) {
   const result = {};
   for (let i = 0; i < BOOKING_INFO_FIELDS.length; i += 1) {
     const key = BOOKING_INFO_FIELDS[i];
+    if (key in raw) {
+      result[key] = raw[key];
+    } else if (Array.isArray(raw)) {
+      result[key] = raw[i];
+    }
+  }
+  return result;
+}
+
+function normaliseTokenisationView(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const result = {};
+  for (let i = 0; i < TOKENISATION_VIEW_FIELDS.length; i += 1) {
+    const key = TOKENISATION_VIEW_FIELDS[i];
     if (key in raw) {
       result[key] = raw[key];
     } else if (Array.isArray(raw)) {
@@ -1097,7 +1121,7 @@ function createDetailElement(label, value, options = {}) {
   return wrapper;
 }
 
-function buildBookingRecord(meta, data, listingInfo) {
+function buildBookingRecord(meta, data, pending, listingInfo) {
   const bookingId = typeof meta.bookingId === 'bigint' ? meta.bookingId : toBigInt(meta.bookingId, 0n);
   const listingAddress = meta.listing;
   const statusValue = Number(toBigInt(data.status, 0n));
@@ -1123,6 +1147,16 @@ function buildBookingRecord(meta, data, listingInfo) {
   const expectedNetRent = toBigInt(data.expectedNetRent, 0n);
   const depositReleased = Boolean(data.depositReleased);
   const tokenised = Boolean(data.tokenised);
+  const pendingInfoRaw = pending ? normaliseTokenisationView(pending) : null;
+  const pendingExists = Boolean(pendingInfoRaw?.exists);
+  const pendingTotalSqmu = toBigInt(pendingInfoRaw?.totalSqmu, 0n);
+  const pendingPricePerSqmu = toBigInt(pendingInfoRaw?.pricePerSqmu, 0n);
+  const pendingFeeBps = toBigInt(pendingInfoRaw?.feeBps, 0n);
+  const pendingPeriodValue = Number(toBigInt(pendingInfoRaw?.period, 0n));
+  const pendingPeriodLabel = BOOKING_PERIOD_LABELS[pendingPeriodValue] || 'Custom';
+  const pendingProposer = typeof pendingInfoRaw?.proposer === 'string'
+    ? pendingInfoRaw.proposer
+    : '0x0000000000000000000000000000000000000000';
   const now = BigInt(Math.floor(Date.now() / 1000));
   const isActive = statusValue === 1;
   const isUpcoming = start > now;
@@ -1174,6 +1208,18 @@ function buildBookingRecord(meta, data, listingInfo) {
     isActive,
     canCancel,
     cancelDisabledReason,
+    pendingTokenisationExists: pendingExists && !tokenised,
+    pendingTokenisation: pendingExists
+      ? {
+          exists: pendingExists,
+          proposer: pendingProposer,
+          totalSqmu: pendingTotalSqmu,
+          pricePerSqmu: pendingPricePerSqmu,
+          feeBps: pendingFeeBps,
+          periodValue: pendingPeriodValue,
+          periodLabel: pendingPeriodLabel,
+        }
+      : null,
   };
 }
 
@@ -1226,7 +1272,7 @@ function updateTokenProposalContext(record) {
 }
 
 function isTokenisationEligible(record, account = connectedAccount) {
-  if (!record || record.tokenised) return false;
+  if (!record || record.tokenised || record.pendingTokenisationExists) return false;
   const candidate = normaliseAddress(account);
   if (!candidate) return false;
   return candidate === record.tenantLower || candidate === record.landlordLower;
@@ -1237,6 +1283,16 @@ function openTokenProposalPanel(recordKey) {
   if (!record) {
     setTokenProposalStatus('Booking details unavailable. Refresh your bookings.');
     notify({ message: 'Unable to find booking details for tokenisation.', variant: 'error', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (record.pendingTokenisationExists && !record.tokenised) {
+    setTokenProposalStatus('Waiting for platform approval before submitting a new proposal.');
+    notify({
+      message: 'Tokenisation proposal pending platform approval.',
+      variant: 'info',
+      role: 'tenant',
+      timeout: 5000,
+    });
     return;
   }
   if (!isTokenisationEligible(record)) {
@@ -1540,6 +1596,8 @@ function renderBookingCard(record) {
   tokenHeading.textContent = 'Tokenisation';
   tokenSection.appendChild(tokenHeading);
 
+  const pendingApproval = record.pendingTokenisationExists && !record.tokenised;
+
   if (record.tokenised) {
     const tokenDetails = document.createElement('div');
     tokenDetails.className = 'booking-details';
@@ -1549,6 +1607,38 @@ function renderBookingCard(record) {
     tokenDetails.appendChild(createDetailElement('Tokenisation fee', formatBps(record.feeBps)));
     tokenDetails.appendChild(createDetailElement('Token period', record.periodLabel));
     tokenSection.appendChild(tokenDetails);
+  } else if (pendingApproval && record.pendingTokenisation) {
+    const alert = document.createElement('div');
+    alert.className = 'booking-tokenisation-alert';
+    alert.textContent = 'Waiting for platform approval';
+    tokenSection.appendChild(alert);
+
+    const pendingDetails = document.createElement('div');
+    pendingDetails.className = 'booking-details';
+    pendingDetails.appendChild(
+      createDetailElement('Proposed SQMU', formatSqmu(record.pendingTokenisation.totalSqmu))
+    );
+    pendingDetails.appendChild(
+      createDetailElement('Proposed price', `${formatUsdc(record.pendingTokenisation.pricePerSqmu)} USDC`)
+    );
+    pendingDetails.appendChild(createDetailElement('Proposed fee', formatBps(record.pendingTokenisation.feeBps)));
+    const cadenceLabel = record.pendingTokenisation.periodLabel || 'Custom';
+    pendingDetails.appendChild(createDetailElement('Proposed cadence', cadenceLabel));
+    const proposerShort = short(record.pendingTokenisation.proposer);
+    pendingDetails.appendChild(
+      createDetailElement('Proposer', proposerShort || record.pendingTokenisation.proposer, {
+        copyText: record.pendingTokenisation.proposer,
+        copyLabel: 'Copy proposer address',
+        copySuccessMessage: 'Proposer address copied to clipboard.',
+        copyErrorMessage: 'Unable to copy proposer address.',
+      })
+    );
+    tokenSection.appendChild(pendingDetails);
+
+    const pendingNotice = document.createElement('div');
+    pendingNotice.className = 'booking-helper-text';
+    pendingNotice.textContent = 'Tokenisation proposal submitted. Investors can join after platform approval.';
+    tokenSection.appendChild(pendingNotice);
   } else {
     const tokenEmpty = document.createElement('div');
     tokenEmpty.className = 'booking-tokenisation-empty';
@@ -1600,7 +1690,7 @@ function renderBookingCard(record) {
     outstandingLine.textContent += ` (status ${record.statusLabel.toLowerCase()} — payments disabled)`;
   }
 
-  if (!record.tokenised && (tenantConnected || landlordConnected)) {
+  if (!record.tokenised && !pendingApproval && (tenantConnected || landlordConnected)) {
     const proposeBtn = document.createElement('button');
     proposeBtn.type = 'button';
     proposeBtn.textContent = 'Propose tokenisation';
@@ -1652,11 +1742,18 @@ function renderBookingCard(record) {
   }
 
   const hasAccount = Boolean(normaliseAddress(connectedAccount));
-  if (!record.tokenised && hasAccount && !(tenantConnected || landlordConnected)) {
+  if (!record.tokenised && !pendingApproval && hasAccount && !(tenantConnected || landlordConnected)) {
     const tokenInfo = document.createElement('div');
     tokenInfo.className = 'booking-helper-text';
     tokenInfo.textContent = 'Tokenisation proposals can be submitted by the booking tenant or landlord wallet.';
     card.appendChild(tokenInfo);
+  }
+
+  if (pendingApproval && (tenantConnected || landlordConnected)) {
+    const waitingInfo = document.createElement('div');
+    waitingInfo.className = 'booking-helper-text';
+    waitingInfo.textContent = 'Platform review in progress. You will be able to manage investments once approval is granted.';
+    card.appendChild(waitingInfo);
   }
 
   return card;
@@ -2134,6 +2231,13 @@ async function loadTenantBookings(account, options = {}) {
       args: [meta.bookingId],
     }));
     const bookingResults = await multicallChunks(bookingCalls);
+    const pendingCalls = bookingMetas.map((meta) => ({
+      address: meta.listing,
+      abi: LISTING_ABI,
+      functionName: 'pendingTokenisation',
+      args: [meta.bookingId],
+    }));
+    const pendingResults = await multicallChunks(pendingCalls);
 
     const relevant = [];
     const listingLookup = new Map();
@@ -2149,7 +2253,9 @@ async function loadTenantBookings(account, options = {}) {
       if (!listingLookup.has(lower)) {
         listingLookup.set(lower, meta.listing);
       }
-      relevant.push({ meta, data });
+      const pendingEntry = pendingResults[i];
+      const pendingData = pendingEntry && pendingEntry.status === 'success' ? pendingEntry.result : null;
+      relevant.push({ meta, data, pending: pendingData });
     }
 
     if (!relevant.length) {
@@ -2163,7 +2269,7 @@ async function loadTenantBookings(account, options = {}) {
     for (const item of relevant) {
       const lower = normaliseAddress(item.meta.listing);
       const info = listingInfoCache.get(lower) || null;
-      records.push(buildBookingRecord(item.meta, item.data, info));
+      records.push(buildBookingRecord(item.meta, item.data, item.pending, info));
     }
     return { records, message: '' };
   })();
