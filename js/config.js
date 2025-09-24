@@ -39,7 +39,7 @@ export const R3NT_ABI = R3NTSQMUArtifact.abi || [];
 export const REGISTRY_ADDRESS = '0xa863B419d947e77888C25329011fDEF1d355d24D'; // BookingRegistry
 export const REGISTRY_ABI = BookingRegistryArtifact.abi || [];
 
-export const LISTING_ADDRESS = '0x3394e58D768BC5F56a631a7B630C0F06cfA42810'; // Listing implementation
+export const LISTING_ADDRESS = '0xDc749F057FDB9f77c661f99dc964D2a6ce70aE19'; // Listing implementation
 export const LISTING_ABI = ListingArtifact.abi || [];
 
 export const FACTORY_ADDRESS = '0x4CC6c3B30DAf5473919a943B67B83a23B87bAe87'; // ListingFactory
@@ -52,4 +52,4 @@ export const AGENT_ABI = AgentArtifact.abi || [];
 
 export const APP_NAME = 'r3nt';
 export const APP_DOMAIN = 'r3nt.sqmu.net'; // origin used in EIP-712 domain if needed
-export const APP_VERSION = '0.3.4';
+export const APP_VERSION = '0.3.5';
