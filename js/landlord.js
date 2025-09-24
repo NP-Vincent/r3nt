@@ -4,6 +4,8 @@ import { arbitrum } from 'https://esm.sh/viem/chains';
 import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
+import { ListingCard, TokenisationCard } from './ui/cards.js';
+import { makeCollapsible } from './ui/accordion.js';
 import {
   PLATFORM_ADDRESS,
   PLATFORM_ABI,
@@ -107,54 +109,95 @@ if (els.connect && !els.connect.dataset.defaultLabel) {
     els.connect.dataset.defaultLabel = initialLabel;
   }
 }
-const depositEls = {
-  section: document.getElementById('depositTools'),
-  listingId: document.getElementById('depositListingId'),
-  bookingId: document.getElementById('depositBookingId'),
-  tenantBps: document.getElementById('depositTenantBps'),
-  load: document.getElementById('depositLoad'),
-  propose: document.getElementById('depositPropose'),
-  bookingInfo: document.getElementById('depositBookingInfo'),
-  status: document.getElementById('depositStatus'),
-};
-const tokenEls = {
-  section: document.getElementById('tokenTools'),
-  listingId: document.getElementById('tokenListingId'),
-  bookingId: document.getElementById('tokenBookingId'),
-  totalSqmu: document.getElementById('tokenTotalSqmu'),
-  pricePerSqmu: document.getElementById('tokenPricePerSqmu'),
-  feeBps: document.getElementById('tokenFeeBps'),
-  period: document.getElementById('tokenPeriodSelect'),
-  load: document.getElementById('tokenLoad'),
-  propose: document.getElementById('tokenPropose'),
-  bookingInfo: document.getElementById('tokenBookingInfo'),
-  status: document.getElementById('tokenStatus'),
-};
 const info = (t) => (els.status.textContent = t);
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'landlord' });
 
-if (depositEls.status) {
-  setDepositStatus('Sign in with Farcaster to manage deposit splits.');
-}
-if (depositEls.load) {
-  depositEls.load.disabled = true;
-}
-if (depositEls.propose) {
-  depositEls.propose.disabled = true;
+const listingUiControllers = new Map();
+let quickAuthReady = false;
+
+function getListingControllerKey(listing) {
+  if (!listing) return '';
+  if (typeof listing === 'string') {
+    return normaliseAddress(listing);
+  }
+  const addr = normaliseAddress(listing.address);
+  if (addr) {
+    return addr;
+  }
+  if (listing.listingIdText) {
+    return `id:${listing.listingIdText}`;
+  }
+  if (listing.listingId) {
+    try {
+      const id = typeof listing.listingId === 'bigint' ? listing.listingId : BigInt(listing.listingId || 0);
+      if (id > 0n) {
+        return `id:${id.toString()}`;
+      }
+    } catch {}
+  }
+  if (Number.isFinite(listing.order)) {
+    return `order:${listing.order}`;
+  }
+  return '';
 }
 
-if (tokenEls.status) {
-  setTokenStatus('Sign in with Farcaster to manage tokenisation.');
+function getListingController(listing) {
+  const key = getListingControllerKey(listing);
+  if (!key) return null;
+  return listingUiControllers.get(key) || null;
 }
-if (tokenEls.load) {
-  tokenEls.load.disabled = true;
+
+function forEachListingController(handler) {
+  for (const controller of listingUiControllers.values()) {
+    try {
+      handler(controller);
+    } catch (err) {
+      console.warn('Listing controller handler failed', err);
+    }
+  }
 }
-if (tokenEls.propose) {
-  tokenEls.propose.disabled = true;
+
+function createCollapsibleSection(label, { id } = {}) {
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.dataset.collapsible = '';
+  if (id) {
+    section.id = id;
+  }
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'inline-button';
+  toggle.dataset.collapsibleToggle = '';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = label;
+  section.appendChild(toggle);
+
+  const content = document.createElement('div');
+  content.dataset.collapsibleContent = '';
+  content.hidden = true;
+  section.appendChild(content);
+
+  makeCollapsible(section);
+
+  const setOpen = (open) => {
+    section.dataset.open = open ? '1' : '0';
+    content.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+
+  return { section, content, toggle, setOpen };
 }
-if (tokenEls.period && !tokenEls.period.value) {
-  tokenEls.period.value = 'month';
+
+function handleDeactivateListing(listing) {
+  notify({
+    message: 'Listing deactivation is not available yet. Contact the platform team to disable listings.',
+    variant: 'warning',
+    role: 'landlord',
+    timeout: 5000,
+  });
+  console.info('Deactivate listing requested', listing?.address || listing);
 }
 
 const backButton = document.querySelector('[data-back-button]');
@@ -188,7 +231,6 @@ let walletConnected = false;
 let landlordListingRecords = [];
 let listingSortMode = DEFAULT_SORT_MODE;
 let listingLocationFilterValue = '';
-let tokenToolContext = null;
 let currentLandlordAddress = null;
 const landlordListingEventWatchers = new Map();
 const landlordEventRefreshState = { timer: null, messages: new Set(), running: false };
@@ -1236,155 +1278,58 @@ async function fetchListingBookings(listing) {
 }
 
 async function openTokenToolsForBooking(listing, bookingId, options = {}) {
-  if (!listing || !listing.address) {
-    updateTokenStatus('Listing address unavailable for tokenisation tools.', 'error');
+  const controller = getListingController(listing);
+  if (!controller || !controller.token) {
+    notify({ message: 'Token tools unavailable for this listing.', variant: 'error', role: 'landlord', timeout: 5000 });
     return;
   }
   const { focus = true } = options;
-  let listingId = listing.listingId;
-  if (typeof listingId !== 'bigint') {
-    try {
-      listingId = listing.listingIdText ? BigInt(listing.listingIdText) : null;
-    } catch {
-      listingId = null;
-    }
-  }
-  if (!listingId || listingId <= 0n) {
-    updateTokenStatus('Listing ID unavailable. Unable to load booking details.', 'error');
-    return;
-  }
-  const bookingIdValue = typeof bookingId === 'bigint' ? bookingId : BigInt(bookingId || 0);
-  if (bookingIdValue <= 0n) {
-    updateTokenStatus('Booking ID unavailable.', 'error');
-    return;
-  }
-  if (tokenEls.listingId) {
-    tokenEls.listingId.value = listingId.toString();
-  }
-  if (tokenEls.bookingId) {
-    tokenEls.bookingId.value = bookingIdValue.toString();
-  }
-  if (focus && tokenEls.section) {
-    try {
-      tokenEls.section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch {
-      // ignore scroll errors
-    }
-  }
-  const originalLoadDisabled = tokenEls.load ? tokenEls.load.disabled : false;
-  if (tokenEls.load) {
-    tokenEls.load.disabled = true;
-  }
-  setTokenFormDisabled(true);
-  setTokenStatus('Loading booking details…');
   try {
-    const { booking, pending } = await fetchTokenBookingDetails(listing.address, bookingIdValue);
-    renderTokenBookingInfo(listing.address, bookingIdValue, booking, pending);
-    applyBookingToTokenForm(booking);
-    tokenToolContext = { listingId, listingAddr: listing.address, bookingId: bookingIdValue };
-    syncTokenProposalState(booking, pending, { preserveStatus: true });
-    updateTokenStatus('Booking details loaded. Adjust parameters and submit to manage tokenisation.', 'success');
+    await controller.token.openForBooking(bookingId, { focus });
   } catch (err) {
-    console.error('Failed to load booking details via quick action', err);
-    clearTokenBookingInfo();
-    updateTokenStatus(err?.message || 'Unable to load booking details.', 'error');
-  } finally {
-    setTokenFormDisabled(false);
-    if (tokenEls.load) {
-      tokenEls.load.disabled = originalLoadDisabled;
-    }
+    console.error('Failed to open token tools via quick action', err);
+    notify({ message: err?.message || 'Unable to load booking details.', variant: 'error', role: 'landlord', timeout: 6000 });
   }
 }
 
 function renderLandlordListingCard(listing) {
-  const card = document.createElement('div');
-  card.className = 'landlord-card';
-  card.dataset.expanded = 'false';
+  const listingIdText = listing?.listingIdText || (listing?.listingId ? listing.listingId.toString() : '');
+  const areaValue = Number(listing.areaSqm ?? 0n);
+  const locationLabel =
+    listing?.geohash && typeof listing.geohash === 'string'
+      ? listing.geohash
+      : Number.isFinite(listing?.lat) && Number.isFinite(listing?.lon)
+        ? `${Number(listing.lat).toFixed(5)}, ${Number(listing.lon).toFixed(5)}`
+        : '—';
+  let focusAvailabilitySection = () => {};
+  let openTokenSection = () => {};
 
-  const baseId = (listing?.listingIdText || listing?.address || `listing-${listing?.order ?? 0}`).toString();
-  const sanitizedId = baseId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  const detailsId = `listing-details-${sanitizedId || `listing-${listing?.order ?? 0}`}`;
+  const actions = [
+    { label: 'Check availability', onClick: () => focusAvailabilitySection() },
+    { label: 'Deactivate', onClick: () => handleDeactivateListing(listing) },
+    { label: 'Propose tokenisation', onClick: () => openTokenSection() },
+  ];
 
-  const summary = document.createElement('div');
-  summary.className = 'landlord-card-summary';
+  const card = ListingCard({
+    id: listingIdText || shortAddress(listing?.address || '') || `listing-${listing?.order ?? 0}`,
+    title: listing?.title,
+    location: locationLabel,
+    pricePerDayUSDC: formatUsdc(listing.baseDailyRate),
+    areaSqm: areaValue > 0 ? areaValue : undefined,
+    depositUSDC: formatUsdc(listing.depositAmount),
+    status: 'Active',
+    actions,
+  });
 
-  const summaryMain = document.createElement('div');
-  summaryMain.className = 'landlord-card-summary-main';
-  summaryMain.tabIndex = 0;
-  summaryMain.setAttribute('role', 'button');
-  summaryMain.setAttribute('aria-controls', detailsId);
-  summaryMain.setAttribute('aria-expanded', 'false');
+  card.classList.add('landlord-listing-card');
 
-  const idLine = document.createElement('div');
-  idLine.className = 'landlord-card-id';
-  idLine.textContent = listing.listingIdText ? `Listing #${listing.listingIdText}` : 'Listing';
-  summaryMain.appendChild(idLine);
-
-  const metaLine = document.createElement('div');
-  metaLine.className = 'landlord-card-meta';
-  const addressSpan = document.createElement('span');
-  addressSpan.textContent = shortAddress(listing.address);
-  if (listing.address) {
-    addressSpan.title = listing.address;
-  }
-  metaLine.appendChild(addressSpan);
-
-  const priceSpan = document.createElement('span');
-  priceSpan.textContent = `${formatUsdc(listing.baseDailyRate)} USDC / day`;
-  metaLine.appendChild(priceSpan);
-
-  summaryMain.appendChild(metaLine);
-
-  const summaryActions = document.createElement('div');
-  summaryActions.className = 'landlord-card-summary-actions';
-
-  if (navigator?.clipboard?.writeText && listing.address) {
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'icon-button';
-    copyBtn.title = 'Copy listing address';
-    copyBtn.setAttribute('aria-label', 'Copy listing address');
-    copyBtn.textContent = '⧉';
-    copyBtn.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(listing.address);
-        notify({
-          message: 'Listing address copied to clipboard.',
-          variant: 'success',
-          role: 'landlord',
-          timeout: 4000,
-        });
-      } catch (err) {
-        console.error('Failed to copy listing address', err);
-        notify({
-          message: 'Unable to copy listing address.',
-          variant: 'error',
-          role: 'landlord',
-          timeout: 5000,
-        });
-      }
-    });
-    summaryActions.appendChild(copyBtn);
-  }
-
-  const toggleBtn = document.createElement('button');
-  toggleBtn.type = 'button';
-  toggleBtn.className = 'icon-button landlord-card-toggle';
-  toggleBtn.textContent = '▸';
-  toggleBtn.setAttribute('aria-label', 'Expand listing details');
-  toggleBtn.setAttribute('aria-controls', detailsId);
-  toggleBtn.setAttribute('aria-expanded', 'false');
-  summaryActions.appendChild(toggleBtn);
-
-  summary.appendChild(summaryMain);
-  summary.appendChild(summaryActions);
-  card.appendChild(summary);
+  const sections = document.createElement('div');
+  sections.className = 'landlord-card-sections';
+  card.appendChild(sections);
 
   const details = document.createElement('div');
   details.className = 'landlord-card-details';
-  details.id = detailsId;
-  details.hidden = true;
+  sections.appendChild(details);
 
   const rateLine = document.createElement('div');
   rateLine.className = 'landlord-card-detail';
@@ -1396,7 +1341,6 @@ function renderLandlordListingCard(listing) {
   depositLine.textContent = `Deposit: ${formatUsdc(listing.depositAmount)} USDC`;
   details.appendChild(depositLine);
 
-  const areaValue = Number(listing.areaSqm ?? 0n);
   if (Number.isFinite(areaValue) && areaValue > 0) {
     const areaLine = document.createElement('div');
     areaLine.className = 'landlord-card-detail';
@@ -1413,7 +1357,7 @@ function renderLandlordListingCard(listing) {
 
   const idDetail = document.createElement('div');
   idDetail.className = 'landlord-card-detail';
-  idDetail.textContent = listing.listingIdText ? `Listing ID: ${listing.listingIdText}` : 'Listing ID: (not assigned)';
+  idDetail.textContent = listingIdText ? `Listing ID: ${listingIdText}` : 'Listing ID: (not assigned)';
   details.appendChild(idDetail);
 
   const createdDetail = document.createElement('div');
@@ -1433,6 +1377,23 @@ function renderLandlordListingCard(listing) {
   addressContainer.appendChild(addressValue);
   details.appendChild(addressContainer);
 
+  if (navigator?.clipboard?.writeText && listing.address) {
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'inline-button small';
+    copyBtn.textContent = 'Copy address';
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(listing.address);
+        notify({ message: 'Listing address copied to clipboard.', variant: 'success', role: 'landlord', timeout: 4000 });
+      } catch (err) {
+        console.error('Failed to copy listing address', err);
+        notify({ message: 'Unable to copy listing address.', variant: 'error', role: 'landlord', timeout: 5000 });
+      }
+    });
+    details.appendChild(copyBtn);
+  }
+
   const bookingsCard = document.createElement('div');
   bookingsCard.className = 'bookings-card landlord-bookings-card';
 
@@ -1451,14 +1412,14 @@ function renderLandlordListingCard(listing) {
 
   const bookingsStatus = document.createElement('div');
   bookingsStatus.className = 'bookings-status';
-  bookingsStatus.textContent = 'Expand to load bookings.';
+  bookingsStatus.textContent = 'Press refresh to load bookings.';
   bookingsCard.appendChild(bookingsStatus);
 
   const bookingsList = document.createElement('div');
   bookingsList.className = 'bookings-list';
   bookingsCard.appendChild(bookingsList);
 
-  details.appendChild(bookingsCard);
+  sections.appendChild(bookingsCard);
 
   let bookingsLoaded = false;
   let bookingsLoading = null;
@@ -1533,8 +1494,13 @@ function renderLandlordListingCard(listing) {
     details.appendChild(metaLink);
   }
 
+  const availabilitySection = document.createElement('div');
+  availabilitySection.className = 'availability-tools';
+  details.appendChild(availabilitySection);
+
   const dateRow = document.createElement('div');
   dateRow.className = 'row';
+  availabilitySection.appendChild(dateRow);
 
   const startLabel = document.createElement('label');
   startLabel.textContent = 'Start';
@@ -1550,17 +1516,21 @@ function renderLandlordListingCard(listing) {
   endLabel.appendChild(endInput);
   dateRow.appendChild(endLabel);
 
-  details.appendChild(dateRow);
-
   const checkBtn = document.createElement('button');
   checkBtn.textContent = 'Check availability';
   checkBtn.className = 'check-availability';
-  details.appendChild(checkBtn);
+  availabilitySection.appendChild(checkBtn);
 
   const result = document.createElement('div');
   result.className = 'availability-result muted';
   result.textContent = 'Select dates to check availability.';
-  details.appendChild(result);
+  availabilitySection.appendChild(result);
+
+  focusAvailabilitySection = () => {
+    try {
+      availabilitySection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {}
+  };
 
   checkBtn.onclick = () =>
     disableWhile(checkBtn, async () => {
@@ -1599,44 +1569,46 @@ function renderLandlordListingCard(listing) {
       }
     });
 
-  card.appendChild(details);
+  const depositTools = createDepositTools(listing);
+  sections.appendChild(depositTools.section);
 
-  let expanded = false;
-  const setExpanded = (value) => {
-    expanded = Boolean(value);
-    details.hidden = !expanded;
-    card.dataset.expanded = expanded ? 'true' : 'false';
-    const label = expanded ? 'Collapse listing details' : 'Expand listing details';
-    toggleBtn.textContent = expanded ? '▾' : '▸';
-    toggleBtn.setAttribute('aria-label', label);
-    toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    summaryMain.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    if (expanded) {
-      loadBookings().catch((err) => {
-        console.error('Failed to load bookings when expanding listing card', err);
-      });
-    }
+  const tokenTools = createTokenTools(listing);
+  sections.appendChild(tokenTools.section);
+  openTokenSection = () => tokenTools.controller.openPanel({ focus: true });
+
+  const controller = {
+    listing,
+    card,
+    deposit: depositTools.controller,
+    token: tokenTools.controller,
+    setQuickAuthReady(value) {
+      depositTools.controller?.setQuickAuthReady(value);
+      tokenTools.controller?.setQuickAuthReady(value);
+    },
+    setQuickAuthFailed(message) {
+      depositTools.controller?.setQuickAuthFailed(message);
+      tokenTools.controller?.setQuickAuthFailed(message);
+    },
+    setWalletConnected(value) {
+      depositTools.controller?.setWalletConnected(value);
+      tokenTools.controller?.setWalletConnected(value);
+    },
+    openTokenForBooking(bookingId, options = {}) {
+      tokenTools.controller?.openForBooking(bookingId, options);
+    },
   };
+  const key = getListingControllerKey(listing);
+  if (key) {
+    listingUiControllers.set(key, controller);
+  }
 
-  const toggle = () => {
-    setExpanded(!expanded);
-  };
-
-  summaryMain.addEventListener('click', toggle);
-  summaryMain.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      toggle();
-    }
-  });
-  toggleBtn.addEventListener('click', (event) => {
-    event.stopPropagation();
-    toggle();
-  });
+  if (quickAuthReady) {
+    controller.setQuickAuthReady(true);
+  }
+  controller.setWalletConnected(walletConnected);
 
   return card;
 }
-
 function toBigIntOrZero(value) {
   if (typeof value === 'bigint') return value;
   try {
@@ -1788,6 +1760,13 @@ function renderLandlordListingView() {
     container.classList.remove('muted');
     for (const listing of entries) {
       container.appendChild(renderLandlordListingCard(listing));
+    }
+  }
+
+  const activeKeys = new Set(entries.map((entry) => getListingControllerKey(entry)).filter(Boolean));
+  for (const key of Array.from(listingUiControllers.keys())) {
+    if (!activeKeys.has(key)) {
+      listingUiControllers.delete(key);
     }
   }
 
@@ -2130,75 +2109,65 @@ let provider; // EIP-1193
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 
 // -------------------- Deposit split tools --------------------
-function setDepositStatus(message) {
-  if (depositEls.status) {
-    depositEls.status.textContent = message || '';
-  }
+function parseBookingIdValue(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : String(raw ?? '').trim();
+  if (!text) throw new Error('Enter a booking ID.');
+  if (!/^\d+$/.test(text)) throw new Error('Booking ID must be a whole number.');
+  const value = BigInt(text);
+  if (value <= 0n) throw new Error('Booking ID must be at least 1.');
+  return value;
 }
 
-function updateDepositStatus(message, variant = 'info') {
-  setDepositStatus(message);
-  if (message) {
-    notify({ message, variant, role: 'landlord', timeout: variant === 'error' ? 7000 : 5000 });
-  }
-}
-
-function clearDepositBookingInfo() {
-  if (depositEls.bookingInfo) {
-    depositEls.bookingInfo.innerHTML = '';
-  }
-}
-
-function parseDepositListingId() {
-  if (!depositEls.listingId) throw new Error('Listing ID input missing.');
-  const raw = depositEls.listingId.value.trim();
-  if (!/^\d+$/.test(raw)) throw new Error('Listing ID must be a whole number.');
-  const id = BigInt(raw);
-  if (id === 0n) throw new Error('Listing ID must be at least 1.');
-  return id;
-}
-
-function parseDepositBookingId() {
-  if (!depositEls.bookingId) throw new Error('Booking ID input missing.');
-  const raw = depositEls.bookingId.value.trim();
-  if (!/^\d+$/.test(raw)) throw new Error('Booking ID must be a whole number.');
-  return BigInt(raw);
-}
-
-function parseDepositTenantBps() {
-  if (!depositEls.tenantBps) throw new Error('Tenant share input missing.');
-  const raw = depositEls.tenantBps.value.trim();
-  if (!/^\d+$/.test(raw)) throw new Error('Tenant share must be whole basis points.');
-  const bps = Number(raw);
-  if (!Number.isFinite(bps) || bps < 0 || bps > 10_000) {
+function parseTenantBpsValue(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : String(raw ?? '').trim();
+  if (!text) throw new Error('Enter the tenant share in basis points.');
+  if (!/^\d+$/.test(text)) throw new Error('Tenant share must be whole basis points.');
+  const value = Number(text);
+  if (!Number.isFinite(value) || value < 0 || value > 10_000) {
     throw new Error('Basis points must be between 0 and 10000.');
   }
-  return bps;
+  return value;
 }
 
-async function getListingAddressById(listingId) {
-  const abi = await loadPlatformAbi();
-  if (!Array.isArray(abi) || abi.length === 0) {
-    throw new Error('Platform ABI unavailable.');
-  }
-  const addr = await pub.readContract({
-    address: PLATFORM_ADDRESS,
-    abi,
-    functionName: 'listingById',
-    args: [listingId],
-  });
-  if (
-    typeof addr !== 'string' ||
-    !/^0x[0-9a-fA-F]{40}$/.test(addr) ||
-    /^0x0+$/i.test(addr)
-  ) {
-    throw new Error('Listing not found.');
-  }
-  return addr;
+async function fetchDepositBookingDetails(listingAddr, bookingId) {
+  const [bookingRaw, pendingRaw] = await Promise.all([
+    pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'bookingInfo', args: [bookingId] }),
+    pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'pendingDepositSplit', args: [bookingId] }),
+  ]);
+  const booking = {
+    tenant: bookingRaw.tenant,
+    start: bookingRaw.start,
+    end: bookingRaw.end,
+    grossRent: bookingRaw.grossRent,
+    expectedNetRent: bookingRaw.expectedNetRent,
+    rentPaid: bookingRaw.rentPaid,
+    deposit: bookingRaw.deposit,
+    status: bookingRaw.status,
+    depositReleased: bookingRaw.depositReleased,
+    depositTenantBps: bookingRaw.depositTenantBps,
+    tokenised: bookingRaw.tokenised,
+    totalSqmu: bookingRaw.totalSqmu,
+    soldSqmu: bookingRaw.soldSqmu,
+    pricePerSqmu: bookingRaw.pricePerSqmu,
+    feeBps: bookingRaw.feeBps,
+    period: bookingRaw.period,
+    proposer: bookingRaw.proposer,
+  };
+  const pending = pendingRaw
+    ? {
+        exists: pendingRaw.exists,
+        tenantBps: pendingRaw.tenantBps,
+        proposer: pendingRaw.proposer,
+      }
+    : { exists: false };
+  return { booking, pending };
 }
 
-function renderDepositBookingInfo(listingAddr, bookingId, booking, pending) {
-  if (!depositEls.bookingInfo) return;
+function renderDepositBookingInfo(container, listingAddr, bookingId, booking, pending) {
+  if (!container || !booking) {
+    return;
+  }
+  container.innerHTML = '';
   const statusIndex = Number(booking.status || 0n);
   const statusLabel = BOOKING_STATUS_LABELS[statusIndex] || `Unknown (${statusIndex})`;
   const durationSeconds = (booking.end || 0n) - (booking.start || 0n);
@@ -2236,137 +2205,288 @@ function renderDepositBookingInfo(listingAddr, bookingId, booking, pending) {
       ? `Pending proposal: tenant ${(Number(pending.tenantBps || 0n) / 100).toFixed(2)}% · proposer ${pending.proposer}`
       : 'Pending proposal: none',
   );
-  depositEls.bookingInfo.innerHTML = lines.map((line) => escapeHtml(line)).join('<br>');
-}
-
-async function loadDepositBooking() {
-  if (!depositEls.load) return;
-  setDepositStatus('Loading booking details…');
-  try {
-    const listingId = parseDepositListingId();
-    const bookingId = parseDepositBookingId();
-    const listingAddr = await getListingAddressById(listingId);
-    const [bookingRaw, pending] = await Promise.all([
-      pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'bookingInfo', args: [bookingId] }),
-      pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'pendingDepositSplit', args: [bookingId] }),
-    ]);
-
-    const booking = {
-      tenant: bookingRaw.tenant,
-      start: bookingRaw.start,
-      end: bookingRaw.end,
-      grossRent: bookingRaw.grossRent,
-      expectedNetRent: bookingRaw.expectedNetRent,
-      rentPaid: bookingRaw.rentPaid,
-      deposit: bookingRaw.deposit,
-      status: bookingRaw.status,
-      depositReleased: bookingRaw.depositReleased,
-      depositTenantBps: bookingRaw.depositTenantBps,
-      tokenised: bookingRaw.tokenised,
-      totalSqmu: bookingRaw.totalSqmu,
-      soldSqmu: bookingRaw.soldSqmu,
-      pricePerSqmu: bookingRaw.pricePerSqmu,
-      feeBps: bookingRaw.feeBps,
-      period: bookingRaw.period,
-    };
-
-    renderDepositBookingInfo(listingAddr, bookingId, booking, pending);
-    updateDepositStatus('Booking details loaded.', 'success');
-  } catch (err) {
-    clearDepositBookingInfo();
-    updateDepositStatus(err?.message || 'Unable to load booking details.', 'error');
+  for (const line of lines) {
+    const row = document.createElement('div');
+    row.textContent = line;
+    container.appendChild(row);
   }
 }
 
-if (depositEls.load) {
-  depositEls.load.addEventListener('click', () => {
-    loadDepositBooking();
-  });
-}
+function createDepositTools(listing) {
+  const { section, content, setOpen } = createCollapsibleSection('Deposit split');
+  content.classList.add('deposit-tools');
 
-if (depositEls.propose) {
-  depositEls.propose.addEventListener('click', async () => {
-    try {
-      if (!provider) throw new Error('Connect wallet first.');
-      const accounts = await provider.request({ method: 'eth_accounts' });
-      const [from] = Array.isArray(accounts) ? accounts : [];
-      if (!from) throw new Error('No wallet account.');
-      await ensureArbitrum(provider);
-      const listingId = parseDepositListingId();
-      const bookingId = parseDepositBookingId();
-      const tenantBps = parseDepositTenantBps();
-      const listingAddr = await getListingAddressById(listingId);
-      const data = encodeFunctionData({
-        abi: LISTING_ABI,
-        functionName: 'proposeDepositSplit',
-        args: [bookingId, BigInt(tenantBps)],
-      });
-      const txHash = await provider.request({
-        method: 'eth_sendTransaction',
-        params: [{ from, to: listingAddr, data }],
-      });
-      updateDepositStatus(`Proposal tx sent: ${txHash}`, 'success');
-    } catch (err) {
-      updateDepositStatus(err?.message || 'Failed to propose split.', 'error');
+  const intro = document.createElement('p');
+  intro.className = 'muted';
+  intro.textContent = 'Propose how deposits should be split after checkout. Platform owners confirm the final release.';
+  content.appendChild(intro);
+
+  const fieldset = document.createElement('div');
+  const bookingLabel = document.createElement('label');
+  bookingLabel.textContent = 'Booking ID';
+  const bookingInput = document.createElement('input');
+  bookingInput.type = 'number';
+  bookingInput.min = '1';
+  bookingInput.step = '1';
+  bookingInput.placeholder = '1';
+  bookingInput.inputMode = 'numeric';
+  bookingLabel.appendChild(bookingInput);
+  fieldset.appendChild(bookingLabel);
+
+  const tenantLabel = document.createElement('label');
+  tenantLabel.textContent = 'Tenant share (bps)';
+  const tenantInput = document.createElement('input');
+  tenantInput.type = 'number';
+  tenantInput.min = '0';
+  tenantInput.max = '10000';
+  tenantInput.step = '1';
+  tenantInput.value = '5000';
+  tenantInput.inputMode = 'numeric';
+  tenantLabel.appendChild(tenantInput);
+  fieldset.appendChild(tenantLabel);
+
+  content.appendChild(fieldset);
+
+  const actions = document.createElement('div');
+  actions.className = 'card-actions';
+
+  const loadBtn = document.createElement('button');
+  loadBtn.type = 'button';
+  loadBtn.className = 'inline-button';
+  loadBtn.textContent = 'Load booking';
+  actions.appendChild(loadBtn);
+
+  const proposeBtn = document.createElement('button');
+  proposeBtn.type = 'button';
+  proposeBtn.className = 'inline-button';
+  proposeBtn.textContent = 'Propose deposit split';
+  actions.appendChild(proposeBtn);
+
+  content.appendChild(actions);
+
+  const statusEl = document.createElement('div');
+  statusEl.className = 'muted deposit-status';
+  content.appendChild(statusEl);
+
+  const bookingInfoEl = document.createElement('div');
+  bookingInfoEl.className = 'muted deposit-booking-info';
+  content.appendChild(bookingInfoEl);
+
+  const state = {
+    quickAuthReady: false,
+    walletConnected: false,
+    currentBookingId: null,
+  };
+
+  const setStatus = (message, variant = 'info', { notify: shouldNotify = false } = {}) => {
+    statusEl.textContent = message || '';
+    if (shouldNotify && message) {
+      notify({ message, variant, role: 'landlord', timeout: variant === 'error' ? 7000 : 5000 });
     }
+  };
+
+  const updateButtonState = () => {
+    loadBtn.disabled = !state.quickAuthReady;
+    const noBooking = !state.currentBookingId;
+    proposeBtn.disabled = !state.quickAuthReady || !state.walletConnected || noBooking;
+  };
+
+  const clearBookingDetails = () => {
+    bookingInfoEl.innerHTML = '';
+    state.currentBookingId = null;
+    updateButtonState();
+  };
+
+  const loadBooking = async ({ preserveStatus = false } = {}) => {
+    if (!listing?.address) {
+      setStatus('Listing address unavailable for deposit tools.', 'error');
+      return;
+    }
+    let bookingId;
+    try {
+      bookingId = parseBookingIdValue(bookingInput.value);
+    } catch (err) {
+      setStatus(err?.message || 'Enter a valid booking ID.', 'error');
+      return;
+    }
+    setStatus('Loading booking details…');
+    loadBtn.disabled = true;
+    try {
+      const { booking, pending } = await fetchDepositBookingDetails(listing.address, bookingId);
+      renderDepositBookingInfo(bookingInfoEl, listing.address, bookingId, booking, pending);
+      state.currentBookingId = bookingId;
+      if (pending?.tenantBps != null) {
+        tenantInput.value = toNumberOr(pending.tenantBps, 0).toString();
+      }
+      if (!preserveStatus) {
+        setStatus('Booking details loaded.', state.walletConnected ? 'success' : 'info');
+      }
+    } catch (err) {
+      console.error('Unable to load deposit booking details', err);
+      clearBookingDetails();
+      setStatus(err?.message || 'Unable to load booking details.', 'error');
+    } finally {
+      updateButtonState();
+    }
+  };
+
+  const submitProposal = async () => {
+    if (!listing?.address) {
+      setStatus('Listing address unavailable for deposit tools.', 'error');
+      return;
+    }
+    if (!provider) {
+      setStatus('Connect wallet before proposing deposit splits.', 'error');
+      return;
+    }
+    if (!state.currentBookingId) {
+      setStatus('Load a booking before proposing a deposit split.', 'error');
+      return;
+    }
+    let tenantBps;
+    try {
+      tenantBps = parseTenantBpsValue(tenantInput.value);
+    } catch (err) {
+      setStatus(err?.message || 'Enter the tenant share in basis points.', 'error');
+      return;
+    }
+    let from;
+    try {
+      const accounts = await provider.request({ method: 'eth_accounts' });
+      [from] = Array.isArray(accounts) ? accounts : [];
+    } catch (err) {
+      console.error('Failed to read wallet accounts', err);
+    }
+    if (!from) {
+      setStatus('No wallet account connected.', 'error');
+      return;
+    }
+    try {
+      await ensureArbitrum(provider);
+    } catch (err) {
+      setStatus(err?.message || 'Switch to Arbitrum to continue.', 'error');
+      return;
+    }
+    try {
+      await assertListingOwnership(listing.address, from);
+    } catch (err) {
+      setStatus(err?.message || 'Connected wallet is not the landlord for this listing.', 'error');
+      return;
+    }
+    const args = [state.currentBookingId, BigInt(tenantBps)];
+    const data = encodeFunctionData({ abi: LISTING_ABI, functionName: 'proposeDepositSplit', args });
+    setStatus('Submitting deposit split proposal…');
+    loadBtn.disabled = true;
+    proposeBtn.disabled = true;
+    try {
+      let walletSendUnsupported = false;
+      try {
+        const { unsupported } = await requestWalletSendCalls(provider, {
+          calls: [{ to: listing.address, data }],
+          from,
+          chainId: ARBITRUM_HEX,
+        });
+        walletSendUnsupported = unsupported;
+      } catch (err) {
+        if (isUserRejectedRequestError(err)) {
+          setStatus('Deposit split proposal cancelled.', 'warning');
+          return;
+        }
+        throw err;
+      }
+      if (walletSendUnsupported) {
+        await provider.request({
+          method: 'eth_sendTransaction',
+          params: [{ from, to: listing.address, data }],
+        });
+      }
+      setStatus('Deposit split proposal submitted. Awaiting platform approval.', 'success', { notify: true });
+      try {
+        await loadBooking({ preserveStatus: true });
+      } catch (err) {
+        console.error('Failed to refresh deposit booking after proposal', err);
+      }
+    } catch (err) {
+      console.error('Deposit split proposal failed', err);
+      const variant = isUserRejectedRequestError(err) ? 'warning' : 'error';
+      setStatus(err?.message || 'Failed to propose split.', variant);
+    } finally {
+      updateButtonState();
+    }
+  };
+
+  loadBtn.addEventListener('click', () => {
+    loadBooking();
   });
-}
 
+  proposeBtn.addEventListener('click', () => {
+    submitProposal();
+  });
+
+  setStatus('Sign in with Farcaster to manage deposit splits.');
+  updateButtonState();
+
+  return {
+    section,
+    controller: {
+      setQuickAuthReady: (ready) => {
+        state.quickAuthReady = Boolean(ready);
+        updateButtonState();
+        if (state.quickAuthReady) {
+          const message = state.walletConnected
+            ? 'Load a booking to review its deposit.'
+            : 'Connect wallet to manage deposit splits.';
+          setStatus(message);
+        }
+      },
+      setQuickAuthFailed: (message) => {
+        state.quickAuthReady = false;
+        clearBookingDetails();
+        updateButtonState();
+        setStatus(message, 'error');
+      },
+      setWalletConnected: (connected) => {
+        state.walletConnected = Boolean(connected);
+        updateButtonState();
+        if (!state.quickAuthReady) {
+          return;
+        }
+        const message = state.walletConnected
+          ? state.currentBookingId
+            ? 'Booking details loaded.'
+            : 'Load a booking to review its deposit.'
+          : 'Connect wallet to manage deposit splits.';
+        setStatus(message);
+      },
+      openPanel: ({ focus = false } = {}) => {
+        setOpen(true);
+        if (focus) {
+          bookingInput.focus();
+        }
+      },
+      loadBookingById: async (bookingId, options = {}) => {
+        bookingInput.value = bookingId?.toString() || '';
+        await loadBooking(options);
+      },
+    },
+  };
+}
 // -------------------- Tokenisation tools --------------------
-function setTokenStatus(message) {
-  if (tokenEls.status) {
-    tokenEls.status.textContent = message || '';
-  }
-}
-
-function updateTokenStatus(message, variant = 'info') {
-  setTokenStatus(message);
-  if (message) {
-    notify({ message, variant, role: 'landlord', timeout: variant === 'error' ? 7000 : 5000 });
-  }
-}
-
-function clearTokenBookingInfo() {
-  if (tokenEls.bookingInfo) {
-    tokenEls.bookingInfo.innerHTML = '';
-  }
-}
-
-function parseTokenListingId() {
-  if (!tokenEls.listingId) throw new Error('Listing ID input missing.');
-  const raw = tokenEls.listingId.value.trim();
-  if (!/^\d+$/.test(raw)) throw new Error('Listing ID must be a whole number.');
-  const id = BigInt(raw);
-  if (id === 0n) throw new Error('Listing ID must be at least 1.');
-  return id;
-}
-
-function parseTokenBookingId() {
-  if (!tokenEls.bookingId) throw new Error('Booking ID input missing.');
-  const raw = tokenEls.bookingId.value.trim();
-  if (!/^\d+$/.test(raw)) throw new Error('Booking ID must be a whole number.');
-  return BigInt(raw);
-}
-
-function parseTokenTotalSqmu() {
-  if (!tokenEls.totalSqmu) throw new Error('Total SQMU input missing.');
-  const raw = tokenEls.totalSqmu.value.trim().replace(/,/g, '');
-  if (!raw) throw new Error('Enter the total SQMU supply.');
-  if (!/^\d+$/.test(raw)) throw new Error('Total SQMU must be a whole number.');
-  const value = BigInt(raw);
+function parseTokenTotalSqmuValue(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : String(raw ?? '').trim();
+  if (!text) throw new Error('Enter the total SQMU supply.');
+  if (!/^\d+$/.test(text)) throw new Error('Total SQMU must be a whole number.');
+  const value = BigInt(text);
   if (value === 0n) throw new Error('Total SQMU must be greater than zero.');
   return value;
 }
 
-function parseTokenPricePerSqmu() {
-  if (!tokenEls.pricePerSqmu) throw new Error('Price per SQMU input missing.');
-  const raw = tokenEls.pricePerSqmu.value;
-  if (typeof raw !== 'string' || !raw.trim()) {
-    throw new Error('Enter the price per SQMU.');
-  }
+function parseTokenPricePerSqmuValue(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : String(raw ?? '').trim();
+  if (!text) throw new Error('Enter the price per SQMU.');
   let value;
   try {
-    value = parseDec6(raw);
+    value = parseDec6(text);
   } catch (err) {
     throw new Error('Enter the price per SQMU using up to 6 decimals.');
   }
@@ -2376,20 +2496,18 @@ function parseTokenPricePerSqmu() {
   return value;
 }
 
-function parseTokenFeeBps() {
-  if (!tokenEls.feeBps) throw new Error('Platform fee input missing.');
-  const raw = tokenEls.feeBps.value.trim();
-  if (!/^\d+$/.test(raw)) throw new Error('Platform fee must be whole basis points.');
-  const value = Number(raw);
+function parseTokenFeeBpsValue(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : String(raw ?? '').trim();
+  if (!text) throw new Error('Enter the platform fee in basis points.');
+  if (!/^\d+$/.test(text)) throw new Error('Platform fee must be whole basis points.');
+  const value = Number(text);
   if (!Number.isFinite(value) || value < 0 || value > 10_000) {
     throw new Error('Platform fee must be between 0 and 10000 basis points.');
   }
   return value;
 }
 
-function parseTokenPeriodOption() {
-  if (!tokenEls.period) throw new Error('Distribution period selector missing.');
-  const key = tokenEls.period.value || '';
+function parseTokenPeriodOptionValue(key) {
   const option = PERIOD_OPTIONS[key];
   if (!option) {
     throw new Error('Select a distribution period.');
@@ -2397,223 +2515,283 @@ function parseTokenPeriodOption() {
   return option;
 }
 
-function applyBookingToTokenForm(booking) {
-  if (!booking) return;
-  if (tokenEls.totalSqmu) {
-    tokenEls.totalSqmu.value = booking.totalSqmu > 0n ? booking.totalSqmu.toString() : '';
+function renderTokenBookingInfo(container, listingAddr, bookingId, booking, pending) {
+  if (!container || !booking) {
+    return;
   }
-  if (tokenEls.pricePerSqmu) {
-    tokenEls.pricePerSqmu.value = booking.pricePerSqmu > 0n ? formatUsdc(booking.pricePerSqmu) : '';
-  }
-  if (tokenEls.feeBps) {
-    tokenEls.feeBps.value = booking.feeBps > 0n ? booking.feeBps.toString() : (tokenEls.feeBps.value || '0');
-  }
-  if (tokenEls.period) {
-    const periodKey = getPeriodKeyFromValue(booking.period);
-    if (periodKey && tokenEls.period.querySelector(`option[value="${periodKey}"]`)) {
-      tokenEls.period.value = periodKey;
-    } else if (tokenEls.period.querySelector('option[value="month"]')) {
-      tokenEls.period.value = 'month';
-    }
-  }
-}
-
-function renderTokenBookingInfo(listingAddr, bookingId, booking, pending) {
-  if (!tokenEls.bookingInfo) return false;
+  container.innerHTML = '';
   const statusIndex = Number(booking.status || 0n);
   const statusLabel = BOOKING_STATUS_LABELS[statusIndex] || `Unknown (${statusIndex})`;
   const durationSeconds = (booking.end || 0n) - (booking.start || 0n);
-  const periodIndex = toNumberOr(booking.period, 0);
+  const periodIndex = Number(booking.period || 0n);
   const periodLabel = BOOKING_PERIOD_LABELS[periodIndex] || `Custom (${periodIndex})`;
-  const lines = [
-    `Listing: ${listingAddr}`,
-    `Booking ID: ${bookingId.toString()}`,
-    `Status: ${statusLabel}`,
-    `Tenant: ${booking.tenant}`,
-    `Range: ${formatTimestamp(booking.start)} → ${formatTimestamp(booking.end)} (${formatDuration(durationSeconds)})`,
-    `Gross rent: ${formatUsdc(booking.grossRent)} USDC`,
-    `Net rent expected: ${formatUsdc(booking.expectedNetRent)} USDC`,
-    `Rent paid so far: ${formatUsdc(booking.rentPaid)} USDC`,
-    `Tokenisation: ${booking.tokenised ? 'Enabled' : 'Not enabled'}`,
-  ];
-  if (booking.totalSqmu > 0n) {
-    lines.push(
-      `Configured SQMU: ${formatSqmu(booking.totalSqmu)} @ ${formatUsdc(booking.pricePerSqmu)} USDC`,
-      `Fee: ${formatBasisPoints(booking.feeBps)}`,
-      `Cadence: ${periodLabel}`,
-    );
-  }
-  const proposer = booking.proposer && !/^0x0+$/i.test(booking.proposer) ? booking.proposer : '—';
-  lines.push(`Last proposer: ${proposer}`);
-  if (pending?.exists) {
-    const pendingPeriodIndex = toNumberOr(pending.period, 0);
-    const pendingPeriodLabel = BOOKING_PERIOD_LABELS[pendingPeriodIndex] || `Custom (${pendingPeriodIndex})`;
-    lines.push(
-      `Pending proposal: ${formatSqmu(pending.totalSqmu)} SQMU @ ${formatUsdc(pending.pricePerSqmu)} USDC · Fee ${formatBasisPoints(pending.feeBps)} · ${pendingPeriodLabel} · proposer ${pending.proposer}`,
-    );
-  } else {
-    lines.push('Pending proposal: none');
-  }
-
   const awaitingApproval = Boolean(pending?.exists) && !booking.tokenised;
-  const container = tokenEls.bookingInfo;
-  container.innerHTML = '';
+
+  const heading = document.createElement('div');
+  heading.className = 'booking-tokenisation-title';
+  heading.textContent = 'Tokenisation';
+  container.appendChild(heading);
+
   if (awaitingApproval) {
     const alert = document.createElement('div');
     alert.className = 'booking-tokenisation-alert';
     alert.textContent = 'Waiting for platform approval';
     container.appendChild(alert);
   }
-  for (const line of lines) {
-    const row = document.createElement('div');
-    row.textContent = line;
-    container.appendChild(row);
+
+  const details = document.createElement('div');
+  details.className = 'booking-details';
+  details.appendChild(createBookingDetailElement('Status', statusLabel));
+  details.appendChild(createBookingDetailElement('Booking ID', bookingId.toString()));
+  details.appendChild(createBookingDetailElement('Range', `${formatTimestamp(booking.start)} → ${formatTimestamp(booking.end)} (${formatDuration(durationSeconds)})`));
+  details.appendChild(createBookingDetailElement('Deposit', `${formatUsdc(booking.deposit)} USDC`));
+  details.appendChild(createBookingDetailElement('Gross rent', `${formatUsdc(booking.grossRent)} USDC`));
+  details.appendChild(createBookingDetailElement('Net rent', `${formatUsdc(booking.expectedNetRent)} USDC`));
+  details.appendChild(createBookingDetailElement('Rent paid', `${formatUsdc(booking.rentPaid)} USDC`));
+  details.appendChild(createBookingDetailElement('Token period', periodLabel));
+  details.appendChild(createBookingDetailElement('Tokenised', booking.tokenised ? 'Yes' : 'No'));
+  if (booking.tokenised) {
+    details.appendChild(createBookingDetailElement('Total SQMU', formatSqmu(booking.totalSqmu)));
+    details.appendChild(createBookingDetailElement('Sold SQMU', formatSqmu(booking.soldSqmu)));
+    details.appendChild(createBookingDetailElement('Price per SQMU', `${formatUsdc(booking.pricePerSqmu)} USDC`));
+    details.appendChild(createBookingDetailElement('Fee', formatBasisPoints(booking.feeBps)));
   }
-  return awaitingApproval;
+  const proposerText = booking.proposer && !/^0x0+$/i.test(booking.proposer) ? booking.proposer : '—';
+  details.appendChild(createBookingDetailElement('Last proposer', proposerText));
+  if (pending?.exists) {
+    const pendingPeriodIndex = Number(pending.period || 0);
+    const pendingPeriodLabel = BOOKING_PERIOD_LABELS[pendingPeriodIndex] || `Custom (${pendingPeriodIndex})`;
+    const pendingDetail = `Pending proposal: ${formatSqmu(pending.totalSqmu)} SQMU @ ${formatUsdc(pending.pricePerSqmu)} USDC · Fee ${formatBasisPoints(pending.feeBps)} · ${pendingPeriodLabel} · proposer ${pending.proposer}`;
+    details.appendChild(createBookingDetailElement('Pending', pendingDetail));
+  } else {
+    details.appendChild(createBookingDetailElement('Pending', 'None'));
+  }
+  container.appendChild(details);
+
+  const helper = document.createElement('div');
+  helper.className = 'booking-helper-text';
+  helper.textContent = awaitingApproval
+    ? 'Tokenisation proposal submitted. Awaiting platform decision.'
+    : 'Load bookings to manage tokenisation proposals.';
+  container.appendChild(helper);
 }
 
-function syncTokenProposalState(booking, pending, { preserveStatus = false } = {}) {
-  const awaitingApproval = Boolean(pending?.exists) && !booking?.tokenised;
-  if (tokenEls.propose) {
-    const shouldDisable = awaitingApproval || !walletConnected;
-    tokenEls.propose.disabled = shouldDisable;
-  }
-  if (!preserveStatus) {
-    if (awaitingApproval) {
-      updateTokenStatus('Booking details loaded — waiting for platform approval before new proposals.', 'info');
-    } else if (walletConnected) {
-      updateTokenStatus('Booking details loaded. Adjust parameters and submit to propose tokenisation.', 'success');
-    } else {
-      updateTokenStatus('Booking details loaded. Connect wallet to submit proposals.', 'info');
-    }
-  }
-  return awaitingApproval;
-}
+function createTokenTools(listing) {
+  const identifier = listing?.listingIdText || listing?.listingId?.toString?.() || shortAddress(listing?.address || '') || 'listing';
+  const panelId = `tokenPanel-${identifier}`;
+  const { section, content, setOpen } = createCollapsibleSection('Tokenisation');
+  content.classList.add('token-tools');
 
-async function fetchTokenBookingDetails(listingAddr, bookingId) {
-  const [bookingRaw, pendingRaw] = await Promise.all([
-    pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'bookingInfo', args: [bookingId] }),
-    pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'pendingTokenisation', args: [bookingId] }),
-  ]);
-  const booking = {
-    tenant: bookingRaw.tenant,
-    start: bookingRaw.start,
-    end: bookingRaw.end,
-    grossRent: bookingRaw.grossRent,
-    expectedNetRent: bookingRaw.expectedNetRent,
-    rentPaid: bookingRaw.rentPaid,
-    deposit: bookingRaw.deposit,
-    status: bookingRaw.status,
-    tokenised: bookingRaw.tokenised,
-    totalSqmu: bookingRaw.totalSqmu,
-    soldSqmu: bookingRaw.soldSqmu,
-    pricePerSqmu: bookingRaw.pricePerSqmu,
-    feeBps: bookingRaw.feeBps,
-    period: bookingRaw.period,
-    proposer: bookingRaw.proposer,
+  const intro = document.createElement('p');
+  intro.className = 'muted';
+  intro.textContent = 'Define SQMU supply, pricing and cadence for bookings you manage. Platform approval is required before investors can participate.';
+  content.appendChild(intro);
+
+  const bookingLabel = document.createElement('label');
+  bookingLabel.textContent = 'Booking ID';
+  const bookingInput = document.createElement('input');
+  bookingInput.type = 'number';
+  bookingInput.min = '1';
+  bookingInput.step = '1';
+  bookingInput.placeholder = '1';
+  bookingInput.inputMode = 'numeric';
+  bookingLabel.appendChild(bookingInput);
+  content.appendChild(bookingLabel);
+
+  const actions = document.createElement('div');
+  actions.className = 'card-actions';
+  const loadBtn = document.createElement('button');
+  loadBtn.type = 'button';
+  loadBtn.className = 'inline-button';
+  loadBtn.textContent = 'Load booking';
+  actions.appendChild(loadBtn);
+  content.appendChild(actions);
+
+  const statusEl = document.createElement('div');
+  statusEl.className = 'muted token-status';
+  content.appendChild(statusEl);
+
+  const infoContainer = document.createElement('div');
+  infoContainer.className = 'token-booking-info';
+  content.appendChild(infoContainer);
+
+  const proposalPanel = document.createElement('div');
+  proposalPanel.dataset.collapsibleContent = 'inner';
+  proposalPanel.id = panelId;
+  content.appendChild(proposalPanel);
+
+  const state = {
+    quickAuthReady: false,
+    walletConnected: false,
+    currentBookingId: null,
+    awaitingApproval: false,
+    loading: false,
   };
-  const pending = pendingRaw
-    ? {
-        exists: pendingRaw.exists,
-        proposer: pendingRaw.proposer,
-        totalSqmu: pendingRaw.totalSqmu,
-        pricePerSqmu: pendingRaw.pricePerSqmu,
-        feeBps: pendingRaw.feeBps,
-        period: pendingRaw.period,
+
+  let proposalForm = null;
+
+  const setStatus = (message, variant = 'info', { notify: shouldNotify = false } = {}) => {
+    statusEl.textContent = message || '';
+    if (shouldNotify && message) {
+      notify({ message, variant, role: 'landlord', timeout: variant === 'error' ? 7000 : 5000 });
+    }
+  };
+
+  const updateButtonState = () => {
+    loadBtn.disabled = !state.quickAuthReady || state.loading;
+  };
+
+  const updateFormDisabled = () => {
+    if (!proposalForm) return;
+    const disabled = !state.quickAuthReady || !state.walletConnected || state.awaitingApproval || state.loading;
+    const controls = proposalForm.querySelectorAll('input, select, button');
+    controls.forEach((el) => { el.disabled = disabled; });
+  };
+
+  const clearBookingDetails = () => {
+    infoContainer.innerHTML = '';
+    proposalPanel.innerHTML = '';
+    proposalForm = null;
+    state.currentBookingId = null;
+    state.awaitingApproval = false;
+    updateButtonState();
+    updateFormDisabled();
+  };
+
+  const renderProposalForm = (booking, pending) => {
+    proposalPanel.innerHTML = '';
+    const form = TokenisationCard({
+      bookingId: state.currentBookingId ? state.currentBookingId.toString() : '',
+      totalSqmu: booking?.totalSqmu ? booking.totalSqmu.toString() : undefined,
+      soldSqmu: booking?.soldSqmu ? booking.soldSqmu.toString() : undefined,
+      pricePerSqmu: booking?.pricePerSqmu ? formatUsdc(booking.pricePerSqmu) : undefined,
+      feeBps: booking?.feeBps ? Number(booking.feeBps) : undefined,
+      period: getPeriodKeyFromValue(booking?.period) || undefined,
+      mode: 'propose',
+      onSubmit: (vals) => submitProposal(vals),
+    });
+    proposalPanel.appendChild(form);
+    const amountInput = form.querySelector('input[name="amount"]');
+    if (amountInput && booking?.totalSqmu > 0n) {
+      amountInput.value = booking.totalSqmu.toString();
+    }
+    const priceInput = form.querySelector('input[name="price"]');
+    if (priceInput && booking?.pricePerSqmu > 0n) {
+      priceInput.value = formatUsdc(booking.pricePerSqmu);
+    }
+    const feeInput = form.querySelector('input[name="fee"]');
+    if (feeInput && booking?.feeBps) {
+      feeInput.value = booking.feeBps.toString();
+    }
+    const periodSelect = form.querySelector('select[name="period"]');
+    const periodKey = getPeriodKeyFromValue(booking?.period);
+    if (periodSelect && periodKey) {
+      periodSelect.value = periodKey;
+    }
+    proposalForm = form;
+    updateFormDisabled();
+  };
+
+  const loadBooking = async ({ preserveStatus = false } = {}) => {
+    if (!listing?.address) {
+      setStatus('Listing address unavailable for tokenisation tools.', 'error');
+      return;
+    }
+    let bookingId;
+    try {
+      bookingId = parseBookingIdValue(bookingInput.value);
+    } catch (err) {
+      setStatus(err?.message || 'Enter a valid booking ID.', 'error');
+      return;
+    }
+    setStatus('Loading booking details…');
+    state.loading = true;
+    updateButtonState();
+    updateFormDisabled();
+    try {
+      const { booking, pending } = await fetchTokenBookingDetails(listing.address, bookingId);
+      state.currentBookingId = bookingId;
+      state.awaitingApproval = Boolean(pending?.exists) && !booking.tokenised;
+      infoContainer.innerHTML = '';
+      renderTokenBookingInfo(infoContainer, listing.address, bookingId, booking, pending);
+      renderProposalForm(booking, pending);
+      if (!preserveStatus) {
+        if (state.awaitingApproval) {
+          setStatus('Booking details loaded — waiting for platform approval before new proposals.', 'info');
+        } else if (state.walletConnected) {
+          setStatus('Booking details loaded. Adjust parameters and submit to manage tokenisation.', 'success');
+        } else {
+          setStatus('Booking details loaded. Connect wallet to submit proposals.', 'info');
+        }
       }
-    : { exists: false };
-  return { booking, pending };
-}
-
-function setTokenFormDisabled(disabled) {
-  const flag = Boolean(disabled);
-  if (tokenEls.listingId) tokenEls.listingId.disabled = flag;
-  if (tokenEls.bookingId) tokenEls.bookingId.disabled = flag;
-  if (tokenEls.totalSqmu) tokenEls.totalSqmu.disabled = flag;
-  if (tokenEls.pricePerSqmu) tokenEls.pricePerSqmu.disabled = flag;
-  if (tokenEls.feeBps) tokenEls.feeBps.disabled = flag;
-  if (tokenEls.period) tokenEls.period.disabled = flag;
-}
-
-async function loadTokenBookingDetails() {
-  if (!tokenEls.load) return;
-  const originalLabel = tokenEls.load.textContent;
-  tokenEls.load.disabled = true;
-  tokenEls.load.textContent = 'Loading…';
-  setTokenStatus('Loading booking details…');
-  try {
-    const listingId = parseTokenListingId();
-    const bookingId = parseTokenBookingId();
-    const listingAddr = await getListingAddressById(listingId);
-    const { booking, pending } = await fetchTokenBookingDetails(listingAddr, bookingId);
-    renderTokenBookingInfo(listingAddr, bookingId, booking, pending);
-    applyBookingToTokenForm(booking);
-    tokenToolContext = { listingId, listingAddr, bookingId };
-    syncTokenProposalState(booking, pending);
-  } catch (err) {
-    clearTokenBookingInfo();
-    updateTokenStatus(err?.message || 'Unable to load booking details.', 'error');
-  } finally {
-    tokenEls.load.disabled = false;
-    tokenEls.load.textContent = originalLabel;
-  }
-}
-
-async function assertListingOwnership(listingAddr, walletAddr) {
-  const listingRecord = landlordListingRecords.find((entry) => addressesEqual(entry?.address, listingAddr));
-  if (listingRecord && addressesEqual(listingRecord.landlord, walletAddr)) {
-    return;
-  }
-  try {
-    const owner = await pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'landlord' });
-    if (!addressesEqual(owner, walletAddr)) {
-      throw new Error('Connected wallet is not the landlord for this listing.');
+    } catch (err) {
+      console.error('Unable to load token booking details', err);
+      clearBookingDetails();
+      setStatus(err?.message || 'Unable to load booking details.', 'error');
+    } finally {
+      state.loading = false;
+      updateButtonState();
+      updateFormDisabled();
     }
-  } catch (err) {
-    if (err?.message === 'Connected wallet is not the landlord for this listing.') {
-      throw err;
+  };
+
+  const submitProposal = async (values) => {
+    if (!listing?.address) {
+      setStatus('Listing address unavailable for tokenisation tools.', 'error');
+      return;
     }
-    throw new Error('Unable to verify listing ownership.');
-  }
-}
-
-async function proposeTokenisationForLandlord() {
-  if (!provider) {
-    updateTokenStatus('Connect wallet before proposing tokenisation.', 'error');
-    return;
-  }
-
-  const originalLabel = tokenEls.propose ? tokenEls.propose.textContent : '';
-  const loadDisabledBefore = tokenEls.load ? tokenEls.load.disabled : false;
-  setTokenFormDisabled(true);
-  if (tokenEls.load) tokenEls.load.disabled = true;
-  if (tokenEls.propose) {
-    tokenEls.propose.disabled = true;
-    tokenEls.propose.textContent = 'Submitting…';
-  }
-  setTokenStatus('Preparing tokenisation proposal…');
-
-  try {
-    const accounts = await provider.request({ method: 'eth_accounts' });
-    const [from] = Array.isArray(accounts) ? accounts : [];
-    if (!from) throw new Error('No wallet account connected.');
-    await ensureArbitrum(provider);
-
-    const listingId = parseTokenListingId();
-    const bookingId = parseTokenBookingId();
-    const totalSqmu = parseTokenTotalSqmu();
-    const pricePerSqmu = parseTokenPricePerSqmu();
-    const feeBps = parseTokenFeeBps();
-    const periodInfo = parseTokenPeriodOption();
-    const listingAddr = await getListingAddressById(listingId);
-
-    await assertListingOwnership(listingAddr, from);
-
-    const args = [bookingId, totalSqmu, pricePerSqmu, BigInt(feeBps), periodInfo.value];
-
+    if (!provider) {
+      setStatus('Connect wallet before proposing tokenisation.', 'error');
+      return;
+    }
+    if (!state.currentBookingId) {
+      setStatus('Load a booking before proposing tokenisation.', 'error');
+      return;
+    }
+    if (state.awaitingApproval) {
+      setStatus('Await platform approval before submitting a new proposal.', 'info');
+      return;
+    }
+    let totalSqmu;
+    let pricePerSqmu;
+    let feeBps;
+    let periodInfo;
+    try {
+      totalSqmu = parseTokenTotalSqmuValue(values.amount);
+      pricePerSqmu = parseTokenPricePerSqmuValue(values.price);
+      feeBps = parseTokenFeeBpsValue(values.fee);
+      periodInfo = parseTokenPeriodOptionValue(values.period);
+    } catch (err) {
+      setStatus(err?.message || 'Check your proposal inputs.', 'error');
+      return;
+    }
+    let from;
+    try {
+      const accounts = await provider.request({ method: 'eth_accounts' });
+      [from] = Array.isArray(accounts) ? accounts : [];
+    } catch (err) {
+      console.error('Failed to read wallet accounts', err);
+    }
+    if (!from) {
+      setStatus('No wallet account connected.', 'error');
+      return;
+    }
+    try {
+      await ensureArbitrum(provider);
+    } catch (err) {
+      setStatus(err?.message || 'Switch to Arbitrum to continue.', 'error');
+      return;
+    }
+    try {
+      await assertListingOwnership(listing.address, from);
+    } catch (err) {
+      setStatus(err?.message || 'Connected wallet is not the landlord for this listing.', 'error');
+      return;
+    }
+    const args = [state.currentBookingId, totalSqmu, pricePerSqmu, BigInt(feeBps), periodInfo.value];
     try {
       await pub.simulateContract({
-        address: listingAddr,
+        address: listing.address,
         abi: LISTING_ABI,
         functionName: 'proposeTokenisation',
         args,
@@ -2621,83 +2799,118 @@ async function proposeTokenisationForLandlord() {
       });
     } catch (err) {
       const detail = err?.shortMessage || err?.message || 'Tokenisation proposal simulation failed.';
-      throw new Error(detail);
+      setStatus(detail, 'error');
+      return;
     }
-
     const data = encodeFunctionData({
       abi: LISTING_ABI,
       functionName: 'proposeTokenisation',
       args,
     });
-
-    updateTokenStatus('Submitting tokenisation proposal…');
-
-    let walletSendUnsupported = false;
-    let batchedSuccess = false;
+    setStatus('Submitting tokenisation proposal…');
+    state.loading = true;
+    updateButtonState();
+    updateFormDisabled();
     try {
-      const { unsupported } = await requestWalletSendCalls(provider, {
-        calls: [{ to: listingAddr, data }],
-        from,
-        chainId: ARBITRUM_HEX,
-      });
-      walletSendUnsupported = unsupported;
-      batchedSuccess = !unsupported;
-    } catch (err) {
-      if (isUserRejectedRequestError(err)) {
-        updateTokenStatus('Tokenisation proposal cancelled.', 'warning');
-        return;
+      let walletSendUnsupported = false;
+      let batchedSuccess = false;
+      try {
+        const { unsupported } = await requestWalletSendCalls(provider, {
+          calls: [{ to: listing.address, data }],
+          from,
+          chainId: ARBITRUM_HEX,
+        });
+        walletSendUnsupported = unsupported;
+        batchedSuccess = !unsupported;
+      } catch (err) {
+        if (isUserRejectedRequestError(err)) {
+          setStatus('Tokenisation proposal cancelled.', 'warning');
+          return;
+        }
+        throw err;
       }
-      throw err;
-    }
-
-    if (!batchedSuccess && walletSendUnsupported) {
-      await provider.request({
-        method: 'eth_sendTransaction',
-        params: [{ from, to: listingAddr, data }],
-      });
-    }
-
-    updateTokenStatus('Tokenisation proposal submitted. Awaiting platform approval.', 'success');
-    notify({ message: 'Tokenisation proposal submitted.', variant: 'success', role: 'landlord', timeout: 6000 });
-
-    try {
-      const { booking, pending } = await fetchTokenBookingDetails(listingAddr, bookingId);
-      renderTokenBookingInfo(listingAddr, bookingId, booking, pending);
-      applyBookingToTokenForm(booking);
-      tokenToolContext = { listingId, listingAddr, bookingId };
-      syncTokenProposalState(booking, pending, { preserveStatus: true });
+      if (!batchedSuccess && walletSendUnsupported) {
+        await provider.request({
+          method: 'eth_sendTransaction',
+          params: [{ from, to: listing.address, data }],
+        });
+      }
+      setStatus('Tokenisation proposal submitted. Awaiting platform approval.', 'success', { notify: true });
+      try {
+        await loadBooking({ preserveStatus: true });
+      } catch (err) {
+        console.error('Failed to refresh token booking details after proposal', err);
+      }
     } catch (err) {
-      console.error('Failed to refresh token booking details after proposal', err);
+      console.error('Tokenisation proposal failed', err);
+      const variant = isUserRejectedRequestError(err) ? 'warning' : 'error';
+      setStatus(err?.message || 'Tokenisation proposal failed.', variant);
+    } finally {
+      state.loading = false;
+      updateButtonState();
+      updateFormDisabled();
     }
-  } catch (err) {
-    console.error('Tokenisation proposal failed', err);
-    const message = err?.message || 'Tokenisation proposal failed.';
-    const variant = isUserRejectedRequestError(err) ? 'warning' : 'error';
-    updateTokenStatus(message, variant);
-  } finally {
-    setTokenFormDisabled(false);
-    if (tokenEls.propose) {
-      tokenEls.propose.disabled = false;
-      tokenEls.propose.textContent = originalLabel;
-    }
-    if (tokenEls.load) {
-      tokenEls.load.disabled = loadDisabledBefore;
-    }
-  }
-}
+  };
 
-if (tokenEls.load) {
-  tokenEls.load.addEventListener('click', () => {
-    loadTokenBookingDetails();
+  loadBtn.addEventListener('click', () => {
+    loadBooking();
   });
-}
 
-if (tokenEls.propose) {
-  tokenEls.propose.addEventListener('click', () => {
-    proposeTokenisationForLandlord();
-  });
-}
+  setStatus('Sign in with Farcaster to manage tokenisation.');
+  updateButtonState();
+  updateFormDisabled();
 
+  return {
+    section,
+    controller: {
+      setQuickAuthReady: (ready) => {
+        state.quickAuthReady = Boolean(ready);
+        updateButtonState();
+        updateFormDisabled();
+        if (state.quickAuthReady) {
+          const message = state.walletConnected
+            ? 'Load a booking to manage tokenisation.'
+            : 'Connect wallet to propose tokenisation.';
+          setStatus(message);
+        }
+      },
+      setQuickAuthFailed: (message) => {
+        state.quickAuthReady = false;
+        clearBookingDetails();
+        updateButtonState();
+        updateFormDisabled();
+        setStatus(message, 'error');
+      },
+      setWalletConnected: (connected) => {
+        state.walletConnected = Boolean(connected);
+        updateFormDisabled();
+        if (!state.quickAuthReady) {
+          return;
+        }
+        const message = state.walletConnected
+          ? state.currentBookingId
+            ? 'Booking details loaded. Adjust parameters and submit to manage tokenisation.'
+            : 'Load a booking to manage tokenisation.'
+          : 'Connect wallet to propose tokenisation.';
+        setStatus(message);
+      },
+      openPanel: ({ focus = false } = {}) => {
+        setOpen(true);
+        if (focus) {
+          bookingInput.focus();
+        }
+      },
+      openForBooking: async (bookingId, options = {}) => {
+        bookingInput.value = bookingId?.toString() || '';
+        setOpen(true);
+        if (options.focus) {
+          bookingInput.focus();
+        }
+        await loadBooking(options);
+      },
+    },
+  };
+}
 // -------------------- Boot --------------------
 (async () => {
   try {
@@ -2713,35 +2926,20 @@ if (tokenEls.propose) {
     fidBig = BigInt(payloadJson.sub);
     els.contextBar.textContent = `FID: ${fidBig.toString()} · Signed in`;
     notify({ message: `Signed in with FID ${fidBig.toString()}.`, variant: 'success', role: 'landlord', timeout: 5000 });
+    quickAuthReady = true;
+    forEachListingController((controller) => {
+      controller.setQuickAuthReady(true);
+    });
   } catch (e) {
+    quickAuthReady = false;
     els.contextBar.textContent = 'QuickAuth failed. Open this inside a Farcaster client.';
     notify({ message: 'QuickAuth failed. Open inside a Farcaster client.', variant: 'error', role: 'landlord', timeout: 6000 });
-    if (depositEls.load) {
-      depositEls.load.disabled = true;
-    }
-    if (tokenEls.load) {
-      tokenEls.load.disabled = true;
-    }
-    if (tokenEls.propose) {
-      tokenEls.propose.disabled = true;
-    }
-    setTokenStatus('QuickAuth failed. Open inside a Farcaster client.');
-    clearTokenBookingInfo();
-    setDepositStatus('QuickAuth failed. Open inside a Farcaster client.');
+    forEachListingController((controller) => {
+      controller.setQuickAuthFailed('QuickAuth failed. Open inside a Farcaster client.');
+    });
     return;
   }
 
-  if (depositEls.load) {
-    depositEls.load.disabled = false;
-  }
-  if (tokenEls.load) {
-    tokenEls.load.disabled = false;
-  }
-  if (tokenEls.propose) {
-    tokenEls.propose.disabled = true;
-  }
-  setTokenStatus('Connect wallet to propose tokenisation.');
-  setDepositStatus('Connect wallet to manage deposit splits.');
   els.connect.disabled = false;
   updateOnboardingProgress();
 })();
@@ -2806,14 +3004,9 @@ els.connect.onclick = async () => {
     currentLandlordAddress = landlordAddr;
     setConnectButtonState(true, 'Wallet Connected');
     walletConnected = true;
-    if (depositEls.propose) {
-      depositEls.propose.disabled = false;
-    }
-    if (tokenEls.propose) {
-      tokenEls.propose.disabled = false;
-    }
-    setTokenStatus('Wallet connected. Load a booking to review tokenisation.');
-    setDepositStatus('Wallet connected. Load a booking to review its deposit.');
+    forEachListingController((controller) => {
+      controller.setWalletConnected(true);
+    });
     updateOnboardingProgress();
     info('Wallet ready. Loading your listings…');
     notify({ message: 'Wallet connected — ready to deploy.', variant: 'success', role: 'landlord', timeout: 5000 });
@@ -2825,16 +3018,9 @@ els.connect.onclick = async () => {
   } catch (e) {
     walletConnected = false;
     setConnectButtonState(false);
-    if (depositEls.propose) {
-      depositEls.propose.disabled = true;
-    }
-    if (tokenEls.propose) {
-      tokenEls.propose.disabled = true;
-    }
-    if (depositEls.load && depositEls.load.disabled === false) {
-      setDepositStatus(e?.message || 'Wallet connection failed.');
-    }
-    setTokenStatus(e?.message || 'Wallet connection failed.');
+    forEachListingController((controller) => {
+      controller.setWalletConnected(false);
+    });
     info(e?.message || 'Wallet connection failed.');
     notify({ message: e?.message || 'Wallet connection failed.', variant: 'error', role: 'landlord', timeout: 6000 });
     updateOnboardingProgress();
