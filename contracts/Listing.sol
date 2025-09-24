@@ -252,6 +252,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         uint16 feeBps,
         Period period
     );
+    event TokenisationRejected(uint256 indexed bookingId, address indexed rejector, address indexed proposer);
     event SQMUTokensMinted(
         uint256 indexed bookingId,
         address indexed investor,
@@ -747,6 +748,25 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             booking.feeBps,
             booking.period
         );
+    }
+
+    /**
+     * @notice Reject a pending tokenisation proposal and clear it from storage.
+     * @param bookingId Identifier of the booking whose proposal should be cleared.
+     */
+    function rejectTokenisation(uint256 bookingId) external onlyPlatform {
+        Booking storage booking = _bookings[bookingId];
+        require(booking.status != Status.NONE, "unknown booking");
+        require(!booking.tokenised, "already tokenised");
+
+        TokenisationProposal storage proposal = _tokenisationProposals[bookingId];
+        require(proposal.exists, "no proposal");
+
+        address proposer = proposal.proposer;
+        delete _tokenisationProposals[bookingId];
+        booking.proposer = address(0);
+
+        emit TokenisationRejected(bookingId, msg.sender, proposer);
     }
 
     /**

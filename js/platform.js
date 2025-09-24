@@ -65,6 +65,9 @@ const deregisterListingAddressInput = document.getElementById('deregisterListing
 const deregisterLookupBtn = document.getElementById('deregisterLookupBtn');
 const deregisterListingStatusEl = document.getElementById('deregisterListingStatus');
 const deregisterSubmitBtn = document.getElementById('deregisterListingSubmit');
+const tokenRefreshBtn = document.getElementById('tokenRefreshBtn');
+const tokenProposalStatusEl = document.getElementById('tokenProposalStatus');
+const tokenProposalListEl = document.getElementById('tokenProposalList');
 
 const OWNER_REQUIREMENT_MESSAGE = 'Connect the platform owner wallet to unlock controls.';
 
@@ -74,6 +77,8 @@ let ownerRequirementMessage = OWNER_REQUIREMENT_MESSAGE;
 let ownerAccessGranted = false;
 
 const STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
+const BOOKING_STATUS_CLASS_MAP = { 1: 'active', 2: 'completed', 3: 'cancelled', 4: 'defaulted' };
+const TOKEN_PERIOD_LABELS = ['Unspecified', 'Daily', 'Weekly', 'Monthly'];
 const DEPOSIT_DEFAULT_MESSAGE =
   'Enter a listing & booking ID, then load the booking to inspect its deposit status.';
 const DEPOSIT_DEFAULT_STATUS = 'Load a booking to view deposit proposal details.';
@@ -93,6 +98,9 @@ let deactivateLookupCounter = 0;
 let deactivateLookupTimeout = null;
 let deregisterContext = { listingId: null, address: null, resolvedFromId: false, loading: false };
 let deregisterLookupCounter = 0;
+let tokenProposalRecords = [];
+let tokenProposalLoading = false;
+let tokenProposalLoadCounter = 0;
 
 if (toggleDevConsoleBtn) {
   toggleDevConsoleBtn.disabled = true;
@@ -112,6 +120,7 @@ if (navBadge) {
 resetDepositContext();
 resetDeactivateContext();
 resetDeregisterContext();
+resetTokenProposalState();
 setBookingRegistryAddress(configuredRegistryAddress);
 
 function setActionStatus(message, type = 'info', toast = false) {
@@ -187,6 +196,7 @@ function setOwnerControlsEnabled(enabled) {
   updateDepositControlsEnabled();
   updateDeactivateControlsEnabled();
   updateDeregisterControlsEnabled();
+  updateTokenProposalControlsEnabled();
 }
 
 function updateDevConsoleStatus() {
@@ -378,6 +388,20 @@ function formatUsdc(value) {
   return `${negative ? '-' : ''}${units}${fraction ? `.${fraction}` : ''}`;
 }
 
+function formatSqmu(value) {
+  try {
+    const amount = BigNumber.from(value || 0);
+    const text = amount.toString();
+    if (text.length <= 3) {
+      return text;
+    }
+    return text.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  } catch (err) {
+    console.error('Failed to format SQMU value', err);
+    return String(value ?? '');
+  }
+}
+
 function formatBps(bps) {
   const num = Number(BigNumber.from(bps).toString());
   if (!Number.isFinite(num)) return `${bps} bps`;
@@ -421,6 +445,33 @@ function formatTimestamp(value) {
     console.error('Failed to format timestamp', err);
     return String(value ?? '');
   }
+}
+
+function shortAddress(value) {
+  if (typeof value !== 'string') return '';
+  if (!value.startsWith('0x') || value.length < 10) return value;
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function createTokenDetail(label, value, options = {}) {
+  const { tooltip } = options || {};
+  const wrapper = document.createElement('div');
+  const labelEl = document.createElement('div');
+  labelEl.className = 'booking-detail-label';
+  labelEl.textContent = label;
+  const valueEl = document.createElement('div');
+  valueEl.className = 'booking-detail-value';
+  if (value instanceof Node) {
+    valueEl.appendChild(value);
+  } else {
+    valueEl.textContent = value;
+  }
+  if (tooltip) {
+    valueEl.title = tooltip;
+  }
+  wrapper.appendChild(labelEl);
+  wrapper.appendChild(valueEl);
+  return wrapper;
 }
 
 function toBool(value) {
@@ -595,6 +646,341 @@ function resetDeregisterContext({ clearInputs = false } = {}) {
     setDeregisterListingStatus(DEREGISTER_DEFAULT_STATUS, 'info');
   }
   updateDeregisterControlsEnabled();
+}
+
+function setTokenProposalStatus(message, type = 'info', toast = false) {
+  if (!tokenProposalStatusEl) {
+    return;
+  }
+  tokenProposalStatusEl.textContent = message ?? '';
+  tokenProposalStatusEl.classList.remove('status-ok', 'status-error', 'status-warning', 'status-info');
+  if (type === 'success') {
+    tokenProposalStatusEl.classList.add('status-ok');
+  } else if (type === 'error') {
+    tokenProposalStatusEl.classList.add('status-error');
+  } else if (type === 'warning') {
+    tokenProposalStatusEl.classList.add('status-warning');
+  } else {
+    tokenProposalStatusEl.classList.add('status-info');
+  }
+  if (toast && message) {
+    const variant = type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
+    notify({ message, variant, role: 'platform', timeout: type === 'error' ? 8000 : 5000 });
+  }
+}
+
+function resetTokenProposalState() {
+  tokenProposalRecords = [];
+  if (tokenProposalListEl) {
+    tokenProposalListEl.innerHTML = '';
+  }
+  setTokenProposalStatus('Connect the owner wallet to load tokenisation proposals.', 'info');
+  updateTokenProposalControlsEnabled();
+}
+
+function updateTokenProposalControlsEnabled() {
+  if (!tokenRefreshBtn) {
+    return;
+  }
+  const walletReady = ownerAccessGranted && Boolean(platformWrite) && Boolean(signer);
+  tokenRefreshBtn.disabled = !(walletReady && !tokenProposalLoading);
+}
+
+function renderTokenProposalList(records) {
+  if (!tokenProposalListEl) {
+    return;
+  }
+  tokenProposalListEl.innerHTML = '';
+  const list = Array.isArray(records) ? records : [];
+  if (list.length === 0) {
+    return;
+  }
+  for (const record of list) {
+    tokenProposalListEl.appendChild(createTokenProposalCard(record));
+  }
+}
+
+function createTokenProposalCard(record) {
+  const card = document.createElement('div');
+  card.className = 'token-proposal-card';
+
+  const title = document.createElement('h3');
+  title.textContent = `Listing #${record.listingIdText} · Booking #${record.bookingIdText}`;
+  card.appendChild(title);
+
+  const context = document.createElement('div');
+  context.className = 'token-proposal-context';
+  const landlordLine = document.createElement('strong');
+  landlordLine.textContent = `Landlord ${record.landlordShort || record.landlord}`;
+  if (record.landlord) {
+    landlordLine.title = record.landlord;
+  }
+  context.appendChild(landlordLine);
+  const statusMeta = document.createElement('div');
+  statusMeta.className = 'token-proposal-meta';
+  const statusClass = record.statusClass ? ` booking-status-${record.statusClass}` : '';
+  statusMeta.innerHTML = `Status: <span class="booking-status-badge${statusClass}">${record.statusLabel}</span>`;
+  context.appendChild(statusMeta);
+  const stayMeta = document.createElement('div');
+  stayMeta.className = 'token-proposal-meta';
+  stayMeta.textContent = `Stay: ${record.startLabel} → ${record.endLabel} (${record.durationLabel})`;
+  context.appendChild(stayMeta);
+  card.appendChild(context);
+
+  const details = document.createElement('div');
+  details.className = 'booking-details';
+  details.appendChild(createTokenDetail('Total SQMU', formatSqmu(record.pending.totalSqmu)));
+  details.appendChild(createTokenDetail('Price per SQMU', `${formatUsdc(record.pending.pricePerSqmu)} USDC`));
+  details.appendChild(createTokenDetail('Platform fee', formatBps(record.pending.feeBps)));
+  details.appendChild(createTokenDetail('Cadence', record.pending.periodLabel));
+  const proposerText = record.pending.proposerShort || record.pending.proposer || '—';
+  details.appendChild(createTokenDetail('Proposer', proposerText, { tooltip: record.pending.proposer || undefined }));
+  details.appendChild(createTokenDetail('Gross rent', `${formatUsdc(record.grossRent)} USDC`));
+  details.appendChild(createTokenDetail('Net rent', `${formatUsdc(record.expectedNetRent)} USDC`));
+  card.appendChild(details);
+
+  const actions = document.createElement('div');
+  actions.className = 'token-proposal-actions';
+  const approveBtn = document.createElement('button');
+  approveBtn.type = 'button';
+  approveBtn.textContent = 'Approve tokenisation';
+  const rejectBtn = document.createElement('button');
+  rejectBtn.type = 'button';
+  rejectBtn.className = 'secondary';
+  rejectBtn.textContent = 'Reject proposal';
+  actions.appendChild(approveBtn);
+  actions.appendChild(rejectBtn);
+  card.appendChild(actions);
+
+  const statusLine = document.createElement('div');
+  statusLine.className = 'token-proposal-status';
+  statusLine.textContent = 'Awaiting platform approval.';
+  card.appendChild(statusLine);
+
+  approveBtn.addEventListener('click', () => {
+    handleTokenProposalAction(record, 'approve', { approveBtn, rejectBtn, statusLine }).catch((err) => {
+      console.error('Failed to approve tokenisation proposal', err);
+    });
+  });
+  rejectBtn.addEventListener('click', () => {
+    handleTokenProposalAction(record, 'reject', { approveBtn, rejectBtn, statusLine }).catch((err) => {
+      console.error('Failed to reject tokenisation proposal', err);
+    });
+  });
+
+  return card;
+}
+
+async function handleTokenProposalAction(record, action, controls = {}) {
+  if (!ownerAccessGranted || !platformWrite || !signer) {
+    setTokenProposalStatus('Connect the platform owner wallet before managing tokenisation proposals.', 'error', true);
+    return;
+  }
+  const { approveBtn, rejectBtn, statusLine } = controls;
+  if (approveBtn) approveBtn.disabled = true;
+  if (rejectBtn) rejectBtn.disabled = true;
+  if (tokenRefreshBtn) tokenRefreshBtn.disabled = true;
+  if (statusLine) {
+    statusLine.textContent = action === 'approve' ? 'Submitting approval…' : 'Rejecting proposal…';
+  }
+  try {
+    const listingContract = new Contract(record.listingAddress, LISTING_ABI, signer);
+    const tx =
+      action === 'approve'
+        ? await listingContract.approveTokenisation(record.bookingId)
+        : await listingContract.rejectTokenisation(record.bookingId);
+    setTokenProposalStatus('Waiting for confirmation…', 'info');
+    await tx.wait();
+    const actionText = action === 'approve' ? 'approved' : 'rejected';
+    const message = `Tokenisation ${actionText} for listing #${record.listingIdText} booking #${record.bookingIdText}.`;
+    setTokenProposalStatus(message, 'success', true);
+    if (statusLine) {
+      statusLine.textContent = `Proposal ${actionText}.`;
+    }
+    await loadTokenisationProposals({ quiet: true });
+  } catch (err) {
+    const { message, severity } = interpretError(err);
+    const label = action === 'approve' ? 'approval' : 'rejection';
+    setTokenProposalStatus(`Tokenisation ${label} failed: ${message}`, severity, true);
+    if (statusLine) {
+      statusLine.textContent = `Proposal ${label} failed.`;
+    }
+  } finally {
+    if (approveBtn) approveBtn.disabled = false;
+    if (rejectBtn) rejectBtn.disabled = false;
+    updateTokenProposalControlsEnabled();
+  }
+}
+
+function normalizeTokenProposalRecord({ listingAddress, listingId, landlord, bookingId, bookingRaw, pendingData }) {
+  try {
+    const listingIdBn = BigNumber.from(listingId || 0);
+    const bookingIdBn = BigNumber.from(bookingId || 0);
+    const statusIndex = Number(bookingRaw.status || 0);
+    const statusLabel = STATUS_LABELS[statusIndex] || `Unknown (${statusIndex})`;
+    const statusClass = BOOKING_STATUS_CLASS_MAP[statusIndex] || '';
+    const start = BigNumber.from(bookingRaw.start || 0);
+    const end = BigNumber.from(bookingRaw.end || 0);
+    const duration = end.gt(start) ? end.sub(start) : BigNumber.from(0);
+    const pendingTotal = BigNumber.from(pendingData.totalSqmu || 0);
+    const pendingPrice = BigNumber.from(pendingData.pricePerSqmu || 0);
+    const pendingFee = BigNumber.from(pendingData.feeBps || 0);
+    const pendingPeriod = Number(pendingData.period || 0);
+    let proposer = pendingData.proposer || constants.AddressZero;
+    try {
+      proposer = utils.getAddress(proposer);
+    } catch (err) {
+      console.warn('Unable to normalise token proposer address', proposer, err);
+    }
+    return {
+      listingAddress,
+      listingId: listingIdBn,
+      listingIdText: listingIdBn.toString(),
+      landlord,
+      landlordShort: shortAddress(landlord),
+      bookingId: bookingIdBn,
+      bookingIdText: bookingIdBn.toString(),
+      statusIndex,
+      statusLabel,
+      statusClass,
+      start,
+      end,
+      startLabel: formatTimestamp(start),
+      endLabel: formatTimestamp(end),
+      durationLabel: formatDuration(duration),
+      grossRent: BigNumber.from(bookingRaw.grossRent || bookingRaw.rent || 0),
+      expectedNetRent: BigNumber.from(bookingRaw.expectedNetRent || 0),
+      pending: {
+        totalSqmu: pendingTotal,
+        pricePerSqmu: pendingPrice,
+        feeBps: pendingFee,
+        period: pendingPeriod,
+        periodLabel: TOKEN_PERIOD_LABELS[pendingPeriod] || `Custom (${pendingPeriod})`,
+        proposer,
+        proposerShort: shortAddress(proposer),
+      },
+    };
+  } catch (err) {
+    console.error('Failed to normalise token proposal record', err);
+    return null;
+  }
+}
+
+async function loadTokenisationProposals({ quiet = false } = {}) {
+  if (!tokenProposalListEl) {
+    return;
+  }
+  if (!ownerAccessGranted) {
+    resetTokenProposalState();
+    return;
+  }
+  const requestId = ++tokenProposalLoadCounter;
+  tokenProposalLoading = true;
+  updateTokenProposalControlsEnabled();
+  if (!quiet) {
+    setTokenProposalStatus('Loading tokenisation proposals…', 'info');
+  }
+  try {
+    const listingsRaw = await platformRead.allListings();
+    const addresses = Array.isArray(listingsRaw)
+      ? listingsRaw.filter((addr) => typeof addr === 'string' && addr !== constants.AddressZero)
+      : [];
+    const proposals = [];
+    for (const rawAddress of addresses) {
+      let listingAddress;
+      try {
+        listingAddress = utils.getAddress(rawAddress);
+      } catch (err) {
+        console.warn('Skipping invalid listing address', rawAddress, err);
+        continue;
+      }
+      let listingId;
+      try {
+        listingId = await platformRead.listingIds(listingAddress);
+        if (!listingId || BigNumber.from(listingId).isZero()) {
+          continue;
+        }
+      } catch (err) {
+        console.warn('Unable to resolve listing id for address', listingAddress, err);
+        continue;
+      }
+
+      const listingContract = new Contract(listingAddress, LISTING_ABI, readProvider);
+      let landlordAddress = constants.AddressZero;
+      try {
+        landlordAddress = await listingContract.landlord();
+      } catch (err) {
+        console.warn('Unable to load landlord for listing', listingAddress, err);
+      }
+
+      let nextBookingId = BigNumber.from(0);
+      try {
+        nextBookingId = await listingContract.nextBookingId();
+      } catch (err) {
+        console.warn('Unable to load booking count for listing', listingAddress, err);
+      }
+      const maxBooking = BigInt(nextBookingId.toString());
+      for (let bookingIndex = 1n; bookingIndex < maxBooking; bookingIndex++) {
+        const bookingId = BigNumber.from(bookingIndex.toString());
+        let pendingRaw;
+        try {
+          pendingRaw = await listingContract.pendingTokenisation(bookingId);
+        } catch (err) {
+          console.warn('Unable to load pending tokenisation', listingAddress, bookingIndex.toString(), err);
+          continue;
+        }
+        const pendingData = pendingRaw?.viewData ?? pendingRaw ?? {};
+        if (!toBool(pendingData.exists)) {
+          continue;
+        }
+
+        let bookingRaw;
+        try {
+          bookingRaw = await listingContract.bookingInfo(bookingId);
+        } catch (err) {
+          console.warn('Unable to load booking info for token proposal', listingAddress, bookingIndex.toString(), err);
+          continue;
+        }
+
+        const record = normalizeTokenProposalRecord({
+          listingAddress,
+          listingId,
+          landlord: landlordAddress,
+          bookingId,
+          bookingRaw,
+          pendingData,
+        });
+        if (record) {
+          proposals.push(record);
+        }
+      }
+    }
+
+    if (requestId !== tokenProposalLoadCounter) {
+      return;
+    }
+
+    tokenProposalRecords = proposals;
+    renderTokenProposalList(proposals);
+    if (proposals.length === 0) {
+      setTokenProposalStatus('No pending tokenisation proposals.', 'info');
+    } else {
+      const summary = `Loaded ${proposals.length} tokenisation proposal${proposals.length === 1 ? '' : 's'}.`;
+      setTokenProposalStatus(summary, quiet ? 'info' : 'success', !quiet);
+    }
+  } catch (err) {
+    if (requestId !== tokenProposalLoadCounter) {
+      return;
+    }
+    console.error('Failed to load tokenisation proposals', err);
+    const { message, severity } = interpretError(err);
+    setTokenProposalStatus(`Failed to load tokenisation proposals: ${message}`, severity, true);
+  } finally {
+    if (requestId === tokenProposalLoadCounter) {
+      tokenProposalLoading = false;
+      updateTokenProposalControlsEnabled();
+    }
+  }
 }
 
 function updateBookingRegistryContract() {
@@ -1166,6 +1552,7 @@ connectBtn.addEventListener('click', async () => {
     updateDevConsoleStatus();
     setActionStatus('Owner wallet connected. Loading snapshot…');
     await refreshSnapshot();
+    await loadTokenisationProposals();
   } catch (err) {
     console.error(err);
     const { message, severity } = interpretError(err);
@@ -1201,6 +1588,7 @@ disconnectBtn.addEventListener('click', async () => {
     enableForms(false);
     updateDeregisterControlsEnabled();
     updateDeactivateControlsEnabled();
+    resetTokenProposalState();
     resetOwnerGuardMessage();
     connectBtn.disabled = false;
     setActionStatus('Disconnected.', 'info', true);
@@ -1225,6 +1613,14 @@ if (deregisterListingAddressInput) {
 if (deregisterLookupBtn) {
   deregisterLookupBtn.addEventListener('click', () => {
     lookupDeregisterListingById();
+  });
+}
+
+if (tokenRefreshBtn) {
+  tokenRefreshBtn.addEventListener('click', () => {
+    loadTokenisationProposals().catch((err) => {
+      console.error('Failed to refresh tokenisation proposals', err);
+    });
   });
 }
 

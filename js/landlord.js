@@ -27,6 +27,12 @@ const GEOHASH_ALLOWED_PATTERN = /^[0-9bcdefghjkmnpqrstuvwxyz]+$/;
 const LAT_LON_FILTER_PATTERN = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 const DEFAULT_SORT_MODE = 'created-desc';
 const BOOKING_STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
+const BOOKING_STATUS_CLASS_MAP = {
+  1: 'active',
+  2: 'completed',
+  3: 'cancelled',
+  4: 'defaulted',
+};
 const BOOKING_PERIOD_LABELS = ['Unspecified', 'Daily', 'Weekly', 'Monthly'];
 const PERIOD_OPTIONS = {
   day: { label: 'Daily', value: 1n },
@@ -303,6 +309,72 @@ function formatSqmu(value) {
     return numeric.toLocaleString('en-US');
   }
   return amount.toString();
+}
+
+function formatSqmuProgress(soldValue, totalValue) {
+  const sold = toBigIntOrZero(soldValue);
+  const total = toBigIntOrZero(totalValue);
+  const soldText = `${formatSqmu(sold)} SQMU`;
+  if (total <= 0n) {
+    return soldText;
+  }
+  let percentBasis = 0n;
+  try {
+    percentBasis = (sold * 10000n) / total;
+  } catch {
+    percentBasis = 0n;
+  }
+  const whole = percentBasis / 100n;
+  const fraction = percentBasis % 100n;
+  const percentText = `${whole.toString()}.${fraction.toString().padStart(2, '0')}%`;
+  return `${formatSqmu(sold)} / ${formatSqmu(total)} SQMU (${percentText})`;
+}
+
+function createBookingDetailElement(label, value, options = {}) {
+  const { tooltip } = options || {};
+  const wrapper = document.createElement('div');
+  const labelEl = document.createElement('div');
+  labelEl.className = 'booking-detail-label';
+  labelEl.textContent = label;
+  const valueEl = document.createElement('div');
+  valueEl.className = 'booking-detail-value';
+  if (value instanceof Node) {
+    valueEl.appendChild(value);
+  } else {
+    valueEl.textContent = value;
+  }
+  if (tooltip) {
+    valueEl.title = tooltip;
+  }
+  wrapper.appendChild(labelEl);
+  wrapper.appendChild(valueEl);
+  return wrapper;
+}
+
+function deriveTokenisationState(booking, pending) {
+  const tokenised = Boolean(booking?.tokenised);
+  const pendingExists = Boolean(pending?.exists);
+  if (tokenised) {
+    const total = toBigIntOrZero(booking?.totalSqmu);
+    const sold = toBigIntOrZero(booking?.soldSqmu);
+    const completed = total > 0n && sold >= total;
+    return {
+      state: completed ? 'completed' : 'approved',
+      label: completed ? 'Tokenisation completed' : 'Tokenisation approved',
+      progress: total > 0n ? { sold, total } : null,
+      proposer: booking?.proposer,
+    };
+  }
+  if (pendingExists) {
+    const total = toBigIntOrZero(pending?.totalSqmu);
+    return {
+      state: 'proposed',
+      label: 'Tokenisation proposed',
+      progress: total > 0n ? { sold: 0n, total } : null,
+      proposer: pending?.proposer,
+    };
+  }
+  return { state: 'none', label: 'Not tokenised', progress: null, proposer: booking?.proposer };
 }
 
 function formatTimestamp(ts) {
@@ -895,6 +967,335 @@ async function fetchListingInfo(listingAddr, orderIndex = 0) {
   }
 }
 
+function buildLandlordBookingRecord(listing, bookingId, booking, pending) {
+  if (!booking) return null;
+  let bookingIdValue;
+  try {
+    bookingIdValue = typeof bookingId === 'bigint' ? bookingId : BigInt(bookingId || 0);
+  } catch {
+    bookingIdValue = 0n;
+  }
+  const bookingIdText = bookingIdValue > 0n ? bookingIdValue.toString() : '';
+  const statusIndex = Number(booking.status || 0n);
+  const statusLabel = BOOKING_STATUS_LABELS[statusIndex] || `Unknown (${statusIndex})`;
+  const statusClass = BOOKING_STATUS_CLASS_MAP[statusIndex] || '';
+  const start = toBigIntOrZero(booking.start);
+  const end = toBigIntOrZero(booking.end);
+  const duration = end > start ? end - start : 0n;
+  const periodIndex = Number(booking.period || 0n);
+  const periodLabel = BOOKING_PERIOD_LABELS[periodIndex] || `Custom (${periodIndex})`;
+  const pendingExists = Boolean(pending?.exists);
+  const pendingPeriodIndex = Number(pending?.period || 0);
+  const pendingPeriodLabel = BOOKING_PERIOD_LABELS[pendingPeriodIndex] || `Custom (${pendingPeriodIndex})`;
+  const normalizedPending = pendingExists
+    ? {
+        totalSqmu: toBigIntOrZero(pending.totalSqmu),
+        pricePerSqmu: toBigIntOrZero(pending.pricePerSqmu),
+        feeBps: toBigIntOrZero(pending.feeBps),
+        proposer: pending.proposer,
+        period: pendingPeriodIndex,
+        periodLabel: pendingPeriodLabel,
+      }
+    : null;
+  const tokenState = deriveTokenisationState(booking, pending);
+  const tokenActionLabel =
+    tokenState.state === 'proposed'
+      ? 'Review tokenisation proposal'
+      : tokenState.state === 'approved' || tokenState.state === 'completed'
+        ? 'View investment progress'
+        : 'Propose tokenisation';
+  return {
+    listingId: listing?.listingId,
+    listingIdText: listing?.listingIdText || (listing?.listingId ? listing.listingId.toString() : ''),
+    listingAddress: listing?.address,
+    bookingId: bookingIdValue,
+    bookingIdText,
+    statusIndex,
+    statusLabel,
+    statusClass,
+    start,
+    end,
+    startLabel: formatTimestamp(start),
+    endLabel: formatTimestamp(end),
+    durationLabel: formatDuration(duration),
+    grossRent: toBigIntOrZero(booking.grossRent),
+    expectedNetRent: toBigIntOrZero(booking.expectedNetRent),
+    rentPaid: toBigIntOrZero(booking.rentPaid),
+    deposit: toBigIntOrZero(booking.deposit),
+    tenant: booking.tenant,
+    tenantShort: shortAddress(booking.tenant || ''),
+    periodIndex,
+    periodLabel,
+    tokenised: Boolean(booking.tokenised),
+    totalSqmu: toBigIntOrZero(booking.totalSqmu),
+    soldSqmu: toBigIntOrZero(booking.soldSqmu),
+    pricePerSqmu: toBigIntOrZero(booking.pricePerSqmu),
+    feeBps: toBigIntOrZero(booking.feeBps),
+    tokenState,
+    pending: normalizedPending,
+    pendingExists,
+    tokenActionLabel,
+    pendingPeriodLabel,
+    tokenProposer: booking.proposer,
+    tokenProposerShort: shortAddress(booking.proposer || ''),
+    pendingProposer: normalizedPending?.proposer,
+    pendingProposerShort: normalizedPending?.proposer ? shortAddress(normalizedPending.proposer) : '',
+  };
+}
+
+function renderLandlordBookingTokenSection(record) {
+  const section = document.createElement('div');
+  section.className = 'booking-tokenisation-section';
+
+  const heading = document.createElement('div');
+  heading.className = 'booking-tokenisation-title';
+  heading.textContent = 'Tokenisation';
+  section.appendChild(heading);
+
+  const state = record?.tokenState?.state || 'none';
+  if (state === 'proposed') {
+    const alert = document.createElement('div');
+    alert.className = 'booking-tokenisation-alert';
+    alert.textContent = 'Waiting for platform approval';
+    section.appendChild(alert);
+
+    const details = document.createElement('div');
+    details.className = 'booking-details';
+    details.appendChild(createBookingDetailElement('Proposed SQMU', formatSqmu(record.pending?.totalSqmu)));
+    details.appendChild(
+      createBookingDetailElement('Proposed price', `${formatUsdc(record.pending?.pricePerSqmu)} USDC`)
+    );
+    details.appendChild(createBookingDetailElement('Proposed fee', formatBasisPoints(record.pending?.feeBps)));
+    details.appendChild(createBookingDetailElement('Proposed cadence', record.pendingPeriodLabel || 'Custom'));
+    const proposerText = record.pendingProposerShort || (record.pendingProposer || '—');
+    details.appendChild(
+      createBookingDetailElement('Proposer', proposerText, { tooltip: record.pendingProposer || undefined })
+    );
+    section.appendChild(details);
+
+    const helper = document.createElement('div');
+    helper.className = 'booking-helper-text';
+    helper.textContent = 'Tokenisation proposal submitted. Awaiting platform decision.';
+    section.appendChild(helper);
+    return section;
+  }
+
+  if (state === 'approved' || state === 'completed') {
+    const details = document.createElement('div');
+    details.className = 'booking-details';
+    details.appendChild(createBookingDetailElement('Total SQMU', formatSqmu(record.totalSqmu)));
+    details.appendChild(createBookingDetailElement('Sold SQMU', formatSqmu(record.soldSqmu)));
+    if (record.tokenState?.progress) {
+      details.appendChild(createBookingDetailElement('Progress', formatSqmuProgress(record.soldSqmu, record.totalSqmu)));
+    }
+    details.appendChild(createBookingDetailElement('Price per SQMU', `${formatUsdc(record.pricePerSqmu)} USDC`));
+    details.appendChild(createBookingDetailElement('Token fee', formatBasisPoints(record.feeBps)));
+    details.appendChild(createBookingDetailElement('Token period', record.periodLabel));
+    const proposerText = record.tokenProposerShort || (record.tokenProposer || '—');
+    details.appendChild(
+      createBookingDetailElement('Approved proposer', proposerText, { tooltip: record.tokenProposer || undefined })
+    );
+    section.appendChild(details);
+
+    const helper = document.createElement('div');
+    helper.className = 'booking-helper-text';
+    helper.textContent =
+      state === 'completed'
+        ? 'All SQMU sold. Continue tracking rent distributions from this panel.'
+        : 'Fundraising active. Monitor SQMU sales below.';
+    section.appendChild(helper);
+    return section;
+  }
+
+  const empty = document.createElement('div');
+  empty.className = 'booking-tokenisation-empty';
+  empty.textContent = 'Not tokenised';
+  section.appendChild(empty);
+  return section;
+}
+
+function renderLandlordBookingEntry(listing, record) {
+  const card = document.createElement('article');
+  card.className = 'booking-entry';
+
+  const header = document.createElement('div');
+  header.className = 'booking-entry-header';
+
+  const title = document.createElement('div');
+  title.className = 'booking-entry-title';
+  title.textContent = record.bookingIdText ? `Booking #${record.bookingIdText}` : 'Booking';
+  header.appendChild(title);
+
+  const statusBadge = document.createElement('span');
+  const statusClass = record.statusClass ? ` booking-status-${record.statusClass}` : '';
+  statusBadge.className = `booking-status-badge${statusClass}`;
+  statusBadge.textContent = record.statusLabel;
+  header.appendChild(statusBadge);
+
+  card.appendChild(header);
+
+  const dates = document.createElement('div');
+  dates.className = 'booking-entry-dates';
+  dates.textContent = `Stay: ${record.startLabel} → ${record.endLabel} (${record.durationLabel})`;
+  card.appendChild(dates);
+
+  const details = document.createElement('div');
+  details.className = 'booking-details';
+  details.appendChild(createBookingDetailElement('Gross rent', `${formatUsdc(record.grossRent)} USDC`));
+  details.appendChild(createBookingDetailElement('Rent paid', `${formatUsdc(record.rentPaid)} USDC`));
+  details.appendChild(createBookingDetailElement('Net rent', `${formatUsdc(record.expectedNetRent)} USDC`));
+  details.appendChild(createBookingDetailElement('Deposit', `${formatUsdc(record.deposit)} USDC`));
+  if (record.tenantShort) {
+    details.appendChild(
+      createBookingDetailElement('Tenant', record.tenantShort, { tooltip: record.tenant || undefined })
+    );
+  }
+  card.appendChild(details);
+
+  card.appendChild(renderLandlordBookingTokenSection(record));
+
+  const actions = document.createElement('div');
+  actions.className = 'booking-actions';
+  const manageBtn = document.createElement('button');
+  manageBtn.type = 'button';
+  manageBtn.textContent = record.tokenActionLabel;
+  manageBtn.addEventListener('click', () => {
+    openTokenToolsForBooking(listing, record.bookingId).catch((err) => {
+      console.error('Failed to open token tools via quick action', err);
+    });
+  });
+  actions.appendChild(manageBtn);
+  card.appendChild(actions);
+
+  return card;
+}
+
+function renderLandlordBookings(listing, container, records, statusEl) {
+  if (!container) return;
+  container.innerHTML = '';
+  const list = Array.isArray(records) ? records : [];
+  if (list.length === 0) {
+    if (statusEl) {
+      statusEl.textContent = 'No bookings found for this listing yet.';
+    }
+    return;
+  }
+  for (const record of list) {
+    container.appendChild(renderLandlordBookingEntry(listing, record));
+  }
+  if (statusEl) {
+    statusEl.textContent = `Showing ${list.length} booking${list.length === 1 ? '' : 's'}.`;
+  }
+}
+
+async function fetchListingBookings(listing) {
+  const listingAddr = listing?.address;
+  if (!listingAddr) {
+    throw new Error('Listing address unavailable.');
+  }
+  let nextId;
+  try {
+    nextId = await pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'nextBookingId' });
+  } catch (err) {
+    console.error('Failed to load booking count for listing', listingAddr, err);
+    throw new Error('Unable to load bookings for this listing.');
+  }
+  let maxId;
+  try {
+    maxId = typeof nextId === 'bigint' ? nextId : BigInt(nextId || 0);
+  } catch {
+    maxId = 0n;
+  }
+  if (maxId <= 1n) {
+    return [];
+  }
+  const records = [];
+  let failures = 0;
+  for (let bookingId = 1n; bookingId < maxId; bookingId++) {
+    try {
+      const { booking, pending } = await fetchTokenBookingDetails(listingAddr, bookingId);
+      const record = buildLandlordBookingRecord(listing, bookingId, booking, pending);
+      if (record) {
+        records.push(record);
+      }
+    } catch (err) {
+      failures += 1;
+      console.error('Failed to load booking for listing', listingAddr, bookingId.toString(), err);
+    }
+  }
+  if (records.length === 0 && failures > 0) {
+    throw new Error('Unable to load bookings for this listing.');
+  }
+  records.sort((a, b) => {
+    const left = a?.bookingId || 0n;
+    const right = b?.bookingId || 0n;
+    if (left === right) return 0;
+    return left > right ? -1 : 1;
+  });
+  return records;
+}
+
+async function openTokenToolsForBooking(listing, bookingId, options = {}) {
+  if (!listing || !listing.address) {
+    updateTokenStatus('Listing address unavailable for tokenisation tools.', 'error');
+    return;
+  }
+  const { focus = true } = options;
+  let listingId = listing.listingId;
+  if (typeof listingId !== 'bigint') {
+    try {
+      listingId = listing.listingIdText ? BigInt(listing.listingIdText) : null;
+    } catch {
+      listingId = null;
+    }
+  }
+  if (!listingId || listingId <= 0n) {
+    updateTokenStatus('Listing ID unavailable. Unable to load booking details.', 'error');
+    return;
+  }
+  const bookingIdValue = typeof bookingId === 'bigint' ? bookingId : BigInt(bookingId || 0);
+  if (bookingIdValue <= 0n) {
+    updateTokenStatus('Booking ID unavailable.', 'error');
+    return;
+  }
+  if (tokenEls.listingId) {
+    tokenEls.listingId.value = listingId.toString();
+  }
+  if (tokenEls.bookingId) {
+    tokenEls.bookingId.value = bookingIdValue.toString();
+  }
+  if (focus && tokenEls.section) {
+    try {
+      tokenEls.section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {
+      // ignore scroll errors
+    }
+  }
+  const originalLoadDisabled = tokenEls.load ? tokenEls.load.disabled : false;
+  if (tokenEls.load) {
+    tokenEls.load.disabled = true;
+  }
+  setTokenFormDisabled(true);
+  setTokenStatus('Loading booking details…');
+  try {
+    const { booking, pending } = await fetchTokenBookingDetails(listing.address, bookingIdValue);
+    renderTokenBookingInfo(listing.address, bookingIdValue, booking, pending);
+    applyBookingToTokenForm(booking);
+    tokenToolContext = { listingId, listingAddr: listing.address, bookingId: bookingIdValue };
+    syncTokenProposalState(booking, pending, { preserveStatus: true });
+    updateTokenStatus('Booking details loaded. Adjust parameters and submit to manage tokenisation.', 'success');
+  } catch (err) {
+    console.error('Failed to load booking details via quick action', err);
+    clearTokenBookingInfo();
+    updateTokenStatus(err?.message || 'Unable to load booking details.', 'error');
+  } finally {
+    setTokenFormDisabled(false);
+    if (tokenEls.load) {
+      tokenEls.load.disabled = originalLoadDisabled;
+    }
+  }
+}
+
 function renderLandlordListingCard(listing) {
   const card = document.createElement('div');
   card.className = 'landlord-card';
@@ -1032,6 +1433,80 @@ function renderLandlordListingCard(listing) {
   addressContainer.appendChild(addressValue);
   details.appendChild(addressContainer);
 
+  const bookingsCard = document.createElement('div');
+  bookingsCard.className = 'bookings-card landlord-bookings-card';
+
+  const bookingsHeader = document.createElement('div');
+  bookingsHeader.className = 'bookings-header';
+  const bookingsTitle = document.createElement('h3');
+  bookingsTitle.textContent = 'Bookings';
+  bookingsHeader.appendChild(bookingsTitle);
+  const bookingsRefresh = document.createElement('button');
+  bookingsRefresh.type = 'button';
+  bookingsRefresh.className = 'inline-button small';
+  bookingsRefresh.textContent = 'Refresh';
+  bookingsRefresh.disabled = true;
+  bookingsHeader.appendChild(bookingsRefresh);
+  bookingsCard.appendChild(bookingsHeader);
+
+  const bookingsStatus = document.createElement('div');
+  bookingsStatus.className = 'bookings-status';
+  bookingsStatus.textContent = 'Expand to load bookings.';
+  bookingsCard.appendChild(bookingsStatus);
+
+  const bookingsList = document.createElement('div');
+  bookingsList.className = 'bookings-list';
+  bookingsCard.appendChild(bookingsList);
+
+  details.appendChild(bookingsCard);
+
+  let bookingsLoaded = false;
+  let bookingsLoading = null;
+
+  const loadBookings = async ({ force = false } = {}) => {
+    if (bookingsLoading) {
+      return bookingsLoading;
+    }
+    if (bookingsLoaded && !force) {
+      return;
+    }
+    bookingsLoading = (async () => {
+      bookingsRefresh.disabled = true;
+      bookingsStatus.textContent = 'Loading bookings…';
+      try {
+        const records = await fetchListingBookings(listing);
+        bookingsLoaded = true;
+        renderLandlordBookings(listing, bookingsList, records, bookingsStatus);
+        if (!records || records.length === 0) {
+          bookingsStatus.textContent = 'No bookings found for this listing yet.';
+        }
+      } catch (err) {
+        console.error('Failed to load bookings for listing', listing?.address, err);
+        bookingsStatus.textContent = err?.message || 'Unable to load bookings.';
+        notify({
+          message: 'Unable to load bookings for this listing.',
+          variant: 'error',
+          role: 'landlord',
+          timeout: 6000,
+        });
+      } finally {
+        bookingsLoading = null;
+        bookingsRefresh.disabled = false;
+      }
+    })();
+    try {
+      await bookingsLoading;
+    } finally {
+      bookingsLoading = null;
+    }
+  };
+
+  bookingsRefresh.addEventListener('click', () => {
+    loadBookings({ force: true }).catch((err) => {
+      console.error('Failed to refresh bookings', err);
+    });
+  });
+
   if (listing.geohash) {
     const geohashLine = document.createElement('div');
     geohashLine.className = 'landlord-card-detail';
@@ -1136,6 +1611,11 @@ function renderLandlordListingCard(listing) {
     toggleBtn.setAttribute('aria-label', label);
     toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     summaryMain.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    if (expanded) {
+      loadBookings().catch((err) => {
+        console.error('Failed to load bookings when expanding listing card', err);
+      });
+    }
   };
 
   const toggle = () => {
