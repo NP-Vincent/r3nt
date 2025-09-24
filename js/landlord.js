@@ -27,7 +27,6 @@ const USDC_SCALAR = 1_000_000n;
 const GEOHASH_PRECISION = 7;
 const MANUAL_COORDS_HINT = 'Right-click → “What’s here?” in Google Maps to copy coordinates.';
 const LOCATION_FILTER_PRECISION = 5;
-const GEOHASH_ALLOWED_PATTERN = /^[0-9bcdefghjkmnpqrstuvwxyz]+$/;
 const LAT_LON_FILTER_PATTERN = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 const DEFAULT_SORT_MODE = 'created-desc';
 const BOOKING_STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
@@ -49,7 +48,6 @@ const utf8Encoder = new TextEncoder();
 let platformAbi = Array.isArray(PLATFORM_ABI) && PLATFORM_ABI.length ? PLATFORM_ABI : null;
 let listingPriceCache;
 let listingPriceLoading;
-let locationUpdateSource = null;
 
 function getPeriodKeyFromValue(periodValue) {
   let value;
@@ -86,7 +84,6 @@ const els = {
   status: document.getElementById('status'),
   lat: document.getElementById('lat'),
   lon: document.getElementById('lon'),
-  geohash: document.getElementById('geohash'),
   useLocation: document.getElementById('useLocation'),
   title: document.getElementById('title'),
   shortDesc: document.getElementById('shortDesc'),
@@ -222,24 +219,10 @@ for (const key of onboardingFields) {
   const element = els[key];
   if (element) {
     element.addEventListener('input', updateOnboardingProgress);
-    if (key === 'lat' || key === 'lon') {
-      element.addEventListener('input', updateGeohashFromLatLon);
-      element.addEventListener('blur', updateGeohashFromLatLon);
-    }
   }
 }
 
 updateOnboardingProgress();
-updateGeohashFromLatLon();
-if (els.geohash) {
-  els.geohash.addEventListener('input', () => {
-    handleGeohashInput();
-  });
-  els.geohash.addEventListener('blur', () => {
-    handleGeohashInput();
-    updateGeohashFromLatLon();
-  });
-}
 initGeolocationButton();
 
 if (els.listingSort) {
@@ -528,61 +511,6 @@ function disableWhile(el, fn) {
   })();
 }
 
-function updateGeohashFromLatLon() {
-  if (!els.lat || !els.lon) return;
-  if (locationUpdateSource === 'geohash') return;
-
-  const latRaw = String(els.lat.value ?? '').trim();
-  const lonRaw = String(els.lon.value ?? '').trim();
-  if (!latRaw || !lonRaw) {
-    if (els.geohash && locationUpdateSource !== 'geohash') {
-      els.geohash.value = '';
-    }
-    return;
-  }
-
-  try {
-    const { lat, lon } = parseLatLon(latRaw, lonRaw);
-    const geohash = latLonToGeohash(lat, lon, GEOHASH_PRECISION);
-    if (els.geohash) {
-      locationUpdateSource = 'latlon';
-      els.geohash.value = geohash;
-      locationUpdateSource = null;
-    }
-  } catch {
-  }
-}
-
-function handleGeohashInput() {
-  if (!els.geohash) return;
-  const raw = String(els.geohash.value ?? '').trim().toLowerCase();
-  if (raw !== els.geohash.value) {
-    locationUpdateSource = 'geohash';
-    els.geohash.value = raw;
-    locationUpdateSource = null;
-  }
-
-  if (!raw) {
-    return;
-  }
-
-  if (locationUpdateSource === 'latlon') return;
-
-  try {
-    const coords = geohashToLatLon(raw);
-    if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lon)) {
-      return;
-    }
-    locationUpdateSource = 'geohash';
-    els.lat.value = coords.lat.toFixed(6);
-    els.lon.value = coords.lon.toFixed(6);
-    locationUpdateSource = null;
-    updateOnboardingProgress();
-  } catch (err) {
-    console.warn('Invalid geohash input', raw, err);
-  }
-}
-
 function initGeolocationButton() {
   const button = els.useLocation;
   if (!button) return;
@@ -617,7 +545,6 @@ function initGeolocationButton() {
         assertLatLon(latNum, lonNum);
         els.lat.value = latNum.toFixed(6);
         els.lon.value = lonNum.toFixed(6);
-        updateGeohashFromLatLon();
         updateOnboardingProgress();
         info('Location detected from your browser.');
         notify({
@@ -1179,11 +1106,9 @@ function renderLandlordListingCard(listing) {
   const listingIdText = listing?.listingIdText || (listing?.listingId ? listing.listingId.toString() : '');
   const areaValue = Number(listing.areaSqm ?? 0n);
   const locationLabel =
-    listing?.geohash && typeof listing.geohash === 'string'
-      ? listing.geohash
-      : Number.isFinite(listing?.lat) && Number.isFinite(listing?.lon)
-        ? `${Number(listing.lat).toFixed(5)}, ${Number(listing.lon).toFixed(5)}`
-        : '—';
+    Number.isFinite(listing?.lat) && Number.isFinite(listing?.lon)
+      ? `${Number(listing.lat).toFixed(5)}, ${Number(listing.lon).toFixed(5)}`
+      : '—';
   let focusAvailabilitySection = () => {};
   let openTokenSection = () => {};
 
@@ -1253,10 +1178,6 @@ function renderLandlordListingCard(listing) {
     addressRow.append(copyBtn);
   }
   details.append(addressRow);
-
-  if (listing.geohash) {
-    appendDetail(`Geohash: ${listing.geohash}`);
-  }
 
   if (Number.isFinite(listing.lat) && Number.isFinite(listing.lon)) {
     const latText = Number(listing.lat).toFixed(5);
@@ -1486,11 +1407,7 @@ function parseLocationFilter(rawValue) {
       return { typed: true, applied: false, invalid: true, prefix: '', derivedFrom: 'latlon' };
     }
   }
-  const normalized = raw.toLowerCase();
-  if (!GEOHASH_ALLOWED_PATTERN.test(normalized)) {
-    return { typed: true, applied: false, invalid: true, prefix: '', derivedFrom: 'geohash' };
-  }
-  return { typed: true, applied: true, invalid: false, prefix: normalized, derivedFrom: 'geohash' };
+  return { typed: true, applied: false, invalid: true, prefix: '', derivedFrom: 'latlon' };
 }
 
 function sortListings(listings) {
