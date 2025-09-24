@@ -51,6 +51,13 @@ interface IListingDeposits {
     function confirmDepositSplit(uint256 bookingId, bytes calldata signature) external;
 }
 
+/// @dev Minimal interface exposed by the listing for tokenisation approvals/rejections.
+interface IListingTokenisation {
+    function approveTokenisation(uint256 bookingId) external;
+
+    function rejectTokenisation(uint256 bookingId) external;
+}
+
 /// @dev Minimal interface exposed by the listing for updating its cast hash reference.
 interface IListingCastHash {
     function updateCastHash(bytes32 newCastHash) external;
@@ -447,6 +454,30 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         require(listing != address(0), "listing not found");
 
         IListingDeposits(listing).confirmDepositSplit(bookingId, signature);
+    }
+
+    /**
+     * @notice Approve a pending tokenisation proposal for a given listing booking.
+     * @param listingId Identifier of the listing that owns the booking.
+     * @param bookingId Identifier of the booking whose proposal is being approved.
+     */
+    function approveTokenisation(uint256 listingId, uint256 bookingId) external onlyOwner {
+        address listing = listingById[listingId];
+        require(listing != address(0), "listing not found");
+
+        IListingTokenisation(listing).approveTokenisation(bookingId);
+    }
+
+    /**
+     * @notice Reject and clear a pending tokenisation proposal for a given listing booking.
+     * @param listingId Identifier of the listing that owns the booking.
+     * @param bookingId Identifier of the booking whose proposal is being rejected.
+     */
+    function rejectTokenisation(uint256 listingId, uint256 bookingId) external onlyOwner {
+        address listing = listingById[listingId];
+        require(listing != address(0), "listing not found");
+
+        IListingTokenisation(listing).rejectTokenisation(bookingId);
     }
 
     function updateListingCastHash(uint256 listingId, bytes32 newCastHash) external onlyOwner {
