@@ -204,6 +204,25 @@ function formatDuration(seconds) {
   return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
 }
 
+function formatBps(value) {
+  const bps = toBigInt(value, 0n);
+  const numeric = Number(bps);
+  if (!Number.isFinite(numeric)) {
+    return `${bps.toString()} bps`;
+  }
+  const percent = (numeric / 100).toFixed(2).replace(/\.0+$/, '').replace(/\.([1-9])0$/, '.$1');
+  return `${percent}% (${bps.toString()} bps)`;
+}
+
+function formatSqmu(value) {
+  const amount = toBigInt(value, 0n);
+  const numeric = Number(amount);
+  if (Number.isFinite(numeric) && Math.abs(numeric) <= Number.MAX_SAFE_INTEGER) {
+    return numeric.toLocaleString('en-US');
+  }
+  return amount.toString();
+}
+
 function formatTimestamp(seconds) {
   const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
   if (value <= 0n) return '';
@@ -1004,6 +1023,10 @@ function buildBookingRecord(meta, data, listingInfo) {
   const deposit = toBigInt(data.deposit, 0n);
   const periodValue = Number(toBigInt(data.period, 0n));
   const periodLabel = BOOKING_PERIOD_LABELS[periodValue] || 'Custom';
+  const totalSqmu = toBigInt(data.totalSqmu, 0n);
+  const soldSqmu = toBigInt(data.soldSqmu, 0n);
+  const pricePerSqmu = toBigInt(data.pricePerSqmu, 0n);
+  const feeBps = toBigInt(data.feeBps, 0n);
   const tenant = typeof data.tenant === 'string' ? data.tenant : '0x0000000000000000000000000000000000000000';
   const rentDue = grossRent > rentPaid ? grossRent - rentPaid : 0n;
   const listingTitle = listingInfo ? getListingTitle(listingInfo) : `Listing ${short(listingAddress)}`;
@@ -1049,6 +1072,10 @@ function buildBookingRecord(meta, data, listingInfo) {
     expectedNetRent,
     periodValue,
     periodLabel,
+    totalSqmu,
+    soldSqmu,
+    pricePerSqmu,
+    feeBps,
     tokenised,
     tenant,
     tenantLower: normaliseAddress(tenant),
@@ -1104,10 +1131,33 @@ function renderBookingCard(record) {
     ? `${formatUsdc(record.deposit)} USDC${record.depositReleased ? ' · Released' : ' · Escrowed'}`
     : 'No deposit';
   details.appendChild(createDetailElement('Deposit', depositText));
-  if (record.tokenised) {
-    details.appendChild(createDetailElement('Tokenisation', 'Enabled'));
-  }
   card.appendChild(details);
+
+  const tokenSection = document.createElement('div');
+  tokenSection.className = 'booking-tokenisation-section';
+
+  const tokenHeading = document.createElement('div');
+  tokenHeading.className = 'booking-tokenisation-title';
+  tokenHeading.textContent = 'Tokenisation';
+  tokenSection.appendChild(tokenHeading);
+
+  if (record.tokenised) {
+    const tokenDetails = document.createElement('div');
+    tokenDetails.className = 'booking-details';
+    tokenDetails.appendChild(createDetailElement('Total SQMU', formatSqmu(record.totalSqmu)));
+    tokenDetails.appendChild(createDetailElement('Sold SQMU', formatSqmu(record.soldSqmu)));
+    tokenDetails.appendChild(createDetailElement('Price per SQMU', `${formatUsdc(record.pricePerSqmu)} USDC`));
+    tokenDetails.appendChild(createDetailElement('Tokenisation fee', formatBps(record.feeBps)));
+    tokenDetails.appendChild(createDetailElement('Token period', record.periodLabel));
+    tokenSection.appendChild(tokenDetails);
+  } else {
+    const tokenEmpty = document.createElement('div');
+    tokenEmpty.className = 'booking-tokenisation-empty';
+    tokenEmpty.textContent = 'Not tokenised';
+    tokenSection.appendChild(tokenEmpty);
+  }
+
+  card.appendChild(tokenSection);
 
   const outstandingLine = document.createElement('div');
   outstandingLine.className = 'booking-helper-text';
