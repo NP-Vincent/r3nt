@@ -6,7 +6,7 @@ import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js'
 import { notify, mountNotificationCenter } from './notifications.js';
 import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
-import { createCollapsibleSection } from './ui/accordion.js';
+import { createCollapsibleSection, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
 import {
   PLATFORM_ADDRESS,
@@ -114,6 +114,7 @@ if (els.connect && !els.connect.dataset.defaultLabel) {
 const info = (t) => (els.status.textContent = t);
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'landlord' });
+mountCollapsibles();
 
 const listingUiControllers = new Map();
 let quickAuthReady = false;
