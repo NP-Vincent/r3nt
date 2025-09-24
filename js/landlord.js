@@ -89,8 +89,6 @@ const els = {
   deposit: document.getElementById('deposit'),
   areaSqm: document.getElementById('areaSqm'),
   rateDaily: document.getElementById('rateDaily'),
-  rateWeekly: document.getElementById('rateWeekly'),
-  rateMonthly: document.getElementById('rateMonthly'),
   minNotice: document.getElementById('minNotice'),
   maxWindow: document.getElementById('maxWindow'),
   metadataUrl: document.getElementById('metadataUrl'),
@@ -203,8 +201,6 @@ const onboardingFields = [
   'areaSqm',
   'deposit',
   'rateDaily',
-  'rateWeekly',
-  'rateMonthly',
   'minNotice',
   'maxWindow',
 ];
@@ -536,8 +532,6 @@ function buildMetadataUri(params) {
     areaSqm,
     deposit,
     rateDaily,
-    rateWeekly,
-    rateMonthly,
     fid,
     castHash,
     minBookingNotice,
@@ -561,8 +555,6 @@ function buildMetadataUri(params) {
     deposit: deposit.toString(),
     rates: {
       daily: rateDaily.toString(),
-      weekly: rateWeekly.toString(),
-      monthly: rateMonthly.toString(),
     },
     bookingWindow: {
       minNoticeSeconds: minBookingNotice.toString(),
@@ -735,9 +727,7 @@ function evaluateOnboardingSteps() {
   try {
     const deposit = parseDec6(els.deposit.value);
     const daily = parseOptionalDec6(els.rateDaily.value);
-    const weekly = parseOptionalDec6(els.rateWeekly.value);
-    const monthly = parseOptionalDec6(els.rateMonthly.value);
-    results.pricing = deposit > 0n && (daily > 0n || weekly > 0n || monthly > 0n);
+    results.pricing = deposit > 0n && daily > 0n;
   } catch {
     results.pricing = false;
   }
@@ -759,7 +749,7 @@ function updateOnboardingProgress() {
 
   if (!results.basics) hints.push('Add a title and short description.');
   if (!results.location) hints.push('Provide latitude, longitude and area.');
-  if (!results.pricing) hints.push('Set a deposit and at least one rent rate.');
+  if (!results.pricing) hints.push('Set a deposit and daily rent rate.');
   if (!results.policies) hints.push('Configure booking notice and window.');
 
   if (els.onboardingHints) {
@@ -2887,8 +2877,8 @@ els.create.onclick = () =>
 
       const deposit = parseDec6(els.deposit.value);
       const rateDaily = parseOptionalDec6(els.rateDaily.value);
-      const rateWeekly = parseOptionalDec6(els.rateWeekly.value);
-      const rateMonthly = parseOptionalDec6(els.rateMonthly.value);
+      if (deposit <= 0n) throw new Error('Deposit must be greater than zero.');
+      if (rateDaily <= 0n) throw new Error('Daily rate must be greater than zero.');
 
       const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
       const geohashStr = latLonToGeohash(lat, lon, GEOHASH_PRECISION);
@@ -2943,8 +2933,6 @@ els.create.onclick = () =>
         areaSqm,
         deposit,
         rateDaily,
-        rateWeekly,
-        rateMonthly,
         fid: fidBig,
         castHash,
         minBookingNotice,

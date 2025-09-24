@@ -151,7 +151,7 @@
 
   <div class="guided-section">
     <h3>2. Pricing & size</h3>
-    <p class="section-subtext">Share the deposit, footprint and daily/weekly/monthly rates you want to accept.</p>
+    <p class="section-subtext">Share the deposit, footprint and daily rate you want to accept.</p>
     <div class="field-grid columns-2">
       <label class="field-option">
         <span class="status-dot" aria-hidden="true"></span>
@@ -170,29 +170,13 @@
         </div>
       </label>
     </div>
-    <div class="field-grid columns-3">
+    <div class="field-grid">
       <label class="field-option">
         <span class="status-dot" aria-hidden="true"></span>
         <div class="field-content">
           <span class="field-title">Daily (USDC)</span>
-          <span class="field-hint">Enter 0 to disable daily pricing.</span>
-          <input id="rateDaily"  value="0" inputmode="decimal">
-        </div>
-      </label>
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Weekly (USDC)</span>
-          <span class="field-hint">Enter 0 to disable weekly pricing.</span>
-          <input id="rateWeekly" value="0" inputmode="decimal">
-        </div>
-      </label>
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Monthly (USDC)</span>
-          <span class="field-hint">Enter 0 to disable monthly pricing.</span>
-          <input id="rateMonthly" value="0" inputmode="decimal">
+          <span class="field-hint">Required — sets the on-chain price per day.</span>
+          <input id="rateDaily" value="0" inputmode="decimal">
         </div>
       </label>
     </div>
