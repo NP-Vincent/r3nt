@@ -6,6 +6,7 @@ import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js'
 import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
 import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
+import { actionsFor } from './ui/actions.js';
 import { el } from './ui/dom.js';
 import {
   RPC_URL,
@@ -972,6 +973,16 @@ function renderListings(listings) {
   container.innerHTML = '';
   listings.forEach((L) => {
     const record = listingRecords.get(L.id) || L;
+    const listingActions = actionsFor({
+      role: 'tenant',
+      entity: 'listing',
+      perms: {
+        onPreview: () => selectListing(record),
+        onBook: () => openBookingFlow(record),
+        bookable: record.active !== false,
+      },
+    });
+
     const card = ListingCard({
       id: record.id,
       title: record.displayTitle || record.title || getListingTitle(record),
@@ -980,10 +991,7 @@ function renderListings(listings) {
       areaSqm: Number.isFinite(record.areaSqm) ? record.areaSqm : undefined,
       depositUSDC: toUsdcNumber(record.deposit ?? record.depositAmount),
       status: record.active ? 'Active' : 'Inactive',
-      actions: [
-        { label: 'Preview totals', onClick: () => selectListing(record) },
-        { label: 'Book', onClick: () => openBookingFlow(record), visible: record.active },
-      ],
+      actions: listingActions,
     });
     card.dataset.address = record.address || '';
     card.dataset.displayTitle = record.displayTitle || '';
@@ -1606,8 +1614,16 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
   });
   for (const record of sorted) {
     bookingRecords.set(record.key, record);
+    const baseActions = actionsFor({
+      role: 'tenant',
+      entity: 'booking',
+      perms: {
+        onPay: () => payRent(record),
+        canPay: record.canPayRent,
+      },
+    });
     const actions = [
-      { label: 'Pay rent', onClick: () => payRent(record), visible: record.canPayRent },
+      ...baseActions,
       {
         label: 'Propose tokenisation',
         onClick: () => openTokenProposal(record),
