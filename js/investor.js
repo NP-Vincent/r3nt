@@ -1,5 +1,5 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
-import { createPublicClient, http, encodeFunctionData } from 'https://esm.sh/viem@2.9.32';
+import { createPublicClient, http, encodeFunctionData, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
@@ -11,6 +11,7 @@ import {
   R3NT_ADDRESS,
   R3NT_ABI,
   APP_VERSION,
+  USDC_ADDRESS,
 } from './config.js';
 import createBackController from './back-navigation.js';
 
@@ -1345,23 +1346,66 @@ async function submitInvestment(event) {
 
     const bookingId = selection.bookingIdRaw ?? BigInt(selection.bookingId || 0);
     const sqmuAmount = evaluation.amount;
-    const data = encodeFunctionData({
+    const totalCost = selection.pricePerSqmu * sqmuAmount;
+    if (totalCost <= 0n) {
+      const message = 'Investment amount must be greater than 0 USDC.';
+      setStatus(message);
+      notify({ message, variant: 'warning', role: 'investor', timeout: 5000 });
+      return;
+    }
+    const formattedCost = formatUsdc(totalCost);
+
+    const investData = encodeFunctionData({
       abi: LISTING_ABI,
       functionName: 'invest',
       args: [bookingId, sqmuAmount, ZERO_ADDRESS],
     });
-    const call = { to: selection.listingAddress, data };
+    const investCall = { to: selection.listingAddress, data: investData };
+
+    let allowance = 0n;
+    try {
+      const allowanceRaw = await pub.readContract({
+        address: USDC_ADDRESS,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [from, selection.listingAddress],
+      });
+      allowance = toBigInt(allowanceRaw, 0n);
+    } catch (err) {
+      console.warn('Failed to read USDC allowance before investing', err);
+      allowance = 0n;
+    }
+
+    const needsApproval = allowance < totalCost;
+    let approveData;
+    const calls = [];
+    if (needsApproval) {
+      approveData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [selection.listingAddress, totalCost],
+      });
+      calls.push({ to: USDC_ADDRESS, data: approveData });
+    }
+    calls.push(investCall);
+
     const submitBtn = els.investSubmit;
     if (submitBtn) submitBtn.disabled = true;
-    setStatus('Submitting investment transaction…');
+    setStatus(
+      needsApproval
+        ? `Submitting USDC approval and investment (${formattedCost} USDC)…`
+        : `Submitting investment (${formattedCost} USDC)…`
+    );
 
     let walletSendUnsupported = false;
+    let batchedSuccess = false;
     try {
       const { unsupported } = await requestWalletSendCalls(p, {
-        calls: [call],
+        calls,
         from,
         chainId: ARBITRUM_HEX,
       });
+      batchedSuccess = !unsupported;
       walletSendUnsupported = unsupported;
     } catch (err) {
       if (isUserRejectedRequestError(err)) {
@@ -1372,9 +1416,15 @@ async function submitInvestment(event) {
       throw err;
     }
 
-    if (walletSendUnsupported) {
+    if (!batchedSuccess && walletSendUnsupported) {
       try {
-        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: selection.listingAddress, data }] });
+        if (needsApproval && approveData) {
+          setStatus(`Approve USDC (${formattedCost} USDC).`);
+          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+        }
+        setStatus(`Confirm investment (${formattedCost} USDC).`);
+        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: selection.listingAddress, data: investData }] });
+        batchedSuccess = true;
       } catch (err) {
         if (isUserRejectedRequestError(err)) {
           setStatus('Investment cancelled by user.');
@@ -1385,8 +1435,13 @@ async function submitInvestment(event) {
       }
     }
 
-    setStatus('Investment transaction sent.');
-    notify({ message: 'Investment transaction sent.', variant: 'success', role: 'investor', timeout: 6000 });
+    setStatus(`Investment submitted (${formattedCost} USDC).`);
+    notify({
+      message: `Investment submitted (${formattedCost} USDC).`,
+      variant: 'success',
+      role: 'investor',
+      timeout: 6000,
+    });
 
     if (els.investSqmuInput) {
       els.investSqmuInput.value = '';
