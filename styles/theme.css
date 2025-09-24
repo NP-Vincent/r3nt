@@ -1256,6 +1256,21 @@ dl.summary-breakdown dd {
   color: var(--color-muted);
 }
 
+.landlord-bookings-card {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  background: rgba(248, 249, 254, 0.6);
+}
+
+.landlord-bookings-card .bookings-header h3 {
+  margin: 0;
+}
+
+.landlord-bookings-card .bookings-status {
+  margin-top: -4px;
+}
+
 .data-list {
   display: flex;
   flex-direction: column;
