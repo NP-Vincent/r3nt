@@ -7,7 +7,8 @@ import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
 import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
-import { el } from './ui/dom.js';
+import { createCollapsibleSection } from './ui/accordion.js';
+import { el, fmt } from './ui/dom.js';
 import {
   RPC_URL,
   REGISTRY_ADDRESS,
@@ -51,6 +52,11 @@ const els = {
 };
 const tokenProposalHost = document.getElementById('tokenProposalPanel');
 
+if (tokenProposalHost) {
+  tokenProposalHost.hidden = true;
+  tokenProposalHost.innerHTML = '';
+}
+
 if (els.connect && !els.connect.dataset.defaultLabel) {
   const initialLabel = (els.connect.textContent || '').trim();
   if (initialLabel) {
@@ -76,6 +82,8 @@ const listingInfoCache = new Map();
 const bookingRecords = new Map();
 const listingRecords = new Map();
 let activeTokenProposalKey = null;
+let activeTokenProposalPanel = null;
+let activeTokenProposalCard = null;
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
 
@@ -185,14 +193,7 @@ const supportsViewPassPurchase = PLATFORM_ABI.some(
   (item) => item?.type === 'function' && item?.name === 'buyViewPass'
 );
 
-function formatUsdc(amount) {
-  const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
-  const negative = value < 0n;
-  const abs = negative ? -value : value;
-  const units = abs / USDC_SCALAR;
-  const fraction = (abs % USDC_SCALAR).toString().padStart(6, '0').replace(/0+$/, '');
-  return `${negative ? '-' : ''}${units.toString()}${fraction ? '.' + fraction : ''}`;
-}
+
 
 function decodeBytes32ToString(value, precision) {
   const hex = typeof value === 'string' ? value : '';
@@ -212,64 +213,13 @@ function decodeBytes32ToString(value, precision) {
   return out;
 }
 
-function formatDuration(seconds) {
-  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
-  if (value <= 0n) return 'None';
-  const totalSeconds = Number(value);
-  if (!Number.isFinite(totalSeconds)) return `${value} sec`;
-  const days = Math.floor(totalSeconds / 86400);
-  const remainder = totalSeconds % 86400;
-  if (days > 0 && remainder === 0) {
-    return `${days} day${days === 1 ? '' : 's'}`;
-  }
-  if (days > 0) {
-    const hours = Math.round(remainder / 3600);
-    if (hours === 0) {
-      return `${days} day${days === 1 ? '' : 's'}`;
-    }
-    return `${days} day${days === 1 ? '' : 's'} ${hours} h`;
-  }
-  const hoursOnly = Math.max(1, Math.round(totalSeconds / 3600));
-  return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
-}
 
-function formatBps(value) {
-  const bps = toBigInt(value, 0n);
-  const numeric = Number(bps);
-  if (!Number.isFinite(numeric)) {
-    return `${bps.toString()} bps`;
-  }
-  const percent = (numeric / 100).toFixed(2).replace(/\.0+$/, '').replace(/\.([1-9])0$/, '.$1');
-  return `${percent}% (${bps.toString()} bps)`;
-}
 
-function formatSqmu(value) {
-  const amount = toBigInt(value, 0n);
-  const numeric = Number(amount);
-  if (Number.isFinite(numeric) && Math.abs(numeric) <= Number.MAX_SAFE_INTEGER) {
-    return numeric.toLocaleString('en-US');
-  }
-  return amount.toString();
-}
 
-function formatTimestamp(seconds) {
-  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
-  if (value <= 0n) return '';
-  let asNumber;
-  try {
-    asNumber = Number(value);
-  } catch {
-    return `Unix ${value}`;
-  }
-  if (!Number.isFinite(asNumber) || Number.isNaN(asNumber)) {
-    return `Unix ${value}`;
-  }
-  const date = new Date(asNumber * 1000);
-  if (Number.isNaN(date.getTime())) {
-    return `Unix ${value}`;
-  }
-  return date.toUTCString();
-}
+
+
+
+
 
 function extractErrorMessage(error) {
   let current = error;
@@ -353,33 +303,9 @@ function toBigInt(value, fallback = 0n) {
   return fallback;
 }
 
-function toUsdcNumber(value) {
-  const amount = toBigInt(value, 0n);
-  const numeric = Number(amount);
-  if (!Number.isFinite(numeric) || Number.isNaN(numeric)) {
-    return 0;
-  }
-  return numeric / 1_000_000;
-}
 
-function formatDateLabel(seconds) {
-  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
-  if (value <= 0n) return '—';
-  let numeric;
-  try {
-    numeric = Number(value);
-  } catch {
-    return `Unix ${value}`;
-  }
-  if (!Number.isFinite(numeric) || Number.isNaN(numeric)) {
-    return `Unix ${value}`;
-  }
-  const date = new Date(numeric * 1000);
-  if (Number.isNaN(date.getTime())) {
-    return `Unix ${value}`;
-  }
-  return date.toISOString().slice(0, 10);
-}
+
+
 
 function parseUsdcInput(raw) {
   if (typeof raw !== 'string') return null;
@@ -531,8 +457,8 @@ function getListingSubtitle(info) {
   if (!info) {
     return 'Select a property to preview totals.';
   }
-  const daily = formatUsdc(info.baseDailyRate);
-  const deposit = formatUsdc(info.depositAmount);
+  const daily = fmt.usdc(info.baseDailyRate);
+  const deposit = fmt.usdc(info.depositAmount);
   return `Base ${daily} USDC/day · Deposit ${deposit} USDC`;
 }
 
@@ -553,10 +479,10 @@ function updateSummary() {
   setText(summary.title, title);
   setText(summary.subtitle, listing ? getListingSubtitle(listing) : 'Select a property to preview totals.');
   setText(summary.nights, '—');
-  setText(summary.deposit, listing ? (depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : 'No deposit') : '—');
+  setText(summary.deposit, listing ? (depositAmount > 0n ? `${fmt.usdc(depositAmount)} USDC` : 'No deposit') : '—');
   setText(summary.rent, listing ? '0 USDC' : '—');
   setText(summary.installment, listing ? 'Select how often to pay rent' : '—');
-  setText(summary.total, listing ? (depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : '0 USDC') : '—');
+  setText(summary.total, listing ? (depositAmount > 0n ? `${fmt.usdc(depositAmount)} USDC` : '0 USDC') : '—');
   setText(summary.notice, listing ? 'Select stay dates to continue.' : 'Pick a property to enable booking.');
 
   const requiresPass = viewPassRequired && !hasActiveViewPass;
@@ -567,7 +493,7 @@ function updateSummary() {
   if (els.confirmBooking) {
     els.confirmBooking.disabled = true;
     els.confirmBooking.textContent = depositAmount > 0n
-      ? `Book with ${formatUsdc(depositAmount)} USDC deposit`
+      ? `Book with ${fmt.usdc(depositAmount)} USDC deposit`
       : 'Book stay';
   }
 
@@ -610,24 +536,24 @@ function updateSummary() {
   setText(summary.nights, `${nights} night${nights === 1 ? '' : 's'}`);
 
   const rent = calculateRent(listing.baseDailyRate, startTs, endTs);
-  setText(summary.rent, rent > 0n ? `${formatUsdc(rent)} USDC` : '0 USDC');
+  setText(summary.rent, rent > 0n ? `${fmt.usdc(rent)} USDC` : '0 USDC');
 
   const installmentCap = calculateInstallmentCap(rent, startTs, endTs, selectedPeriod.days);
   setText(
     summary.installment,
     installmentCap > 0n
-      ? `${selectedPeriod.label} up to ${formatUsdc(installmentCap)} USDC`
+      ? `${selectedPeriod.label} up to ${fmt.usdc(installmentCap)} USDC`
       : `${selectedPeriod.label} payments`
   );
 
-  setText(summary.total, depositAmount > 0n ? `${formatUsdc(depositAmount)} USDC` : '0 USDC');
+  setText(summary.total, depositAmount > 0n ? `${fmt.usdc(depositAmount)} USDC` : '0 USDC');
 
   if (requiresPass) {
     setText(summary.notice, 'Purchase a view pass to unlock bookings.');
     if (els.confirmBooking) {
       els.confirmBooking.disabled = true;
       els.confirmBooking.textContent = depositAmount > 0n
-        ? `Book with ${formatUsdc(depositAmount)} USDC deposit`
+        ? `Book with ${fmt.usdc(depositAmount)} USDC deposit`
         : 'Book stay';
     }
     return;
@@ -638,7 +564,7 @@ function updateSummary() {
   if (els.confirmBooking) {
     els.confirmBooking.disabled = false;
     els.confirmBooking.textContent = depositAmount > 0n
-      ? `Book with ${formatUsdc(depositAmount)} USDC deposit`
+      ? `Book with ${fmt.usdc(depositAmount)} USDC deposit`
       : 'Book stay';
   }
 }
@@ -717,10 +643,10 @@ function openBookingFlow(listing) {
 function updateBuyLabel() {
   const parts = [];
   if (typeof viewPassPrice === 'bigint') {
-    parts.push(`${formatUsdc(viewPassPrice)} USDC`);
+    parts.push(`${fmt.usdc(viewPassPrice)} USDC`);
   }
   if (typeof viewPassDuration === 'bigint' && viewPassDuration > 0n) {
-    parts.push(formatDuration(viewPassDuration));
+    parts.push(fmt.duration(viewPassDuration));
   }
   els.buy.textContent = parts.length ? `Buy View Pass (${parts.join(' / ')})` : 'Buy View Pass';
 }
@@ -987,9 +913,9 @@ function renderListings(listings) {
       id: record.id,
       title: record.displayTitle || record.title || getListingTitle(record),
       location: record.locationPill || getListingLocationPill(record),
-      pricePerDayUSDC: toUsdcNumber(record.baseDailyRate),
+      pricePerDayUSDC: record.baseDailyRate,
       areaSqm: Number.isFinite(record.areaSqm) ? record.areaSqm : undefined,
-      depositUSDC: toUsdcNumber(record.deposit ?? record.depositAmount),
+      depositUSDC: record.deposit ?? record.depositAmount,
       status: record.active ? 'Active' : 'Inactive',
       actions: listingActions,
     });
@@ -1003,8 +929,8 @@ function renderListings(listings) {
       }
     }
 
-    const minNoticeText = formatDuration(record.minBookingNotice);
-    const maxWindowText = record.maxBookingWindow > 0n ? formatDuration(record.maxBookingWindow) : 'Unlimited';
+    const minNoticeText = fmt.duration(record.minBookingNotice);
+    const maxWindowText = record.maxBookingWindow > 0n ? fmt.duration(record.maxBookingWindow) : 'Unlimited';
     card.append(el('div', { class: 'card-footnote' }, `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`));
 
     if (record.geohash || (Number.isFinite(record.lat) && Number.isFinite(record.lon))) {
@@ -1144,8 +1070,8 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
     statusClass: statusMeta.className,
     start,
     end,
-    startLabel: formatDateLabel(start),
-    endLabel: formatDateLabel(end),
+    startLabel: fmt.date(start),
+    endLabel: fmt.date(end),
     grossRent,
     rentPaid,
     rentDue,
@@ -1192,6 +1118,11 @@ function isTokenisationEligible(record, account = connectedAccount) {
 
 function closeTokenProposal() {
   activeTokenProposalKey = null;
+  if (activeTokenProposalPanel?.section) {
+    activeTokenProposalPanel.section.remove();
+  }
+  activeTokenProposalPanel = null;
+  activeTokenProposalCard = null;
   if (tokenProposalHost) {
     tokenProposalHost.innerHTML = '';
     tokenProposalHost.hidden = true;
@@ -1217,51 +1148,64 @@ function openTokenProposal(booking) {
     return;
   }
 
+  closeTokenProposal();
   activeTokenProposalKey = record.key;
   if (tokenProposalHost) {
-    tokenProposalHost.hidden = false;
+    tokenProposalHost.hidden = true;
     tokenProposalHost.innerHTML = '';
-
-    const summary = el('div', { class: 'card-footnote' }, `Stay: ${record.startLabel} → ${record.endLabel} · Rent ${formatUsdc(record.grossRent)} USDC`);
-
-    let form;
-    form = TokenisationCard({
-      bookingId: record.bookingIdText || record.bookingId.toString(),
-      mode: 'propose',
-      onSubmit: async (values) => {
-        const controls = Array.from(form.querySelectorAll('input, select, button'));
-        controls.forEach((node) => { node.disabled = true; });
-        try {
-          const success = await submitTokenisationProposalForTenant(record, values);
-          if (success) {
-            closeTokenProposal();
-            try {
-              await loadTenantBookings(connectedAccount, { force: true, showBusyLabel: true });
-            } catch (err) {
-              console.warn('Failed to refresh bookings after tokenisation proposal', err);
-            }
-          }
-        } finally {
-          controls.forEach((node) => { node.disabled = false; });
-        }
-      },
-    });
-
-    const periodSelect = form.querySelector('select[name="period"]');
-    const requiredKey = getPeriodKeyFromValue(record.periodValue);
-    if (periodSelect && requiredKey && periodSelect.querySelector(`option[value="${requiredKey}"]`)) {
-      periodSelect.value = requiredKey;
-    }
-
-    tokenProposalHost.append(form);
-    tokenProposalHost.append(summary);
-
-    try {
-      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch {}
   }
-}
 
+  const card = els.bookings?.list?.querySelector(`[data-booking-key="${record.key}"]`);
+  if (!card) {
+    notify({ message: 'Unable to locate booking card for tokenisation form.', variant: 'error', role: 'tenant', timeout: 5000 });
+    return;
+  }
+
+  const panel = createCollapsibleSection('Tokenisation', { classes: ['booking-tokenisation-panel'] });
+  panel.section.dataset.bookingKey = record.key;
+  activeTokenProposalPanel = panel;
+  activeTokenProposalCard = card;
+
+  const form = TokenisationCard({
+    bookingId: record.bookingIdText || record.bookingId.toString(),
+    mode: 'propose',
+    onSubmit: async (values) => {
+      const controls = Array.from(form.querySelectorAll('input, select, button'));
+      controls.forEach((node) => { node.disabled = true; });
+      try {
+        const success = await submitTokenisationProposalForTenant(record, values);
+        if (success) {
+          closeTokenProposal();
+          try {
+            await loadTenantBookings(connectedAccount, { force: true, showBusyLabel: true });
+          } catch (err) {
+            console.warn('Failed to refresh bookings after tokenisation proposal', err);
+          }
+        }
+      } finally {
+        controls.forEach((node) => { node.disabled = false; });
+      }
+    },
+  });
+
+  const periodSelect = form.querySelector('select[name="period"]');
+  const requiredKey = getPeriodKeyFromValue(record.periodValue);
+  if (periodSelect && requiredKey && periodSelect.querySelector(`option[value="${requiredKey}"]`)) {
+    periodSelect.value = requiredKey;
+  }
+
+  panel.content.append(form);
+  panel.content.append(
+    el('div', { class: 'card-footnote' }, `Stay: ${record.startLabel} → ${record.endLabel} · Rent ${fmt.usdc(record.grossRent)} USDC`),
+  );
+
+  card.append(panel.section);
+  panel.setOpen(true);
+
+  try {
+    panel.section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch {}
+}
 async function submitTokenisationProposalForTenant(record, { amount, totalSqmu, price, pricePerSqmu, fee, feeBps, period }) {
   const target = record && record.key ? bookingRecords.get(record.key) || record : record;
   if (!target) {
@@ -1450,7 +1394,7 @@ async function cancelBookingForTenant(recordKeyOrRecord, button) {
   }
 
     const confirmationMessage = record.deposit > 0n
-      ? `Cancel booking #${record.bookingIdText}? Your ${formatUsdc(record.deposit)} USDC deposit will be refunded automatically.`
+      ? `Cancel booking #${record.bookingIdText}? Your ${fmt.usdc(record.deposit)} USDC deposit will be refunded automatically.`
       : `Cancel booking #${record.bookingIdText}? This frees up the stay for other tenants.`;
   const confirmed = window.confirm(confirmationMessage);
   if (!confirmed) {
@@ -1538,7 +1482,7 @@ async function cancelBookingForTenant(recordKeyOrRecord, button) {
 
     els.status.textContent = 'Cancellation submitted.';
     const successMessage = record.deposit > 0n
-      ? `Booking cancelled. Your ${formatUsdc(record.deposit)} USDC deposit will be returned.`
+      ? `Booking cancelled. Your ${fmt.usdc(record.deposit)} USDC deposit will be returned.`
       : 'Booking cancelled. No deposit was held.';
     notify({
       message: successMessage,
@@ -1643,27 +1587,27 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
       listingId: record.listingTitle || short(record.listingAddress),
       dates: `${record.startLabel} → ${record.endLabel}`,
       period: record.periodLabel,
-      depositUSDC: toUsdcNumber(record.deposit),
-      rentUSDC: toUsdcNumber(record.grossRent),
+      depositUSDC: record.deposit,
+      rentUSDC: record.grossRent,
       status: record.statusLabel,
       actions,
     });
     card.dataset.bookingKey = record.key;
     card.append(el('div', { class: 'card-footnote' }, record.listingTitle));
     const rentFootnote = record.rentDue > 0n
-      ? `Outstanding rent: ${formatUsdc(record.rentDue)} USDC`
+      ? `Outstanding rent: ${fmt.usdc(record.rentDue)} USDC`
       : 'All rent settled.';
     card.append(el('div', { class: 'card-footnote' }, rentFootnote));
     if (record.tokenised) {
       card.append(
-        el('div', { class: 'card-footnote' }, `Tokenised · ${formatSqmu(record.totalSqmu)} SQMU · ${formatUsdc(record.pricePerSqmu)} USDC`),
+        el('div', { class: 'card-footnote' }, `Tokenised · ${fmt.sqmu(record.totalSqmu)} SQMU · ${fmt.usdc(record.pricePerSqmu)} USDC`),
       );
     } else if (record.pendingTokenisationExists && record.pendingTokenisation) {
       card.append(
         el(
           'div',
           { class: 'card-footnote' },
-          `Pending tokenisation · ${formatSqmu(record.pendingTokenisation.totalSqmu)} SQMU @ ${formatUsdc(record.pendingTokenisation.pricePerSqmu)} USDC (${formatBps(record.pendingTokenisation.feeBps)})`,
+          `Pending tokenisation · ${fmt.sqmu(record.pendingTokenisation.totalSqmu)} SQMU @ ${fmt.usdc(record.pendingTokenisation.pricePerSqmu)} USDC (${fmt.bps(record.pendingTokenisation.feeBps)})`,
         ),
       );
     } else if (!isTokenisationEligible(record)) {
@@ -1684,7 +1628,9 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
     statusEl.textContent = `Showing ${sorted.length} booking${sorted.length === 1 ? '' : 's'}.`;
   }
 
-  if (activeTokenProposalKey) {
+  if (activeTokenProposalPanel?.section && !document.body.contains(activeTokenProposalPanel.section)) {
+    closeTokenProposal();
+  } else if (activeTokenProposalKey) {
     const contextRecord = bookingRecords.get(activeTokenProposalKey);
     if (!contextRecord || contextRecord.tokenised || contextRecord.pendingTokenisationExists || !isTokenisationEligible(contextRecord)) {
       closeTokenProposal();
@@ -1944,10 +1890,10 @@ async function bookListing(listing = selectedListing){
     if (!selectedPeriod) throw new Error("Select how often you'll pay rent.");
     const nowTs = BigInt(Math.floor(Date.now() / 1000));
     if (listing.minBookingNotice > 0n && startTs < nowTs + listing.minBookingNotice) {
-      throw new Error(`Start must respect the ${formatDuration(listing.minBookingNotice)} minimum notice.`);
+      throw new Error(`Start must respect the ${fmt.duration(listing.minBookingNotice)} minimum notice.`);
     }
     if (listing.maxBookingWindow > 0n && startTs > nowTs + listing.maxBookingWindow) {
-      throw new Error(`Start beyond allowed booking window (${formatDuration(listing.maxBookingWindow)}).`);
+      throw new Error(`Start beyond allowed booking window (${fmt.duration(listing.maxBookingWindow)}).`);
     }
 
     const available = await pub.readContract({
@@ -2008,10 +1954,10 @@ async function bookListing(listing = selectedListing){
       await p.request({ method: 'eth_sendTransaction', params: [{ from, to: listing.address, data: bookData }] });
     };
 
-    const depositMsg = deposit > 0n ? `${formatUsdc(deposit)} USDC deposit` : 'no deposit';
-    const rentMsg = rent > 0n ? `${formatUsdc(rent)} USDC rent` : '0 USDC rent';
+    const depositMsg = deposit > 0n ? `${fmt.usdc(deposit)} USDC deposit` : 'no deposit';
+    const rentMsg = rent > 0n ? `${fmt.usdc(rent)} USDC rent` : '0 USDC rent';
     const cadenceMsg = installmentCap > 0n
-      ? `${selectedPeriod.label} payments up to ${formatUsdc(installmentCap)} USDC`
+      ? `${selectedPeriod.label} payments up to ${fmt.usdc(installmentCap)} USDC`
       : `${selectedPeriod.label} payments`;
     const approvalNotice = needsApproval
       ? ' Confirm the approval and booking when prompted.'
@@ -2146,18 +2092,18 @@ async function checkViewPass(){
 
     if (active) {
       const remaining = expiry > now ? expiry - now : 0n;
-      const remainingLabel = remaining > 0n ? formatDuration(remaining) : 'Expiring soon';
-      const expiresAt = formatTimestamp(expiry);
+      const remainingLabel = remaining > 0n ? fmt.duration(remaining) : 'Expiring soon';
+      const expiresAt = fmt.timestamp(expiry);
       if (hasDurationValue) {
         els.status.textContent = `View pass active (${remainingLabel}${expiresAt ? `, expires ${expiresAt}` : ''}).`;
       } else {
         els.status.textContent = 'View pass active.';
       }
     } else {
-      const expiredAt = expiry > 0n ? formatTimestamp(expiry) : '';
+      const expiredAt = expiry > 0n ? fmt.timestamp(expiry) : '';
       let requirement;
       if (typeof viewPassPrice === 'bigint' && viewPassPrice > 0n) {
-        requirement = ` Purchase required (${formatUsdc(viewPassPrice)} USDC).`;
+        requirement = ` Purchase required (${fmt.usdc(viewPassPrice)} USDC).`;
       } else if (!hasDurationValue) {
         requirement = ' Unable to load pass details — assume purchase required.';
       } else {
@@ -2306,7 +2252,7 @@ async function payRent(record, options = {}) {
     return;
   }
 
-  const defaultAmount = target.rentDue > 0n ? formatUsdc(target.rentDue) : '';
+  const defaultAmount = target.rentDue > 0n ? fmt.usdc(target.rentDue) : '';
   const promptValue = options.amount ?? window.prompt('Enter rent amount in USDC', defaultAmount);
   if (promptValue === null || promptValue === undefined) {
     return;
@@ -2322,7 +2268,7 @@ async function payRent(record, options = {}) {
   }
   if (target.rentDue > 0n && parsedAmount > target.rentDue) {
     notify({
-      message: `You can pay at most ${formatUsdc(target.rentDue)} USDC right now.`,
+      message: `You can pay at most ${fmt.usdc(target.rentDue)} USDC right now.`,
       variant: 'warning',
       role: 'tenant',
       timeout: 5000,
@@ -2379,7 +2325,7 @@ async function payRent(record, options = {}) {
     });
     calls.push({ to: target.listingAddress, data: payData });
 
-    els.status.textContent = `Submitting rent payment (${formatUsdc(parsedAmount)} USDC)…`;
+    els.status.textContent = `Submitting rent payment (${fmt.usdc(parsedAmount)} USDC)…`;
 
     let walletSendUnsupported = false;
     let batchedSuccess = false;
@@ -2402,17 +2348,17 @@ async function payRent(record, options = {}) {
 
     if (!batchedSuccess && walletSendUnsupported) {
       if (needsApproval && approveData) {
-        els.status.textContent = `Approve USDC, then confirm rent payment (${formatUsdc(parsedAmount)} USDC).`;
+        els.status.textContent = `Approve USDC, then confirm rent payment (${fmt.usdc(parsedAmount)} USDC).`;
         await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
       } else {
-        els.status.textContent = `Confirm rent payment (${formatUsdc(parsedAmount)} USDC).`;
+        els.status.textContent = `Confirm rent payment (${fmt.usdc(parsedAmount)} USDC).`;
       }
       await p.request({ method: 'eth_sendTransaction', params: [{ from, to: target.listingAddress, data: payData }] });
     }
 
     els.status.textContent = 'Rent payment submitted.';
     notify({
-      message: `Rent payment of ${formatUsdc(parsedAmount)} USDC submitted.`,
+      message: `Rent payment of ${fmt.usdc(parsedAmount)} USDC submitted.`,
       variant: 'success',
       role: 'tenant',
       timeout: 6000,
