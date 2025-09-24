@@ -66,6 +66,9 @@ mountNotificationCenter(document.getElementById('notificationTray'), { role: 'in
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 let provider;
 const state = { account: null, holdings: [], selectedBooking: null };
+let investorDataLoading = false;
+const investorListingEventWatchers = new Map();
+const investorEventRefreshState = { timer: null, messages: new Set(), running: false };
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
 backController.update();
@@ -87,6 +90,33 @@ function shortAddress(addr) {
   if (typeof addr !== 'string') return '';
   if (!addr.startsWith('0x') || addr.length < 10) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function normaliseAddress(addr) {
+  if (typeof addr !== 'string') {
+    return '';
+  }
+  return addr.trim().toLowerCase();
+}
+
+function toBigInt(value, fallback = 0n) {
+  if (typeof value === 'bigint') {
+    return value;
+  }
+  try {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return BigInt(value);
+    }
+    if (typeof value === 'string' && value.trim()) {
+      return BigInt(value.trim());
+    }
+    if (value === null || value === undefined) {
+      return fallback;
+    }
+    return BigInt(value);
+  } catch {
+    return fallback;
+  }
 }
 
 function makeBookingKey(listingAddress, bookingId) {
@@ -296,8 +326,15 @@ function setStatus(message) {
 }
 
 function updateConnectedAccount(addr) {
+  const previousAccount = state.account;
+  const previousNormalised = normaliseAddress(previousAccount);
   const value = typeof addr === 'string' ? addr : null;
+  const nextNormalised = normaliseAddress(value);
   state.account = value;
+  if (!value || (previousNormalised && nextNormalised && previousNormalised !== nextNormalised)) {
+    resetInvestorRefreshQueue();
+    clearInvestorEventWatchers();
+  }
   if (els.connect) {
     if (!els.connect.dataset.defaultLabel) {
       const initialLabel = (els.connect.textContent || '').trim();
@@ -623,6 +660,200 @@ function syncSelectedBooking(entries) {
   }
   state.selectedBooking = updated;
   updateInvestSelectionUI({ preserveInput: true });
+}
+
+function resetInvestorRefreshQueue() {
+  if (investorEventRefreshState.timer) {
+    clearTimeout(investorEventRefreshState.timer);
+    investorEventRefreshState.timer = null;
+  }
+  investorEventRefreshState.messages.clear();
+  investorEventRefreshState.running = false;
+}
+
+function clearInvestorEventWatchers() {
+  for (const unwatchers of investorListingEventWatchers.values()) {
+    for (const stop of unwatchers) {
+      try {
+        if (typeof stop === 'function') {
+          stop();
+        }
+      } catch (err) {
+        console.warn('Failed to remove investor event watcher', err);
+      }
+    }
+  }
+  investorListingEventWatchers.clear();
+}
+
+function queueInvestorDataRefresh(message) {
+  if (!state.account) {
+    return;
+  }
+  if (message) {
+    investorEventRefreshState.messages.add(message);
+  }
+  if (investorEventRefreshState.timer) {
+    return;
+  }
+  investorEventRefreshState.timer = setTimeout(processInvestorEventRefresh, 1200);
+}
+
+async function processInvestorEventRefresh() {
+  investorEventRefreshState.timer = null;
+  if (!state.account) {
+    investorEventRefreshState.messages.clear();
+    investorEventRefreshState.running = false;
+    return;
+  }
+  if (investorDataLoading || investorEventRefreshState.running) {
+    investorEventRefreshState.timer = setTimeout(processInvestorEventRefresh, 1200);
+    return;
+  }
+  const messages = Array.from(investorEventRefreshState.messages);
+  investorEventRefreshState.messages.clear();
+  investorEventRefreshState.running = true;
+  const summary = messages.length ? messages.join(' • ') : 'On-chain update detected';
+  setStatus(`${summary}. Refreshing dashboards…`);
+  let success = false;
+  try {
+    success = await loadInvestorData(state.account, { silent: true });
+  } catch (err) {
+    console.error('Investor dashboard refresh failed', err);
+  }
+  if (success) {
+    setStatus(`${summary}. Dashboards updated.`);
+  }
+  investorEventRefreshState.running = false;
+  if (investorEventRefreshState.messages.size > 0) {
+    investorEventRefreshState.timer = setTimeout(processInvestorEventRefresh, 1200);
+  }
+}
+
+function createInvestorListingWatchers(listingAddress) {
+  const watchers = [];
+  const register = (eventName, handler) => {
+    try {
+      const unwatch = pub.watchContractEvent({
+        address: listingAddress,
+        abi: LISTING_ABI,
+        eventName,
+        pollingInterval: 8000,
+        onLogs: (logs) => {
+          if (!Array.isArray(logs) || logs.length === 0) {
+            return;
+          }
+          for (const log of logs) {
+            try {
+              handler(log);
+            } catch (err) {
+              console.error(`Investor event handler error (${eventName})`, err);
+            }
+          }
+        },
+        onError: (err) => {
+          console.error(`Investor event watcher error (${eventName})`, err);
+        },
+      });
+      if (typeof unwatch === 'function') {
+        watchers.push(unwatch);
+      }
+    } catch (err) {
+      console.error('Failed to watch investor event', eventName, listingAddress, err);
+    }
+  };
+
+  const shortListing = shortAddress(listingAddress);
+
+  register('TokenisationProposed', (log) => {
+    const bookingId = toBigInt(log?.args?.bookingId);
+    const proposer = typeof log?.args?.proposer === 'string' ? log.args.proposer : '';
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const proposerLabel = proposer ? shortAddress(proposer) : 'unknown';
+    const message = `Tokenisation proposed for booking #${bookingLabel} on ${shortListing} by ${proposerLabel}.`;
+    notify({ message, variant: 'info', role: 'investor', timeout: 6000 });
+    queueInvestorDataRefresh(`Tokenisation proposal update for booking #${bookingLabel}`);
+  });
+
+  register('TokenisationApproved', (log) => {
+    const bookingId = toBigInt(log?.args?.bookingId);
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const message = `Tokenisation approved for booking #${bookingLabel} on ${shortListing}.`;
+    notify({ message, variant: 'success', role: 'investor', timeout: 6000 });
+    queueInvestorDataRefresh(`Tokenisation approved for booking #${bookingLabel}`);
+  });
+
+  register('SQMUTokensMinted', (log) => {
+    const bookingId = toBigInt(log?.args?.bookingId);
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const investorAddr = typeof log?.args?.investor === 'string' ? log.args.investor : '';
+    const sqmuAmount = toBigInt(log?.args?.sqmuAmount);
+    const investorLabel = investorAddr ? shortAddress(investorAddr) : 'unknown';
+    const message = `${investorLabel} purchased ${sqmuAmount.toString()} SQMU for booking #${bookingLabel} on ${shortListing}.`;
+    notify({ message, variant: 'success', role: 'investor', timeout: 6000 });
+    queueInvestorDataRefresh(`SQMU sale update for booking #${bookingLabel}`);
+  });
+
+  register('RentPaid', (log) => {
+    const bookingId = toBigInt(log?.args?.bookingId);
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const payer = typeof log?.args?.payer === 'string' ? log.args.payer : '';
+    const netAmount = toBigInt(log?.args?.netAmount);
+    const message = `Rent paid for booking #${bookingLabel} on ${shortListing}: ${formatUsdc(netAmount)} USDC net (payer ${shortAddress(payer) || 'unknown'}).`;
+    notify({ message, variant: 'success', role: 'investor', timeout: 6000 });
+    queueInvestorDataRefresh(`Rent payment for booking #${bookingLabel}`);
+  });
+
+  register('Claimed', (log) => {
+    const bookingId = toBigInt(log?.args?.bookingId);
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const account = typeof log?.args?.account === 'string' ? log.args.account : '';
+    const amount = toBigInt(log?.args?.amount);
+    const accountLabel = account ? shortAddress(account) : 'unknown';
+    const message = `${accountLabel} claimed ${formatUsdc(amount)} USDC from booking #${bookingLabel} on ${shortListing}.`;
+    notify({ message, variant: 'info', role: 'investor', timeout: 6000 });
+    queueInvestorDataRefresh(`Claim update for booking #${bookingLabel}`);
+  });
+
+  return watchers;
+}
+
+function syncInvestorListingEventWatchers(addresses) {
+  if (!state.account) {
+    return;
+  }
+  const desired = new Set();
+  if (Array.isArray(addresses)) {
+    for (const address of addresses) {
+      const normalised = normaliseAddress(address);
+      if (!normalised) {
+        continue;
+      }
+      desired.add(normalised);
+      if (investorListingEventWatchers.has(normalised)) {
+        continue;
+      }
+      const watchers = createInvestorListingWatchers(address);
+      if (watchers.length) {
+        investorListingEventWatchers.set(normalised, watchers);
+      }
+    }
+  }
+  for (const [address, unwatchers] of investorListingEventWatchers) {
+    if (desired.has(address)) {
+      continue;
+    }
+    for (const stop of unwatchers) {
+      try {
+        if (typeof stop === 'function') {
+          stop();
+        }
+      } catch (err) {
+        console.warn('Failed to remove stale investor watcher', err);
+      }
+    }
+    investorListingEventWatchers.delete(address);
+  }
 }
 
 async function ensureArbitrum(p) {
@@ -1001,16 +1232,23 @@ function renderDashboards(results) {
   renderRent(rentClaims);
 }
 
-async function loadInvestorData(account) {
-  setStatus('Loading investor data…');
+async function loadInvestorData(account, options = {}) {
+  const { silent = false } = options;
+  if (!silent) {
+    setStatus('Loading investor data…');
+  }
+  investorDataLoading = true;
   try {
     const cleaned = await fetchPlatformListings();
+    syncInvestorListingEventWatchers(cleaned);
     if (!cleaned.length) {
       renderDashboards([]);
       clearInvestSelection({ silent: true });
-      setStatus('No listings available yet.');
-      notify({ message: 'No listings available yet.', variant: 'info', role: 'investor', timeout: 5000 });
-      return;
+      if (!silent) {
+        setStatus('No listings available yet.');
+        notify({ message: 'No listings available yet.', variant: 'info', role: 'investor', timeout: 5000 });
+      }
+      return true;
     }
     const allEntries = [];
     for (const listing of cleaned) {
@@ -1020,12 +1258,18 @@ async function loadInvestorData(account) {
     state.holdings = allEntries;
     syncSelectedBooking(allEntries);
     renderDashboards(allEntries);
-    setStatus(`Loaded ${allEntries.length} booking${allEntries.length === 1 ? '' : 's'}.`);
-    notify({ message: 'Investor data refreshed.', variant: 'success', role: 'investor', timeout: 5000 });
+    if (!silent) {
+      setStatus(`Loaded ${allEntries.length} booking${allEntries.length === 1 ? '' : 's'}.`);
+      notify({ message: 'Investor data refreshed.', variant: 'success', role: 'investor', timeout: 5000 });
+    }
+    return true;
   } catch (err) {
     console.error('Failed to load investor data', err);
     setStatus('Unable to load investor data.');
     notify({ message: err?.message || 'Unable to load investor data.', variant: 'error', role: 'investor', timeout: 6000 });
+    return false;
+  } finally {
+    investorDataLoading = false;
   }
 }
 
