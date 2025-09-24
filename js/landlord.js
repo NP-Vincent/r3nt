@@ -4,9 +4,10 @@ import { arbitrum } from 'https://esm.sh/viem/chains';
 import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
-import { ListingCard, TokenisationCard } from './ui/cards.js';
+import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
-import { makeCollapsible } from './ui/accordion.js';
+import { createCollapsibleSection } from './ui/accordion.js';
+import { el, fmt } from './ui/dom.js';
 import {
   PLATFORM_ADDRESS,
   PLATFORM_ABI,
@@ -159,38 +160,6 @@ function forEachListingController(handler) {
   }
 }
 
-function createCollapsibleSection(label, { id } = {}) {
-  const section = document.createElement('section');
-  section.className = 'card';
-  section.dataset.collapsible = '';
-  if (id) {
-    section.id = id;
-  }
-
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'inline-button';
-  toggle.dataset.collapsibleToggle = '';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = label;
-  section.appendChild(toggle);
-
-  const content = document.createElement('div');
-  content.dataset.collapsibleContent = '';
-  content.hidden = true;
-  section.appendChild(content);
-
-  makeCollapsible(section);
-
-  const setOpen = (open) => {
-    section.dataset.open = open ? '1' : '0';
-    content.hidden = !open;
-    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-  };
-
-  return { section, content, toggle, setOpen };
-}
-
 function handleDeactivateListing(listing) {
   notify({
     message: 'Listing deactivation is not available yet. Contact the platform team to disable listings.',
@@ -299,69 +268,11 @@ if (els.listingLocationClear) {
   });
 }
 
-function formatUsdc(amount) {
-  const value = typeof amount === 'bigint' ? amount : BigInt(amount || 0);
-  const negative = value < 0n;
-  const abs = negative ? -value : value;
-  const units = abs / USDC_SCALAR;
-  const fraction = (abs % USDC_SCALAR).toString().padStart(6, '0').replace(/0+$/, '');
-  return `${negative ? '-' : ''}${units.toString()}${fraction ? '.' + fraction : ''}`;
-}
-
-function formatDuration(seconds) {
-  const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
-  if (value <= 0n) return 'None';
-  const totalSeconds = Number(value);
-  if (!Number.isFinite(totalSeconds)) return `${value} sec`;
-  const days = Math.floor(totalSeconds / 86400);
-  const remainder = totalSeconds % 86400;
-  if (days > 0 && remainder === 0) {
-    return `${days} day${days === 1 ? '' : 's'}`;
-  }
-  if (days > 0) {
-    const hours = Math.round(remainder / 3600);
-    if (hours === 0) {
-      return `${days} day${days === 1 ? '' : 's'}`;
-    }
-    return `${days} day${days === 1 ? '' : 's'} ${hours} h`;
-  }
-  const hoursOnly = Math.max(1, Math.round(totalSeconds / 3600));
-  return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
-}
-
-function formatBasisPoints(value) {
-  let bps;
-  try {
-    bps = typeof value === 'bigint' ? value : BigInt(value || 0);
-  } catch {
-    bps = 0n;
-  }
-  const numeric = Number(bps);
-  if (!Number.isFinite(numeric)) {
-    return `${bps.toString()} bps`;
-  }
-  const percent = (numeric / 100).toFixed(2).replace(/\.0+$/, '').replace(/\.([1-9])0$/, '.$1');
-  return `${percent}% (${bps.toString()} bps)`;
-}
-
-function formatSqmu(value) {
-  let amount;
-  try {
-    amount = typeof value === 'bigint' ? value : BigInt(value || 0);
-  } catch {
-    amount = 0n;
-  }
-  const numeric = Number(amount);
-  if (Number.isFinite(numeric) && Math.abs(numeric) <= Number.MAX_SAFE_INTEGER) {
-    return numeric.toLocaleString('en-US');
-  }
-  return amount.toString();
-}
 
 function formatSqmuProgress(soldValue, totalValue) {
   const sold = toBigIntOrZero(soldValue);
   const total = toBigIntOrZero(totalValue);
-  const soldText = `${formatSqmu(sold)} SQMU`;
+  const soldText = `${fmt.sqmu(sold)} SQMU`;
   if (total <= 0n) {
     return soldText;
   }
@@ -374,7 +285,7 @@ function formatSqmuProgress(soldValue, totalValue) {
   const whole = percentBasis / 100n;
   const fraction = percentBasis % 100n;
   const percentText = `${whole.toString()}.${fraction.toString().padStart(2, '0')}%`;
-  return `${formatSqmu(sold)} / ${formatSqmu(total)} SQMU (${percentText})`;
+  return `${fmt.sqmu(sold)} / ${fmt.sqmu(total)} SQMU (${percentText})`;
 }
 
 function createBookingDetailElement(label, value, options = {}) {
@@ -422,21 +333,6 @@ function deriveTokenisationState(booking, pending) {
     };
   }
   return { state: 'none', label: 'Not tokenised', progress: null, proposer: booking?.proposer };
-}
-
-function formatTimestamp(ts) {
-  const value = typeof ts === 'bigint' ? ts : BigInt(ts || 0);
-  if (value === 0n) return '-';
-  let asNumber;
-  try {
-    asNumber = Number(value);
-  } catch {
-    return '-';
-  }
-  if (!Number.isFinite(asNumber)) return '-';
-  const date = new Date(asNumber * 1000);
-  if (Number.isNaN(date.getTime())) return '-';
-  return date.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
 function escapeHtml(str) {
@@ -891,7 +787,7 @@ async function getListingPrice() {
 async function refreshListingPriceDisplay() {
   try {
     const price = await getListingPrice();
-    els.feeInfo.textContent = `Listing price: ${formatUsdc(price)} USDC`;
+    els.feeInfo.textContent = `Listing price: ${fmt.usdc(price)} USDC`;
   } catch (err) {
     console.error('Failed to load listing price', err);
     els.feeInfo.textContent = 'Listing price: (unavailable)';
@@ -1056,9 +952,9 @@ function buildLandlordBookingRecord(listing, bookingId, booking, pending) {
     statusClass,
     start,
     end,
-    startLabel: formatTimestamp(start),
-    endLabel: formatTimestamp(end),
-    durationLabel: formatDuration(duration),
+    startLabel: fmt.timestamp(start),
+    endLabel: fmt.timestamp(end),
+    durationLabel: fmt.duration(duration),
     grossRent: toBigIntOrZero(booking.grossRent),
     expectedNetRent: toBigIntOrZero(booking.expectedNetRent),
     rentPaid: toBigIntOrZero(booking.rentPaid),
@@ -1087,6 +983,7 @@ function buildLandlordBookingRecord(listing, bookingId, booking, pending) {
 function renderLandlordBookingTokenSection(record) {
   const section = document.createElement('div');
   section.className = 'booking-tokenisation-section';
+  section.classList.add('card-footnote');
 
   const heading = document.createElement('div');
   heading.className = 'booking-tokenisation-title';
@@ -1102,11 +999,11 @@ function renderLandlordBookingTokenSection(record) {
 
     const details = document.createElement('div');
     details.className = 'booking-details';
-    details.appendChild(createBookingDetailElement('Proposed SQMU', formatSqmu(record.pending?.totalSqmu)));
+    details.appendChild(createBookingDetailElement('Proposed SQMU', fmt.sqmu(record.pending?.totalSqmu)));
     details.appendChild(
-      createBookingDetailElement('Proposed price', `${formatUsdc(record.pending?.pricePerSqmu)} USDC`)
+      createBookingDetailElement('Proposed price', `${fmt.usdc(record.pending?.pricePerSqmu)} USDC`)
     );
-    details.appendChild(createBookingDetailElement('Proposed fee', formatBasisPoints(record.pending?.feeBps)));
+    details.appendChild(createBookingDetailElement('Proposed fee', fmt.bps(record.pending?.feeBps)));
     details.appendChild(createBookingDetailElement('Proposed cadence', record.pendingPeriodLabel || 'Custom'));
     const proposerText = record.pendingProposerShort || (record.pendingProposer || '—');
     details.appendChild(
@@ -1124,13 +1021,13 @@ function renderLandlordBookingTokenSection(record) {
   if (state === 'approved' || state === 'completed') {
     const details = document.createElement('div');
     details.className = 'booking-details';
-    details.appendChild(createBookingDetailElement('Total SQMU', formatSqmu(record.totalSqmu)));
-    details.appendChild(createBookingDetailElement('Sold SQMU', formatSqmu(record.soldSqmu)));
+    details.appendChild(createBookingDetailElement('Total SQMU', fmt.sqmu(record.totalSqmu)));
+    details.appendChild(createBookingDetailElement('Sold SQMU', fmt.sqmu(record.soldSqmu)));
     if (record.tokenState?.progress) {
       details.appendChild(createBookingDetailElement('Progress', formatSqmuProgress(record.soldSqmu, record.totalSqmu)));
     }
-    details.appendChild(createBookingDetailElement('Price per SQMU', `${formatUsdc(record.pricePerSqmu)} USDC`));
-    details.appendChild(createBookingDetailElement('Token fee', formatBasisPoints(record.feeBps)));
+    details.appendChild(createBookingDetailElement('Price per SQMU', `${fmt.usdc(record.pricePerSqmu)} USDC`));
+    details.appendChild(createBookingDetailElement('Token fee', fmt.bps(record.feeBps)));
     details.appendChild(createBookingDetailElement('Token period', record.periodLabel));
     const proposerText = record.tokenProposerShort || (record.tokenProposer || '—');
     details.appendChild(
@@ -1156,61 +1053,45 @@ function renderLandlordBookingTokenSection(record) {
 }
 
 function renderLandlordBookingEntry(listing, record) {
-  const card = document.createElement('article');
-  card.className = 'booking-entry';
+  const card = BookingCard({
+    bookingId: record.bookingIdText || record.bookingId?.toString?.() || '—',
+    listingId: record.listingIdText || shortAddress(listing?.address || ''),
+    dates: `Stay: ${record.startLabel} → ${record.endLabel} (${record.durationLabel})`,
+    period: record.periodLabel,
+    depositUSDC: record.deposit,
+    rentUSDC: record.grossRent,
+    status: record.statusLabel,
+    actions: [
+      {
+        label: record.tokenActionLabel,
+        onClick: () => {
+          openTokenToolsForBooking(listing, record.bookingId).catch((err) => {
+            console.error('Failed to open token tools via quick action', err);
+          });
+        },
+      },
+    ],
+  });
 
-  const header = document.createElement('div');
-  header.className = 'booking-entry-header';
+  if (record.statusClass) {
+    card.classList.add(`booking-status-${record.statusClass}`);
+  }
 
-  const title = document.createElement('div');
-  title.className = 'booking-entry-title';
-  title.textContent = record.bookingIdText ? `Booking #${record.bookingIdText}` : 'Booking';
-  header.appendChild(title);
-
-  const statusBadge = document.createElement('span');
-  const statusClass = record.statusClass ? ` booking-status-${record.statusClass}` : '';
-  statusBadge.className = `booking-status-badge${statusClass}`;
-  statusBadge.textContent = record.statusLabel;
-  header.appendChild(statusBadge);
-
-  card.appendChild(header);
-
-  const dates = document.createElement('div');
-  dates.className = 'booking-entry-dates';
-  dates.textContent = `Stay: ${record.startLabel} → ${record.endLabel} (${record.durationLabel})`;
-  card.appendChild(dates);
-
-  const details = document.createElement('div');
-  details.className = 'booking-details';
-  details.appendChild(createBookingDetailElement('Gross rent', `${formatUsdc(record.grossRent)} USDC`));
-  details.appendChild(createBookingDetailElement('Rent paid', `${formatUsdc(record.rentPaid)} USDC`));
-  details.appendChild(createBookingDetailElement('Net rent', `${formatUsdc(record.expectedNetRent)} USDC`));
-  details.appendChild(createBookingDetailElement('Deposit', `${formatUsdc(record.deposit)} USDC`));
+  card.append(
+    el('div', { class: 'card-footnote' }, `Rent paid ${fmt.usdc(record.rentPaid)} USDC / Net ${fmt.usdc(record.expectedNetRent)} USDC`),
+  );
+  card.append(
+    el('div', { class: 'card-footnote' }, `Deposit ${fmt.usdc(record.deposit)} USDC`),
+  );
   if (record.tenantShort) {
-    details.appendChild(
-      createBookingDetailElement('Tenant', record.tenantShort, { tooltip: record.tenant || undefined })
+    card.append(
+      el('div', { class: 'card-footnote', title: record.tenant || '' }, `Tenant ${record.tenantShort}`),
     );
   }
-  card.appendChild(details);
 
-  card.appendChild(renderLandlordBookingTokenSection(record));
-
-  const actions = document.createElement('div');
-  actions.className = 'booking-actions';
-  const manageBtn = document.createElement('button');
-  manageBtn.type = 'button';
-  manageBtn.textContent = record.tokenActionLabel;
-  manageBtn.addEventListener('click', () => {
-    openTokenToolsForBooking(listing, record.bookingId).catch((err) => {
-      console.error('Failed to open token tools via quick action', err);
-    });
-  });
-  actions.appendChild(manageBtn);
-  card.appendChild(actions);
-
+  card.append(renderLandlordBookingTokenSection(record));
   return card;
 }
-
 function renderLandlordBookings(listing, container, records, statusEl) {
   if (!container) return;
   container.innerHTML = '';
@@ -1321,74 +1202,44 @@ function renderLandlordListingCard(listing) {
     id: listingIdText || shortAddress(listing?.address || '') || `listing-${listing?.order ?? 0}`,
     title: listing?.title,
     location: locationLabel,
-    pricePerDayUSDC: formatUsdc(listing.baseDailyRate),
+    pricePerDayUSDC: listing.baseDailyRate,
     areaSqm: areaValue > 0 ? areaValue : undefined,
-    depositUSDC: formatUsdc(listing.depositAmount),
-    status: 'Active',
+    depositUSDC: listing.depositAmount,
+    status: listing?.active === false ? 'Inactive' : 'Active',
     actions,
   });
 
   card.classList.add('landlord-listing-card');
 
-  const sections = document.createElement('div');
-  sections.className = 'landlord-card-sections';
-  card.appendChild(sections);
+  const sections = el('div', { class: 'landlord-card-sections' });
+  card.append(sections);
 
-  const details = document.createElement('div');
-  details.className = 'landlord-card-details';
-  sections.appendChild(details);
+  const details = el('div', { class: 'landlord-card-details' });
+  sections.append(details);
 
-  const rateLine = document.createElement('div');
-  rateLine.className = 'landlord-card-detail';
-  rateLine.textContent = `Base rate: ${formatUsdc(listing.baseDailyRate)} USDC / day`;
-  details.appendChild(rateLine);
+  const appendDetail = (text) => {
+    if (!text) return;
+    details.append(el('div', { class: 'landlord-card-detail' }, text));
+  };
 
-  const depositLine = document.createElement('div');
-  depositLine.className = 'landlord-card-detail';
-  depositLine.textContent = `Deposit: ${formatUsdc(listing.depositAmount)} USDC`;
-  details.appendChild(depositLine);
-
+  appendDetail(`Base rate: ${fmt.usdc(listing.baseDailyRate)} USDC / day`);
+  appendDetail(`Deposit: ${fmt.usdc(listing.depositAmount)} USDC`);
   if (Number.isFinite(areaValue) && areaValue > 0) {
-    const areaLine = document.createElement('div');
-    areaLine.className = 'landlord-card-detail';
-    areaLine.textContent = `Area: ${areaValue} m²`;
-    details.appendChild(areaLine);
+    appendDetail(`Area: ${fmt.sqm(areaValue)}`);
   }
+  const minNoticeText = fmt.duration(listing.minBookingNotice);
+  const maxWindowText = listing.maxBookingWindow > 0n ? fmt.duration(listing.maxBookingWindow) : 'Unlimited';
+  appendDetail(`Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`);
+  appendDetail(listingIdText ? `Listing ID: ${listingIdText}` : 'Listing ID: (not assigned)');
+  const createdLabel = listing.createdAtIso || (listing.createdAt > 0n ? fmt.timestamp(listing.createdAt) : '(not recorded)');
+  appendDetail(`Created: ${createdLabel}`);
 
-  const minNoticeText = formatDuration(listing.minBookingNotice);
-  const maxWindowText = listing.maxBookingWindow > 0n ? formatDuration(listing.maxBookingWindow) : 'Unlimited';
-  const windowLine = document.createElement('div');
-  windowLine.className = 'landlord-card-detail';
-  windowLine.textContent = `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`;
-  details.appendChild(windowLine);
-
-  const idDetail = document.createElement('div');
-  idDetail.className = 'landlord-card-detail';
-  idDetail.textContent = listingIdText ? `Listing ID: ${listingIdText}` : 'Listing ID: (not assigned)';
-  details.appendChild(idDetail);
-
-  const createdDetail = document.createElement('div');
-  createdDetail.className = 'landlord-card-detail';
-  const createdLabel = listing.createdAtIso || (listing.createdAt > 0n ? `Unix ${listing.createdAt.toString()}` : '(not recorded)');
-  createdDetail.textContent = `Created: ${createdLabel}`;
-  details.appendChild(createdDetail);
-
-  const addressContainer = document.createElement('div');
-  addressContainer.className = 'landlord-card-detail';
-  const addressLabel = document.createElement('div');
-  addressLabel.textContent = 'Listing address:';
-  const addressValue = document.createElement('div');
-  addressValue.className = 'landlord-card-address';
-  addressValue.textContent = listing.address || '—';
-  addressContainer.appendChild(addressLabel);
-  addressContainer.appendChild(addressValue);
-  details.appendChild(addressContainer);
-
+  const addressRow = el('div', { class: 'landlord-card-detail landlord-card-address-row' }, [
+    el('div', {}, 'Listing address:'),
+    el('div', { class: 'landlord-card-address' }, listing.address || '—'),
+  ]);
   if (navigator?.clipboard?.writeText && listing.address) {
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'inline-button small';
-    copyBtn.textContent = 'Copy address';
+    const copyBtn = el('button', { type: 'button', class: 'inline-button small' }, 'Copy address');
     copyBtn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(listing.address);
@@ -1398,35 +1249,40 @@ function renderLandlordListingCard(listing) {
         notify({ message: 'Unable to copy listing address.', variant: 'error', role: 'landlord', timeout: 5000 });
       }
     });
-    details.appendChild(copyBtn);
+    addressRow.append(copyBtn);
+  }
+  details.append(addressRow);
+
+  if (listing.geohash) {
+    appendDetail(`Geohash: ${listing.geohash}`);
   }
 
-  const bookingsCard = document.createElement('div');
-  bookingsCard.className = 'bookings-card landlord-bookings-card';
+  if (Number.isFinite(listing.lat) && Number.isFinite(listing.lon)) {
+    const latText = Number(listing.lat).toFixed(5);
+    const lonText = Number(listing.lon).toFixed(5);
+    appendDetail(`Coordinates: ${latText}°, ${lonText}°`);
+  }
 
-  const bookingsHeader = document.createElement('div');
-  bookingsHeader.className = 'bookings-header';
-  const bookingsTitle = document.createElement('h3');
-  bookingsTitle.textContent = 'Bookings';
-  bookingsHeader.appendChild(bookingsTitle);
-  const bookingsRefresh = document.createElement('button');
-  bookingsRefresh.type = 'button';
-  bookingsRefresh.className = 'inline-button small';
-  bookingsRefresh.textContent = 'Refresh';
-  bookingsRefresh.disabled = true;
-  bookingsHeader.appendChild(bookingsRefresh);
-  bookingsCard.appendChild(bookingsHeader);
+  if (listing.metadataURI) {
+    details.append(
+      el('a', { href: listing.metadataURI, target: '_blank', rel: 'noopener', class: 'listing-link' }, 'Metadata'),
+    );
+  }
 
-  const bookingsStatus = document.createElement('div');
-  bookingsStatus.className = 'bookings-status';
-  bookingsStatus.textContent = 'Press refresh to load bookings.';
-  bookingsCard.appendChild(bookingsStatus);
-
-  const bookingsList = document.createElement('div');
-  bookingsList.className = 'bookings-list';
-  bookingsCard.appendChild(bookingsList);
-
-  sections.appendChild(bookingsCard);
+  const bookingsPanel = createCollapsibleSection('Bookings', { classes: ['landlord-bookings-card'] });
+  const bookingsRefresh = el('button', {
+    type: 'button',
+    class: 'inline-button small',
+    disabled: true,
+  }, 'Refresh');
+  const bookingsStatus = el('div', { class: 'bookings-status' }, 'Press refresh to load bookings.');
+  const bookingsList = el('div', { class: 'bookings-list' });
+  const bookingsHeader = el('div', { class: 'bookings-header' }, [
+    el('h3', {}, 'Bookings'),
+    bookingsRefresh,
+  ]);
+  bookingsPanel.content.append(bookingsHeader, bookingsStatus, bookingsList);
+  sections.append(bookingsPanel.section);
 
   let bookingsLoaded = false;
   let bookingsLoading = null;
@@ -1470,72 +1326,28 @@ function renderLandlordListingCard(listing) {
   };
 
   bookingsRefresh.addEventListener('click', () => {
+    bookingsPanel.setOpen(true);
     loadBookings({ force: true }).catch((err) => {
       console.error('Failed to refresh bookings', err);
     });
   });
 
-  if (listing.geohash) {
-    const geohashLine = document.createElement('div');
-    geohashLine.className = 'landlord-card-detail';
-    geohashLine.textContent = `Geohash: ${listing.geohash}`;
-    details.appendChild(geohashLine);
-  }
-
-  if (Number.isFinite(listing.lat) && Number.isFinite(listing.lon)) {
-    const coordsLine = document.createElement('div');
-    coordsLine.className = 'landlord-card-detail';
-    const latText = Number(listing.lat).toFixed(5);
-    const lonText = Number(listing.lon).toFixed(5);
-    coordsLine.textContent = `Coordinates: ${latText}°, ${lonText}°`;
-    details.appendChild(coordsLine);
-  }
-
-  if (listing.metadataURI) {
-    const metaLink = document.createElement('a');
-    metaLink.href = listing.metadataURI;
-    metaLink.target = '_blank';
-    metaLink.rel = 'noopener';
-    metaLink.textContent = 'Metadata';
-    metaLink.className = 'listing-link';
-    details.appendChild(metaLink);
-  }
-
-  const availabilitySection = document.createElement('div');
-  availabilitySection.className = 'availability-tools';
-  details.appendChild(availabilitySection);
-
-  const dateRow = document.createElement('div');
-  dateRow.className = 'row';
-  availabilitySection.appendChild(dateRow);
-
-  const startLabel = document.createElement('label');
-  startLabel.textContent = 'Start';
-  const startInput = document.createElement('input');
-  startInput.type = 'date';
-  startLabel.appendChild(startInput);
-  dateRow.appendChild(startLabel);
-
-  const endLabel = document.createElement('label');
-  endLabel.textContent = 'End';
-  const endInput = document.createElement('input');
-  endInput.type = 'date';
-  endLabel.appendChild(endInput);
-  dateRow.appendChild(endLabel);
-
-  const checkBtn = document.createElement('button');
-  checkBtn.textContent = 'Check availability';
-  checkBtn.className = 'check-availability';
-  availabilitySection.appendChild(checkBtn);
-
-  const result = document.createElement('div');
-  result.className = 'availability-result muted';
-  result.textContent = 'Select dates to check availability.';
-  availabilitySection.appendChild(result);
+  const availabilityPanel = createCollapsibleSection('Check availability');
+  const startInput = el('input', { type: 'date' });
+  const endInput = el('input', { type: 'date' });
+  const dateRow = el('div', { class: 'row' }, [
+    el('label', {}, ['Start', startInput]),
+    el('label', {}, ['End', endInput]),
+  ]);
+  const checkBtn = el('button', { type: 'button', class: 'check-availability' }, 'Check availability');
+  const result = el('div', { class: 'availability-result muted' }, 'Select dates to check availability.');
+  availabilityPanel.content.append(dateRow, checkBtn, result);
+  sections.append(availabilityPanel.section);
 
   focusAvailabilitySection = () => {
+    availabilityPanel.setOpen(true);
     try {
-      availabilitySection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      availabilityPanel.section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch {}
   };
 
@@ -1577,10 +1389,10 @@ function renderLandlordListingCard(listing) {
     });
 
   const depositTools = createDepositTools(listing);
-  sections.appendChild(depositTools.section);
+  sections.append(depositTools.section);
 
   const tokenTools = createTokenTools(listing);
-  sections.appendChild(tokenTools.section);
+  sections.append(tokenTools.section);
   openTokenSection = () => tokenTools.controller.openPanel({ focus: true });
 
   const controller = {
@@ -1942,7 +1754,7 @@ function createLandlordListingWatchers(listingAddress) {
     const investorAddr = typeof log?.args?.investor === 'string' ? log.args.investor : '';
     const investorLabel = investorAddr ? shortAddress(investorAddr) : 'unknown';
     const sqmuAmount = toBigIntOrZero(log?.args?.sqmuAmount);
-    const message = `${investorLabel} purchased ${formatSqmu(sqmuAmount)} SQMU for booking #${bookingLabel} on ${shortListing}.`;
+    const message = `${investorLabel} purchased ${fmt.sqmu(sqmuAmount)} SQMU for booking #${bookingLabel} on ${shortListing}.`;
     notify({ message, variant: 'success', role: 'landlord', timeout: 6000 });
     queueLandlordListingRefresh(`SQMU sale update for booking #${bookingLabel}`);
   });
@@ -1951,7 +1763,7 @@ function createLandlordListingWatchers(listingAddress) {
     const bookingId = toBigIntOrZero(log?.args?.bookingId);
     const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
     const netAmount = toBigIntOrZero(log?.args?.netAmount);
-    const message = `Rent payment received for booking #${bookingLabel} on ${shortListing}: ${formatUsdc(netAmount)} USDC net.`;
+    const message = `Rent payment received for booking #${bookingLabel} on ${shortListing}: ${fmt.usdc(netAmount)} USDC net.`;
     notify({ message, variant: 'success', role: 'landlord', timeout: 6000 });
     queueLandlordListingRefresh(`Rent payment for booking #${bookingLabel}`);
   });
@@ -1962,7 +1774,7 @@ function createLandlordListingWatchers(listingAddress) {
     const account = typeof log?.args?.account === 'string' ? log.args.account : '';
     const accountLabel = account ? shortAddress(account) : 'unknown';
     const amount = toBigIntOrZero(log?.args?.amount);
-    const message = `${accountLabel} claimed ${formatUsdc(amount)} USDC from booking #${bookingLabel} on ${shortListing}.`;
+    const message = `${accountLabel} claimed ${fmt.usdc(amount)} USDC from booking #${bookingLabel} on ${shortListing}.`;
     notify({ message, variant: 'info', role: 'landlord', timeout: 6000 });
     queueLandlordListingRefresh(`Claim update for booking #${bookingLabel}`);
   });
@@ -2189,19 +2001,19 @@ function renderDepositBookingInfo(container, listingAddr, bookingId, booking, pe
     `Booking ID: ${bookingId.toString()}`,
     `Status: ${statusLabel}`,
     `Tenant: ${booking.tenant}`,
-    `Range: ${formatTimestamp(booking.start)} → ${formatTimestamp(booking.end)} (${formatDuration(durationSeconds)})`,
-    `Deposit held: ${formatUsdc(booking.deposit)} USDC`,
-    `Rent (gross/net): ${formatUsdc(booking.grossRent)} / ${formatUsdc(booking.expectedNetRent)} USDC`,
-    `Rent paid so far: ${formatUsdc(booking.rentPaid)} USDC`,
+    `Range: ${fmt.timestamp(booking.start)} → ${fmt.timestamp(booking.end)} (${fmt.duration(durationSeconds)})`,
+    `Deposit held: ${fmt.usdc(booking.deposit)} USDC`,
+    `Rent (gross/net): ${fmt.usdc(booking.grossRent)} / ${fmt.usdc(booking.expectedNetRent)} USDC`,
+    `Rent paid so far: ${fmt.usdc(booking.rentPaid)} USDC`,
     `Deposit released: ${booking.depositReleased ? 'Yes' : 'No'}${depositShareText}`,
   ];
   if (tokenised) {
     lines.push(
       'Tokenisation: Enabled',
-      `Total SQMU: ${formatSqmu(booking.totalSqmu)}`,
-      `Sold SQMU: ${formatSqmu(booking.soldSqmu)}`,
-      `Price per SQMU: ${formatUsdc(booking.pricePerSqmu)} USDC`,
-      `Token fee: ${formatBasisPoints(booking.feeBps)}`,
+      `Total SQMU: ${fmt.sqmu(booking.totalSqmu)}`,
+      `Sold SQMU: ${fmt.sqmu(booking.soldSqmu)}`,
+      `Price per SQMU: ${fmt.usdc(booking.pricePerSqmu)} USDC`,
+      `Token fee: ${fmt.bps(booking.feeBps)}`,
       `Token period: ${tokenPeriodLabel}`,
     );
   } else {
@@ -2550,25 +2362,25 @@ function renderTokenBookingInfo(container, listingAddr, bookingId, booking, pend
   details.className = 'booking-details';
   details.appendChild(createBookingDetailElement('Status', statusLabel));
   details.appendChild(createBookingDetailElement('Booking ID', bookingId.toString()));
-  details.appendChild(createBookingDetailElement('Range', `${formatTimestamp(booking.start)} → ${formatTimestamp(booking.end)} (${formatDuration(durationSeconds)})`));
-  details.appendChild(createBookingDetailElement('Deposit', `${formatUsdc(booking.deposit)} USDC`));
-  details.appendChild(createBookingDetailElement('Gross rent', `${formatUsdc(booking.grossRent)} USDC`));
-  details.appendChild(createBookingDetailElement('Net rent', `${formatUsdc(booking.expectedNetRent)} USDC`));
-  details.appendChild(createBookingDetailElement('Rent paid', `${formatUsdc(booking.rentPaid)} USDC`));
+  details.appendChild(createBookingDetailElement('Range', `${fmt.timestamp(booking.start)} → ${fmt.timestamp(booking.end)} (${fmt.duration(durationSeconds)})`));
+  details.appendChild(createBookingDetailElement('Deposit', `${fmt.usdc(booking.deposit)} USDC`));
+  details.appendChild(createBookingDetailElement('Gross rent', `${fmt.usdc(booking.grossRent)} USDC`));
+  details.appendChild(createBookingDetailElement('Net rent', `${fmt.usdc(booking.expectedNetRent)} USDC`));
+  details.appendChild(createBookingDetailElement('Rent paid', `${fmt.usdc(booking.rentPaid)} USDC`));
   details.appendChild(createBookingDetailElement('Token period', periodLabel));
   details.appendChild(createBookingDetailElement('Tokenised', booking.tokenised ? 'Yes' : 'No'));
   if (booking.tokenised) {
-    details.appendChild(createBookingDetailElement('Total SQMU', formatSqmu(booking.totalSqmu)));
-    details.appendChild(createBookingDetailElement('Sold SQMU', formatSqmu(booking.soldSqmu)));
-    details.appendChild(createBookingDetailElement('Price per SQMU', `${formatUsdc(booking.pricePerSqmu)} USDC`));
-    details.appendChild(createBookingDetailElement('Fee', formatBasisPoints(booking.feeBps)));
+    details.appendChild(createBookingDetailElement('Total SQMU', fmt.sqmu(booking.totalSqmu)));
+    details.appendChild(createBookingDetailElement('Sold SQMU', fmt.sqmu(booking.soldSqmu)));
+    details.appendChild(createBookingDetailElement('Price per SQMU', `${fmt.usdc(booking.pricePerSqmu)} USDC`));
+    details.appendChild(createBookingDetailElement('Fee', fmt.bps(booking.feeBps)));
   }
   const proposerText = booking.proposer && !/^0x0+$/i.test(booking.proposer) ? booking.proposer : '—';
   details.appendChild(createBookingDetailElement('Last proposer', proposerText));
   if (pending?.exists) {
     const pendingPeriodIndex = Number(pending.period || 0);
     const pendingPeriodLabel = BOOKING_PERIOD_LABELS[pendingPeriodIndex] || `Custom (${pendingPeriodIndex})`;
-    const pendingDetail = `Pending proposal: ${formatSqmu(pending.totalSqmu)} SQMU @ ${formatUsdc(pending.pricePerSqmu)} USDC · Fee ${formatBasisPoints(pending.feeBps)} · ${pendingPeriodLabel} · proposer ${pending.proposer}`;
+    const pendingDetail = `Pending proposal: ${fmt.sqmu(pending.totalSqmu)} SQMU @ ${fmt.usdc(pending.pricePerSqmu)} USDC · Fee ${fmt.bps(pending.feeBps)} · ${pendingPeriodLabel} · proposer ${pending.proposer}`;
     details.appendChild(createBookingDetailElement('Pending', pendingDetail));
   } else {
     details.appendChild(createBookingDetailElement('Pending', 'None'));
@@ -2671,7 +2483,7 @@ function createTokenTools(listing) {
       bookingId: state.currentBookingId ? state.currentBookingId.toString() : '',
       totalSqmu: booking?.totalSqmu ? booking.totalSqmu.toString() : undefined,
       soldSqmu: booking?.soldSqmu ? booking.soldSqmu.toString() : undefined,
-      pricePerSqmu: booking?.pricePerSqmu ? formatUsdc(booking.pricePerSqmu) : undefined,
+      pricePerSqmu: booking?.pricePerSqmu ? fmt.usdc(booking.pricePerSqmu) : undefined,
       feeBps: booking?.feeBps ? Number(booking.feeBps) : undefined,
       period: getPeriodKeyFromValue(booking?.period) || undefined,
       mode: 'propose',
@@ -2684,7 +2496,7 @@ function createTokenTools(listing) {
     }
     const priceInput = form.querySelector('input[name="price"]');
     if (priceInput && booking?.pricePerSqmu > 0n) {
-      priceInput.value = formatUsdc(booking.pricePerSqmu);
+      priceInput.value = fmt.usdc(booking.pricePerSqmu);
     }
     const feeInput = form.querySelector('input[name="fee"]');
     if (feeInput && booking?.feeBps) {
@@ -3134,8 +2946,8 @@ els.create.onclick = () =>
       });
 
       // 2) Submit createListing to the platform
-      info(`Submitting createListing (fee ${formatUsdc(listingPrice)} USDC)…`);
-      notify({ message: `Submitting createListing (fee ${formatUsdc(listingPrice)} USDC)…`, variant: 'info', role: 'landlord', timeout: 5000 });
+      info(`Submitting createListing (fee ${fmt.usdc(listingPrice)} USDC)…`);
+      notify({ message: `Submitting createListing (fee ${fmt.usdc(listingPrice)} USDC)…`, variant: 'info', role: 'landlord', timeout: 5000 });
       const createData = encodeFunctionData({
         abi,
         functionName: 'createListing',
@@ -3168,7 +2980,7 @@ els.create.onclick = () =>
       calls.push({ to: PLATFORM_ADDRESS, data: createData });
 
       if (listingPrice > 0n) {
-        info(`Approving ${formatUsdc(listingPrice)} USDC listing fee…`);
+        info(`Approving ${fmt.usdc(listingPrice)} USDC listing fee…`);
       } else {
         info('Submitting createListing…');
       }
