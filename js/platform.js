@@ -9,6 +9,7 @@ import {
   LISTING_ABI,
   REGISTRY_ABI,
   REGISTRY_ADDRESS,
+  FACTORY_ABI,
   RPC_URL,
   APP_VERSION,
 } from './config.js';
@@ -1360,6 +1361,51 @@ function enableForms(enabled) {
 
 enableForms(false);
 
+async function loadListingImplementationAddress(factoryAddress) {
+  if (!factoryAddress || factoryAddress === constants.AddressZero) {
+    return 'Not configured (factory unset)';
+  }
+
+  if (!Array.isArray(FACTORY_ABI) || FACTORY_ABI.length === 0) {
+    console.warn('ListingFactory ABI unavailable. Cannot read implementation address.');
+    return 'ABI unavailable';
+  }
+
+  let normalizedFactory;
+  try {
+    normalizedFactory = utils.getAddress(factoryAddress);
+  } catch (err) {
+    console.warn('Unable to normalise ListingFactory address', factoryAddress, err);
+    return 'Invalid factory address';
+  }
+
+  let factoryContract;
+  try {
+    factoryContract = new Contract(normalizedFactory, FACTORY_ABI, readProvider);
+  } catch (err) {
+    console.error('Failed to create ListingFactory contract instance', err);
+    const { message } = interpretError(err);
+    return `Lookup failed (${message})`;
+  }
+
+  try {
+    const implementationRaw = await factoryContract.listingImplementation();
+    if (!implementationRaw || implementationRaw === constants.AddressZero) {
+      return 'Not set';
+    }
+    try {
+      return utils.getAddress(implementationRaw);
+    } catch (normaliseError) {
+      console.warn('Unable to normalise listing implementation address', implementationRaw, normaliseError);
+      return implementationRaw;
+    }
+  } catch (error) {
+    console.error('Failed to load listing implementation from factory', error);
+    const { message } = interpretError(error);
+    return `Lookup failed (${message})`;
+  }
+}
+
 async function refreshSnapshot() {
   if (!ownerAccessGranted) {
     snapshotOutputEl.textContent = 'Connect the platform owner wallet to view snapshot.';
@@ -1400,6 +1446,8 @@ async function refreshSnapshot() {
 
     setBookingRegistryAddress(bookingRegistry);
 
+    const listingImplementationAddress = await loadListingImplementationAddress(listingFactory);
+
     const lines = [
       `Owner:           ${owner}`,
       `Treasury:        ${treasury}`,
@@ -1407,6 +1455,7 @@ async function refreshSnapshot() {
       '',
       'Modules:',
       `  • ListingFactory : ${listingFactory}`,
+      `      ↳ Implementation: ${listingImplementationAddress}`,
       `  • BookingRegistry: ${bookingRegistry}`,
       `  • r3nt-SQMU token: ${sqmuToken}`,
       '',
