@@ -1565,3 +1565,29 @@ section.card:not([hidden]),
     scroll-behavior: auto !important;
   }
 }
+
+.card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+[data-collapsible] .inline-button {
+  font-weight: 600;
+}
+
+[data-collapsible-content][hidden] {
+  display: none !important;
+}
