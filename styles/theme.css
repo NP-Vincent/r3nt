@@ -1131,6 +1131,29 @@ dl.summary-breakdown dd {
   font-size: 0.9rem;
 }
 
+.booking-tokenisation-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.booking-tokenisation-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+  font-weight: 600;
+}
+
+.booking-tokenisation-empty {
+  font-size: 0.9rem;
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
 .booking-detail-label {
   font-size: 0.72rem;
   text-transform: uppercase;

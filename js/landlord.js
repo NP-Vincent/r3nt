@@ -27,6 +27,7 @@ const GEOHASH_ALLOWED_PATTERN = /^[0-9bcdefghjkmnpqrstuvwxyz]+$/;
 const LAT_LON_FILTER_PATTERN = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 const DEFAULT_SORT_MODE = 'created-desc';
 const BOOKING_STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
+const BOOKING_PERIOD_LABELS = ['Unspecified', 'Daily', 'Weekly', 'Monthly'];
 
 const UINT64_MAX = (1n << 64n) - 1n;
 const utf8Encoder = new TextEncoder();
@@ -220,6 +221,35 @@ function formatDuration(seconds) {
   }
   const hoursOnly = Math.max(1, Math.round(totalSeconds / 3600));
   return `${hoursOnly} hour${hoursOnly === 1 ? '' : 's'}`;
+}
+
+function formatBasisPoints(value) {
+  let bps;
+  try {
+    bps = typeof value === 'bigint' ? value : BigInt(value || 0);
+  } catch {
+    bps = 0n;
+  }
+  const numeric = Number(bps);
+  if (!Number.isFinite(numeric)) {
+    return `${bps.toString()} bps`;
+  }
+  const percent = (numeric / 100).toFixed(2).replace(/\.0+$/, '').replace(/\.([1-9])0$/, '.$1');
+  return `${percent}% (${bps.toString()} bps)`;
+}
+
+function formatSqmu(value) {
+  let amount;
+  try {
+    amount = typeof value === 'bigint' ? value : BigInt(value || 0);
+  } catch {
+    amount = 0n;
+  }
+  const numeric = Number(amount);
+  if (Number.isFinite(numeric) && Math.abs(numeric) <= Number.MAX_SAFE_INTEGER) {
+    return numeric.toLocaleString('en-US');
+  }
+  return amount.toString();
 }
 
 function formatTimestamp(ts) {
@@ -1434,6 +1464,9 @@ function renderDepositBookingInfo(listingAddr, bookingId, booking, pending) {
   const depositShareText = booking.depositReleased
     ? ` · Tenant share: ${(Number(booking.depositTenantBps || 0n) / 100).toFixed(2)}%`
     : '';
+  const tokenised = Boolean(booking.tokenised);
+  const tokenPeriodIndex = toNumberOr(booking.period, 0);
+  const tokenPeriodLabel = BOOKING_PERIOD_LABELS[tokenPeriodIndex] || `Custom (${tokenPeriodIndex})`;
   const lines = [
     `Listing: ${listingAddr}`,
     `Booking ID: ${bookingId.toString()}`,
@@ -1444,10 +1477,24 @@ function renderDepositBookingInfo(listingAddr, bookingId, booking, pending) {
     `Rent (gross/net): ${formatUsdc(booking.grossRent)} / ${formatUsdc(booking.expectedNetRent)} USDC`,
     `Rent paid so far: ${formatUsdc(booking.rentPaid)} USDC`,
     `Deposit released: ${booking.depositReleased ? 'Yes' : 'No'}${depositShareText}`,
+  ];
+  if (tokenised) {
+    lines.push(
+      'Tokenisation: Enabled',
+      `Total SQMU: ${formatSqmu(booking.totalSqmu)}`,
+      `Sold SQMU: ${formatSqmu(booking.soldSqmu)}`,
+      `Price per SQMU: ${formatUsdc(booking.pricePerSqmu)} USDC`,
+      `Token fee: ${formatBasisPoints(booking.feeBps)}`,
+      `Token period: ${tokenPeriodLabel}`,
+    );
+  } else {
+    lines.push('Tokenisation: Not enabled');
+  }
+  lines.push(
     pending?.exists
       ? `Pending proposal: tenant ${(Number(pending.tenantBps || 0n) / 100).toFixed(2)}% · proposer ${pending.proposer}`
       : 'Pending proposal: none',
-  ];
+  );
   depositEls.bookingInfo.innerHTML = lines.map((line) => escapeHtml(line)).join('<br>');
 }
 
@@ -1474,6 +1521,12 @@ async function loadDepositBooking() {
       status: bookingRaw.status,
       depositReleased: bookingRaw.depositReleased,
       depositTenantBps: bookingRaw.depositTenantBps,
+      tokenised: bookingRaw.tokenised,
+      totalSqmu: bookingRaw.totalSqmu,
+      soldSqmu: bookingRaw.soldSqmu,
+      pricePerSqmu: bookingRaw.pricePerSqmu,
+      feeBps: bookingRaw.feeBps,
+      period: bookingRaw.period,
     };
 
     renderDepositBookingInfo(listingAddr, bookingId, booking, pending);
