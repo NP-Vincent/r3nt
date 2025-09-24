@@ -15,6 +15,7 @@ import {
 import createBackController from './back-navigation.js';
 
 const ARBITRUM_HEX = '0xa4b1';
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const USDC_SCALAR = 1_000_000n;
 const IPFS_PREFIX = 'ipfs://';
 const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
@@ -33,6 +34,24 @@ const els = {
   holdingsList: document.getElementById('holdingsList'),
   tokenisationDashboard: document.getElementById('tokenisationDashboard'),
   rentDashboard: document.getElementById('rentDashboard'),
+  investCard: document.getElementById('investCard'),
+  investDetails: document.getElementById('investDetails'),
+  investProperty: document.getElementById('investProperty'),
+  investListingAddress: document.getElementById('investListingAddress'),
+  investBooking: document.getElementById('investBooking'),
+  investDescription: document.getElementById('investDescription'),
+  investPrice: document.getElementById('investPrice'),
+  investRemaining: document.getElementById('investRemaining'),
+  investFeeBps: document.getElementById('investFeeBps'),
+  investPeriod: document.getElementById('investPeriod'),
+  investForm: document.getElementById('investForm'),
+  investSqmuInput: document.getElementById('investSqmuInput'),
+  investInputHint: document.getElementById('investInputHint'),
+  investTotal: document.getElementById('investTotal'),
+  investFee: document.getElementById('investFee'),
+  investNet: document.getElementById('investNet'),
+  investSubmit: document.getElementById('investSubmit'),
+  investCancel: document.getElementById('investCancel'),
 };
 
 if (els.connect && !els.connect.dataset.defaultLabel) {
@@ -46,7 +65,7 @@ mountNotificationCenter(document.getElementById('notificationTray'), { role: 'in
 
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 let provider;
-const state = { account: null, holdings: [] };
+const state = { account: null, holdings: [], selectedBooking: null };
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
 backController.update();
@@ -68,6 +87,25 @@ function shortAddress(addr) {
   if (typeof addr !== 'string') return '';
   if (!addr.startsWith('0x') || addr.length < 10) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function makeBookingKey(listingAddress, bookingId) {
+  const addr = typeof listingAddress === 'string' ? listingAddress.toLowerCase() : '';
+  let idPart = '';
+  if (typeof bookingId === 'bigint') {
+    idPart = bookingId.toString();
+  } else if (typeof bookingId === 'number') {
+    idPart = Number.isFinite(bookingId) ? bookingId.toString() : '';
+  } else if (typeof bookingId === 'string') {
+    idPart = bookingId.trim();
+  } else {
+    try {
+      idPart = BigInt(bookingId || 0).toString();
+    } catch {
+      idPart = String(bookingId ?? '');
+    }
+  }
+  return `${addr}::${idPart}`;
 }
 
 function normaliseMetadataUrl(uri) {
@@ -282,6 +320,309 @@ function updateConnectedAccount(addr) {
       els.walletAddress.textContent = 'Not connected';
     }
   }
+  if (!value) {
+    clearInvestSelection({ silent: true });
+  }
+}
+
+function createSelectionFromEntry(entry) {
+  if (!entry) return null;
+  const listingAddress = typeof entry.listingAddress === 'string' ? entry.listingAddress : '';
+  let bookingIdRaw = 0n;
+  try {
+    bookingIdRaw = typeof entry.bookingId === 'bigint' ? entry.bookingId : BigInt(entry.bookingId ?? 0);
+  } catch {
+    bookingIdRaw = 0n;
+  }
+  const bookingId = Number(bookingIdRaw);
+  const totalSqmu = typeof entry.totalSqmu === 'bigint' ? entry.totalSqmu : BigInt(entry.totalSqmu ?? 0);
+  const soldSqmu = typeof entry.soldSqmu === 'bigint' ? entry.soldSqmu : BigInt(entry.soldSqmu ?? 0);
+  const remainingSqmu = totalSqmu > soldSqmu ? totalSqmu - soldSqmu : 0n;
+  const pricePerSqmu = typeof entry.pricePerSqmu === 'bigint' ? entry.pricePerSqmu : BigInt(entry.pricePerSqmu ?? 0);
+  const feeBps = Number(entry.feeBps ?? 0);
+  const propertyTitle = entry.propertyTitle || '';
+  const propertyDescription = entry.propertyDescription || '';
+  const periodLabel = (entry.periodLabel || '').trim() || formatPeriodLabel(entry.period);
+  return {
+    key: makeBookingKey(listingAddress, bookingIdRaw),
+    listingAddress,
+    listingAddressLower: listingAddress.toLowerCase(),
+    bookingId,
+    bookingIdRaw,
+    totalSqmu,
+    soldSqmu,
+    remainingSqmu,
+    pricePerSqmu,
+    feeBps,
+    propertyTitle,
+    propertyDescription,
+    periodLabel,
+  };
+}
+
+function evaluateInvestmentInput() {
+  const selection = state.selectedBooking;
+  const input = els.investSqmuInput;
+  const raw = input ? (input.value || '').trim() : '';
+  const hasValue = raw.length > 0;
+  let isNumeric = false;
+  let amount = 0n;
+  let message = '';
+
+  if (hasValue && /^\d+$/.test(raw)) {
+    amount = BigInt(raw);
+    isNumeric = true;
+  } else if (hasValue) {
+    message = 'Enter a whole number of SQMU.';
+  }
+
+  if (!selection) {
+    return { amount, valid: false, hasValue, isNumeric, message: message || 'Select a tokenised booking.' };
+  }
+
+  if (!isNumeric) {
+    return { amount, valid: false, hasValue, isNumeric, message };
+  }
+
+  if (selection.remainingSqmu <= 0n) {
+    return { amount, valid: false, hasValue, isNumeric, message: 'This booking is fully subscribed.' };
+  }
+
+  if (amount <= 0n) {
+    return { amount, valid: false, hasValue, isNumeric, message: 'Enter at least 1 SQMU.' };
+  }
+
+  if (amount > selection.remainingSqmu) {
+    return {
+      amount,
+      valid: false,
+      hasValue,
+      isNumeric,
+      message: `Only ${selection.remainingSqmu.toString()} SQMU remaining.`,
+    };
+  }
+
+  return { amount, valid: true, hasValue, isNumeric, message: '' };
+}
+
+function updateInvestmentTotals() {
+  const selection = state.selectedBooking;
+  const totalEl = els.investTotal;
+  const feeEl = els.investFee;
+  const netEl = els.investNet;
+  const submitBtn = els.investSubmit;
+  const hint = els.investInputHint;
+  const sqmuInput = els.investSqmuInput;
+
+  if (!selection) {
+    if (totalEl) totalEl.textContent = '0 USDC';
+    if (feeEl) feeEl.textContent = '0 USDC';
+    if (netEl) netEl.textContent = '0 USDC';
+    if (submitBtn) submitBtn.disabled = true;
+    if (hint) hint.textContent = '';
+    if (sqmuInput) {
+      sqmuInput.disabled = true;
+      sqmuInput.setCustomValidity('');
+    }
+    return;
+  }
+
+  if (sqmuInput) {
+    sqmuInput.disabled = selection.remainingSqmu <= 0n;
+  }
+
+  const evaluation = evaluateInvestmentInput();
+  const { amount, valid, hasValue, isNumeric, message } = evaluation;
+  const pricePerSqmu = selection.pricePerSqmu;
+  const total = isNumeric ? pricePerSqmu * amount : 0n;
+  const fee = total > 0n ? (total * BigInt(selection.feeBps || 0)) / 10000n : 0n;
+  const net = total - fee;
+
+  if (totalEl) totalEl.textContent = `${formatUsdc(total)} USDC`;
+  if (feeEl) feeEl.textContent = `${formatUsdc(fee)} USDC`;
+  if (netEl) netEl.textContent = `${formatUsdc(net)} USDC`;
+
+  if (submitBtn) {
+    submitBtn.disabled = !valid;
+  }
+
+  if (sqmuInput) {
+    if (selection.remainingSqmu <= 0n) {
+      sqmuInput.setCustomValidity('This booking is fully subscribed.');
+    } else if (!hasValue || valid) {
+      sqmuInput.setCustomValidity('');
+    } else if (message) {
+      sqmuInput.setCustomValidity(message);
+    } else {
+      sqmuInput.setCustomValidity('Enter a valid SQMU amount.');
+    }
+  }
+
+  if (hint) {
+    if (message) {
+      hint.textContent = message;
+    } else if (!hasValue) {
+      hint.textContent = 'Enter the number of SQMU tokens to purchase.';
+    } else {
+      hint.textContent = '';
+    }
+  }
+}
+
+function updateInvestSelectionUI(options = {}) {
+  const { preserveInput = false } = options;
+  const selection = state.selectedBooking;
+  const card = els.investCard;
+  const details = els.investDetails;
+  const sqmuInput = els.investSqmuInput;
+  const savedValue = preserveInput && sqmuInput ? sqmuInput.value : '';
+
+  if (!selection) {
+    if (card) card.hidden = true;
+    if (details) details.hidden = true;
+    if (els.investBooking) els.investBooking.innerHTML = '';
+    if (els.investProperty) els.investProperty.textContent = '';
+    if (els.investListingAddress) els.investListingAddress.textContent = '';
+    if (els.investDescription) {
+      els.investDescription.textContent = '';
+      els.investDescription.hidden = true;
+    }
+    if (els.investPrice) els.investPrice.textContent = '0 USDC';
+    if (els.investRemaining) els.investRemaining.textContent = '0 SQMU-R';
+    if (els.investFeeBps) els.investFeeBps.textContent = '0 bps';
+    if (els.investPeriod) els.investPeriod.textContent = '—';
+    if (sqmuInput) {
+      if (!preserveInput) {
+        sqmuInput.value = '';
+      } else {
+        sqmuInput.value = savedValue;
+      }
+      sqmuInput.disabled = true;
+    }
+    updateInvestmentTotals();
+    return;
+  }
+
+  if (card) card.hidden = false;
+  if (details) details.hidden = false;
+
+  const propertyTitle = (selection.propertyTitle || '').trim() || shortAddress(selection.listingAddress);
+  if (els.investProperty) {
+    els.investProperty.textContent = propertyTitle;
+  }
+  if (els.investListingAddress) {
+    els.investListingAddress.textContent = shortAddress(selection.listingAddress);
+  }
+  if (els.investBooking) {
+    els.investBooking.innerHTML = '';
+    const badge = createBookingBadge(selection.bookingId);
+    if (badge) {
+      els.investBooking.appendChild(badge);
+    } else {
+      const fallback = document.createElement('span');
+      fallback.className = 'badge';
+      fallback.textContent = `Booking #${selection.bookingId}`;
+      els.investBooking.appendChild(fallback);
+    }
+  }
+  if (els.investDescription) {
+    const desc = (selection.propertyDescription || '').trim();
+    if (desc && desc !== propertyTitle) {
+      els.investDescription.textContent = desc;
+      els.investDescription.hidden = false;
+    } else {
+      els.investDescription.textContent = '';
+      els.investDescription.hidden = true;
+    }
+  }
+  if (els.investPrice) {
+    els.investPrice.textContent = `${formatUsdc(selection.pricePerSqmu)} USDC`;
+  }
+  if (els.investRemaining) {
+    els.investRemaining.textContent = `${selection.remainingSqmu.toString()} of ${selection.totalSqmu.toString()} SQMU-R remaining`;
+  }
+  if (els.investFeeBps) {
+    const percent = (Number(selection.feeBps || 0) / 100).toFixed(2);
+    els.investFeeBps.textContent = `${selection.feeBps} bps (${percent}%)`;
+  }
+  if (els.investPeriod) {
+    els.investPeriod.textContent = selection.periodLabel || 'Unspecified';
+  }
+
+  if (sqmuInput) {
+    if (preserveInput) {
+      sqmuInput.value = savedValue;
+    } else {
+      sqmuInput.value = '';
+    }
+    sqmuInput.disabled = false;
+  }
+
+  updateInvestmentTotals();
+
+  if (sqmuInput && !preserveInput) {
+    try {
+      sqmuInput.focus();
+      sqmuInput.select();
+    } catch {}
+  }
+}
+
+function selectBooking(entry) {
+  const selection = createSelectionFromEntry(entry);
+  if (!selection) {
+    return;
+  }
+  if (selection.remainingSqmu <= 0n) {
+    state.selectedBooking = null;
+    updateInvestSelectionUI();
+    setStatus('This booking is fully subscribed.');
+    return;
+  }
+  const currentKey = state.selectedBooking?.key;
+  const preserveInput = currentKey === selection.key;
+  state.selectedBooking = selection;
+  updateInvestSelectionUI({ preserveInput });
+  renderDashboards(state.holdings);
+  if (!preserveInput) {
+    setStatus(`Investment form ready for booking #${selection.bookingId}.`);
+  }
+}
+
+function clearInvestSelection(options = {}) {
+  const { silent = false } = options;
+  if (!state.selectedBooking) {
+    updateInvestSelectionUI();
+    return;
+  }
+  state.selectedBooking = null;
+  updateInvestSelectionUI();
+  renderDashboards(state.holdings);
+  if (!silent) {
+    setStatus('Investment form closed.');
+  }
+}
+
+function syncSelectedBooking(entries) {
+  if (!state.selectedBooking) {
+    updateInvestSelectionUI();
+    return;
+  }
+  const currentKey = state.selectedBooking.key;
+  const match = entries.find((entry) => makeBookingKey(entry.listingAddress, entry.bookingId) === currentKey);
+  if (!match) {
+    state.selectedBooking = null;
+    updateInvestSelectionUI();
+    return;
+  }
+  const updated = createSelectionFromEntry(match);
+  if (!updated || updated.remainingSqmu <= 0n) {
+    state.selectedBooking = null;
+    updateInvestSelectionUI();
+    return;
+  }
+  state.selectedBooking = updated;
+  updateInvestSelectionUI({ preserveInput: true });
 }
 
 async function ensureArbitrum(p) {
@@ -467,9 +808,41 @@ function renderTokenisation(entries) {
     container.appendChild(empty);
     return;
   }
+  const selectedKey = state.selectedBooking?.key ?? null;
   for (const entry of entries) {
+    const selectionDetails = createSelectionFromEntry(entry);
+    const bookingKey = selectionDetails?.key ?? makeBookingKey(entry.listingAddress, entry.bookingId);
+    const hasRemaining = selectionDetails ? selectionDetails.remainingSqmu > 0n : true;
+    const isSelected = Boolean(selectedKey && bookingKey && selectedKey === bookingKey);
+
     const card = document.createElement('div');
-    card.className = 'data-card';
+    card.className = hasRemaining ? 'data-card selectable' : 'data-card';
+    if (bookingKey) {
+      card.dataset.bookingKey = bookingKey;
+    }
+    if (isSelected) {
+      card.classList.add('is-selected');
+    }
+    if (hasRemaining) {
+      card.setAttribute('role', 'button');
+      card.tabIndex = 0;
+      card.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      card.setAttribute('aria-label', `Open invest form for booking #${entry.bookingId}`);
+      card.addEventListener('click', (event) => {
+        if (event.target?.closest('button')) {
+          return;
+        }
+        selectBooking(entry);
+      });
+      card.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectBooking(entry);
+        }
+      });
+    } else {
+      card.setAttribute('aria-disabled', 'true');
+    }
 
     const header = document.createElement('div');
     header.className = 'data-card-header';
@@ -536,6 +909,32 @@ function renderTokenisation(entries) {
     metrics.appendChild(cadenceMetric);
 
     card.appendChild(metrics);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const investBtn = document.createElement('button');
+    investBtn.type = 'button';
+    if (hasRemaining) {
+      investBtn.textContent = isSelected ? 'Invest form open' : 'Invest';
+      if (isSelected) {
+        investBtn.classList.add('secondary');
+      }
+    } else {
+      investBtn.textContent = 'No SQMU available';
+      investBtn.disabled = true;
+      investBtn.classList.add('secondary');
+    }
+    investBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (!hasRemaining) {
+        setStatus('No SQMU available for this booking right now.');
+        return;
+      }
+      selectBooking(entry);
+    });
+    actions.appendChild(investBtn);
+    card.appendChild(actions);
+
     container.appendChild(card);
   }
 }
@@ -608,6 +1007,7 @@ async function loadInvestorData(account) {
     const cleaned = await fetchPlatformListings();
     if (!cleaned.length) {
       renderDashboards([]);
+      clearInvestSelection({ silent: true });
       setStatus('No listings available yet.');
       notify({ message: 'No listings available yet.', variant: 'info', role: 'investor', timeout: 5000 });
       return;
@@ -618,6 +1018,7 @@ async function loadInvestorData(account) {
       allEntries.push(...bookings);
     }
     state.holdings = allEntries;
+    syncSelectedBooking(allEntries);
     renderDashboards(allEntries);
     setStatus(`Loaded ${allEntries.length} booking${allEntries.length === 1 ? '' : 's'}.`);
     notify({ message: 'Investor data refreshed.', variant: 'success', role: 'investor', timeout: 5000 });
@@ -665,6 +1066,104 @@ async function fetchPlatformListings() {
   } catch (err) {
     console.error('Fallback listing enumeration failed', err);
     throw err;
+  }
+}
+
+async function submitInvestment(event) {
+  event.preventDefault();
+  const selection = state.selectedBooking;
+  const evaluation = evaluateInvestmentInput();
+  if (!selection) {
+    updateInvestmentTotals();
+    const message = evaluation.message || 'Select a tokenised booking to invest.';
+    setStatus(message);
+    notify({ message, variant: 'warning', role: 'investor', timeout: 5000 });
+    return;
+  }
+  if (!evaluation.valid) {
+    updateInvestmentTotals();
+    const message = evaluation.message || 'Enter a valid SQMU amount before investing.';
+    setStatus(message);
+    notify({ message, variant: 'warning', role: 'investor', timeout: 5000 });
+    return;
+  }
+  try {
+    if (!state.account) {
+      const message = 'Connect your wallet before investing.';
+      setStatus(message);
+      notify({ message, variant: 'warning', role: 'investor', timeout: 5000 });
+      return;
+    }
+    const p = provider || (provider = await sdk.wallet.getEthereumProvider());
+    const [from] = (await p.request({ method: 'eth_accounts' })) || [];
+    if (!from) throw new Error('No wallet account connected.');
+    await ensureArbitrum(p);
+
+    const bookingId = selection.bookingIdRaw ?? BigInt(selection.bookingId || 0);
+    const sqmuAmount = evaluation.amount;
+    const data = encodeFunctionData({
+      abi: LISTING_ABI,
+      functionName: 'invest',
+      args: [bookingId, sqmuAmount, ZERO_ADDRESS],
+    });
+    const call = { to: selection.listingAddress, data };
+    const submitBtn = els.investSubmit;
+    if (submitBtn) submitBtn.disabled = true;
+    setStatus('Submitting investment transaction…');
+
+    let walletSendUnsupported = false;
+    try {
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls: [call],
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      walletSendUnsupported = unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        setStatus('Investment cancelled by user.');
+        notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
+        return;
+      }
+      throw err;
+    }
+
+    if (walletSendUnsupported) {
+      try {
+        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: selection.listingAddress, data }] });
+      } catch (err) {
+        if (isUserRejectedRequestError(err)) {
+          setStatus('Investment cancelled by user.');
+          notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
+          return;
+        }
+        throw err;
+      }
+    }
+
+    setStatus('Investment transaction sent.');
+    notify({ message: 'Investment transaction sent.', variant: 'success', role: 'investor', timeout: 6000 });
+
+    if (els.investSqmuInput) {
+      els.investSqmuInput.value = '';
+    }
+    updateInvestmentTotals();
+    await loadInvestorData(state.account);
+  } catch (err) {
+    console.error('Investment failed', err);
+    if (isUserRejectedRequestError(err)) {
+      setStatus('Investment cancelled by user.');
+      notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
+      return;
+    }
+    const message = err?.message || 'Investment failed.';
+    setStatus(message);
+    notify({ message, variant: 'error', role: 'investor', timeout: 6000 });
+  } finally {
+    if (els.investSubmit) {
+      els.investSubmit.disabled = false;
+    }
+    updateInvestmentTotals();
   }
 }
 
@@ -724,6 +1223,10 @@ function boot() {
   setVersionBadge();
   setStatus('Connect your wallet to begin.');
 }
+
+els.investSqmuInput?.addEventListener('input', updateInvestmentTotals);
+els.investForm?.addEventListener('submit', submitInvestment);
+els.investCancel?.addEventListener('click', () => clearInvestSelection());
 
 els.connect?.addEventListener('click', async () => {
   try {

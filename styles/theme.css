@@ -838,6 +838,21 @@ footer {
   box-shadow: var(--shadow-subtle);
 }
 
+.data-card.selectable {
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.data-card.selectable:hover {
+  border-color: var(--color-selected-border);
+  box-shadow: var(--shadow-soft);
+}
+
+.data-card.is-selected {
+  border-color: var(--color-selected-border);
+  box-shadow: var(--color-selected-shadow);
+}
+
 .landlord-card-summary {
   display: flex;
   align-items: center;
@@ -1300,6 +1315,42 @@ dl.summary-breakdown dd {
 .listing-summary {
   color: var(--color-muted);
   font-size: 0.9rem;
+}
+
+.invest-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.invest-summary-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.invest-summary .badge-with-copy {
+  flex-shrink: 0;
+}
+
+.invest-address {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.invest-address .mono {
+  color: var(--color-heading);
+}
+
+.invest-amount-hint {
+  font-size: 0.8rem;
+  color: var(--color-muted);
 }
 
 .listing-geo {

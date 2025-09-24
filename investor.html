@@ -51,6 +51,71 @@
     </div>
   </section>
 
+  <section class="card" id="investCard" hidden>
+    <h2>Invest in a tokenised booking</h2>
+    <p class="muted">Select a booking from the tokenisation overview to load investment details.</p>
+    <div id="investDetails" hidden>
+      <div class="invest-summary">
+        <div class="invest-summary-details">
+          <div class="listing-title" id="investProperty"></div>
+          <div class="invest-address muted">Listing <span id="investListingAddress" class="mono"></span></div>
+        </div>
+        <div id="investBooking"></div>
+      </div>
+      <div id="investDescription" class="listing-summary" hidden></div>
+      <div class="metric-row">
+        <div class="metric">
+          <label>Price per SQMU</label>
+          <span id="investPrice">0 USDC</span>
+        </div>
+        <div class="metric">
+          <label>Remaining supply</label>
+          <span id="investRemaining">0 SQMU-R</span>
+        </div>
+        <div class="metric">
+          <label>Platform fee</label>
+          <span id="investFeeBps">0 bps</span>
+        </div>
+        <div class="metric">
+          <label>Rent cadence</label>
+          <span id="investPeriod">—</span>
+        </div>
+      </div>
+      <form id="investForm" class="form-grid">
+        <label for="investSqmuInput">SQMU amount</label>
+        <input
+          type="number"
+          id="investSqmuInput"
+          min="1"
+          step="1"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          placeholder="Enter SQMU amount"
+          required
+        />
+        <div id="investInputHint" class="invest-amount-hint"></div>
+        <div class="metric-row">
+          <div class="metric">
+            <label>Total cost</label>
+            <span id="investTotal">0 USDC</span>
+          </div>
+          <div class="metric">
+            <label>Platform fee</label>
+            <span id="investFee">0 USDC</span>
+          </div>
+          <div class="metric">
+            <label>Net to landlord</label>
+            <span id="investNet">0 USDC</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="submit" id="investSubmit" disabled>Invest</button>
+          <button type="button" class="secondary" id="investCancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
   <section class="card">
     <h2>Rent accrual</h2>
     <p>Claimable rent across your SQMU-R holdings. Claim in a single click when available.</p>
