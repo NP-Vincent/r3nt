@@ -120,18 +120,6 @@
       <label class="field-option">
         <span class="status-dot" aria-hidden="true"></span>
         <div class="field-content">
-          <span class="field-title">GeoHash</span>
-          <span class="field-hint">We derive this automatically. Paste one to update the coordinates.</span>
-          <input id="geohash" placeholder="thrr3sq" autocapitalize="off" spellcheck="false">
-        </div>
-      </label>
-    </div>
-    <div class="muted"><small>We derive a GeoHash locally from these coordinates.</small></div>
-
-    <div class="field-grid">
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
           <span class="field-title">Title (max 64 chars)</span>
           <span class="field-hint">Appears as the property headline inside your cast.</span>
           <input id="title" maxlength="64" placeholder="Cozy studio near metro">
@@ -241,7 +229,7 @@
     </label>
     <label>
       <span>Location filter</span>
-      <input id="listingLocationFilter" placeholder="Geohash prefix or lat,lon" autocomplete="off" spellcheck="false" />
+      <input id="listingLocationFilter" placeholder="Latitude,Longitude" autocomplete="off" spellcheck="false" />
     </label>
     <button type="button" id="listingLocationClear" class="inline-button">Clear</button>
   </div>
