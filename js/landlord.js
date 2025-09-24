@@ -1214,12 +1214,14 @@ async function fetchListingBookings(listing) {
   } catch {
     maxId = 0n;
   }
-  if (maxId <= 1n) {
+  // nextBookingId is incremented before assignments inside the Listing contract, meaning the
+  // returned value reflects the highest booking id that has been created (not the next empty id).
+  if (maxId <= 0n) {
     return [];
   }
   const records = [];
   let failures = 0;
-  for (let bookingId = 1n; bookingId < maxId; bookingId++) {
+  for (let bookingId = 1n; bookingId <= maxId; bookingId++) {
     try {
       const { booking, pending } = await fetchTokenBookingDetails(listingAddr, bookingId);
       const record = buildLandlordBookingRecord(listing, bookingId, booking, pending);
