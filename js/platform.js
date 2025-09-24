@@ -921,7 +921,10 @@ async function loadTokenisationProposals({ quiet = false } = {}) {
         console.warn('Unable to load booking count for listing', listingAddress, err);
       }
       const maxBooking = BigInt(nextBookingId.toString());
-      for (let bookingIndex = 1n; bookingIndex < maxBooking; bookingIndex++) {
+      if (maxBooking < 1n) {
+        continue;
+      }
+      for (let bookingIndex = 1n; bookingIndex <= maxBooking; bookingIndex += 1n) {
         const bookingId = BigNumber.from(bookingIndex.toString());
         let pendingRaw;
         try {
