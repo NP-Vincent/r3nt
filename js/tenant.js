@@ -7,7 +7,7 @@ import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
 import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
-import { createCollapsibleSection } from './ui/accordion.js';
+import { createCollapsibleSection, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
 import {
   RPC_URL,
@@ -86,6 +86,7 @@ let activeTokenProposalPanel = null;
 let activeTokenProposalCard = null;
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
+mountCollapsibles();
 
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });

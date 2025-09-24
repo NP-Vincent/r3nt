@@ -1584,8 +1584,35 @@ section.card:not([hidden]),
   flex-wrap: wrap;
 }
 
-[data-collapsible] .inline-button {
+[data-collapsible] > .collapsible-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
   font-weight: 600;
+}
+
+[data-collapsible] > .collapsible-toggle::after {
+  content: '▾';
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--color-muted-strong);
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+[data-collapsible][data-open='0'] > .collapsible-toggle::after {
+  transform: rotate(-90deg);
+}
+
+[data-collapsible] > .collapsible-toggle:hover::after,
+[data-collapsible] > .collapsible-toggle:focus-visible::after {
+  color: var(--color-link-hover);
+}
+
+[data-collapsible] [data-collapsible-content] {
+  margin-top: 12px;
 }
 
 [data-collapsible-content][hidden] {
