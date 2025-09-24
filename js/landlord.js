@@ -62,10 +62,15 @@ function getPeriodKeyFromValue(periodValue) {
   return '';
 }
 
+function normaliseAddress(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().toLowerCase();
+}
+
 function addressesEqual(a, b) {
-  const left = typeof a === 'string' ? a.toLowerCase() : '';
-  const right = typeof b === 'string' ? b.toLowerCase() : '';
-  return left === right;
+  return normaliseAddress(a) === normaliseAddress(b);
 }
 
 // -------------------- UI handles --------------------
@@ -186,6 +191,9 @@ let landlordListingRecords = [];
 let listingSortMode = DEFAULT_SORT_MODE;
 let listingLocationFilterValue = '';
 let tokenToolContext = null;
+let currentLandlordAddress = null;
+const landlordListingEventWatchers = new Map();
+const landlordEventRefreshState = { timer: null, messages: new Set(), running: false };
 
 const onboardingFields = [
   'title',
@@ -1823,33 +1831,231 @@ function setLandlordListingRecords(records) {
     }
   }
   landlordListingRecords = normalized;
+  syncLandlordListingEventWatchers(normalized);
   renderLandlordListingView();
+}
+
+function resetLandlordRefreshQueue() {
+  if (landlordEventRefreshState.timer) {
+    clearTimeout(landlordEventRefreshState.timer);
+    landlordEventRefreshState.timer = null;
+  }
+  landlordEventRefreshState.messages.clear();
+  landlordEventRefreshState.running = false;
+}
+
+function clearLandlordEventWatchers() {
+  for (const unwatchers of landlordListingEventWatchers.values()) {
+    for (const stop of unwatchers) {
+      try {
+        if (typeof stop === 'function') {
+          stop();
+        }
+      } catch (err) {
+        console.warn('Failed to remove landlord event watcher', err);
+      }
+    }
+  }
+  landlordListingEventWatchers.clear();
+}
+
+function queueLandlordListingRefresh(message) {
+  if (!currentLandlordAddress) {
+    return;
+  }
+  if (message) {
+    landlordEventRefreshState.messages.add(message);
+  }
+  if (landlordEventRefreshState.timer) {
+    return;
+  }
+  landlordEventRefreshState.timer = setTimeout(processLandlordListingRefresh, 1500);
+}
+
+async function processLandlordListingRefresh() {
+  landlordEventRefreshState.timer = null;
+  if (!currentLandlordAddress) {
+    landlordEventRefreshState.messages.clear();
+    landlordEventRefreshState.running = false;
+    return;
+  }
+  if (landlordListingsLoading || landlordEventRefreshState.running) {
+    landlordEventRefreshState.timer = setTimeout(processLandlordListingRefresh, 1500);
+    return;
+  }
+  const messages = Array.from(landlordEventRefreshState.messages);
+  landlordEventRefreshState.messages.clear();
+  landlordEventRefreshState.running = true;
+  const summary = messages.length ? messages.join(' • ') : 'On-chain update detected';
+  if (messages.length) {
+    info(`${summary}. Refreshing listings…`);
+  }
+  let success = false;
+  try {
+    success = await loadLandlordListings(currentLandlordAddress, { silent: true });
+  } catch (err) {
+    console.error('Failed to refresh landlord listings after event', err);
+  }
+  if (success && messages.length) {
+    info(`${summary}. Listings updated.`);
+  }
+  landlordEventRefreshState.running = false;
+  if (landlordEventRefreshState.messages.size > 0) {
+    landlordEventRefreshState.timer = setTimeout(processLandlordListingRefresh, 1500);
+  }
+}
+
+function createLandlordListingWatchers(listingAddress) {
+  const watchers = [];
+  const register = (eventName, handler) => {
+    try {
+      const unwatch = pub.watchContractEvent({
+        address: listingAddress,
+        abi: LISTING_ABI,
+        eventName,
+        pollingInterval: 8000,
+        onLogs: (logs) => {
+          if (!Array.isArray(logs) || logs.length === 0) {
+            return;
+          }
+          for (const log of logs) {
+            try {
+              handler(log);
+            } catch (err) {
+              console.error(`Landlord event handler error (${eventName})`, err);
+            }
+          }
+        },
+        onError: (err) => {
+          console.error(`Landlord event watcher error (${eventName})`, err);
+        },
+      });
+      if (typeof unwatch === 'function') {
+        watchers.push(unwatch);
+      }
+    } catch (err) {
+      console.error('Failed to watch landlord event', eventName, listingAddress, err);
+    }
+  };
+
+  const shortListing = shortAddress(listingAddress);
+
+  register('TokenisationProposed', (log) => {
+    const bookingId = toBigIntOrZero(log?.args?.bookingId);
+    const proposer = typeof log?.args?.proposer === 'string' ? log.args.proposer : '';
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const proposerLabel = proposer ? shortAddress(proposer) : 'unknown';
+    const message = `Tokenisation proposed for booking #${bookingLabel} on ${shortListing} by ${proposerLabel}.`;
+    notify({ message, variant: 'info', role: 'landlord', timeout: 6000 });
+    queueLandlordListingRefresh(`Tokenisation proposal update for booking #${bookingLabel}`);
+  });
+
+  register('TokenisationApproved', (log) => {
+    const bookingId = toBigIntOrZero(log?.args?.bookingId);
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const message = `Tokenisation approved for booking #${bookingLabel} on ${shortListing}.`;
+    notify({ message, variant: 'success', role: 'landlord', timeout: 6000 });
+    queueLandlordListingRefresh(`Tokenisation approved for booking #${bookingLabel}`);
+  });
+
+  register('SQMUTokensMinted', (log) => {
+    const bookingId = toBigIntOrZero(log?.args?.bookingId);
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const investorAddr = typeof log?.args?.investor === 'string' ? log.args.investor : '';
+    const investorLabel = investorAddr ? shortAddress(investorAddr) : 'unknown';
+    const sqmuAmount = toBigIntOrZero(log?.args?.sqmuAmount);
+    const message = `${investorLabel} purchased ${formatSqmu(sqmuAmount)} SQMU for booking #${bookingLabel} on ${shortListing}.`;
+    notify({ message, variant: 'success', role: 'landlord', timeout: 6000 });
+    queueLandlordListingRefresh(`SQMU sale update for booking #${bookingLabel}`);
+  });
+
+  register('RentPaid', (log) => {
+    const bookingId = toBigIntOrZero(log?.args?.bookingId);
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const netAmount = toBigIntOrZero(log?.args?.netAmount);
+    const message = `Rent payment received for booking #${bookingLabel} on ${shortListing}: ${formatUsdc(netAmount)} USDC net.`;
+    notify({ message, variant: 'success', role: 'landlord', timeout: 6000 });
+    queueLandlordListingRefresh(`Rent payment for booking #${bookingLabel}`);
+  });
+
+  register('Claimed', (log) => {
+    const bookingId = toBigIntOrZero(log?.args?.bookingId);
+    const bookingLabel = bookingId > 0n ? bookingId.toString() : '?';
+    const account = typeof log?.args?.account === 'string' ? log.args.account : '';
+    const accountLabel = account ? shortAddress(account) : 'unknown';
+    const amount = toBigIntOrZero(log?.args?.amount);
+    const message = `${accountLabel} claimed ${formatUsdc(amount)} USDC from booking #${bookingLabel} on ${shortListing}.`;
+    notify({ message, variant: 'info', role: 'landlord', timeout: 6000 });
+    queueLandlordListingRefresh(`Claim update for booking #${bookingLabel}`);
+  });
+
+  return watchers;
+}
+
+function syncLandlordListingEventWatchers(records) {
+  if (!currentLandlordAddress) {
+    return;
+  }
+  const desired = new Set();
+  for (const entry of records || []) {
+    const addr = normaliseAddress(entry?.address);
+    if (!addr) {
+      continue;
+    }
+    desired.add(addr);
+    if (landlordListingEventWatchers.has(addr)) {
+      continue;
+    }
+    const watchers = createLandlordListingWatchers(entry.address);
+    if (watchers.length) {
+      landlordListingEventWatchers.set(addr, watchers);
+    }
+  }
+  for (const [addr, unwatchers] of landlordListingEventWatchers) {
+    if (desired.has(addr)) {
+      continue;
+    }
+    for (const stop of unwatchers) {
+      try {
+        if (typeof stop === 'function') {
+          stop();
+        }
+      } catch (err) {
+        console.warn('Failed to remove stale landlord watcher', err);
+      }
+    }
+    landlordListingEventWatchers.delete(addr);
+  }
 }
 
 let landlordListingsLoading;
 
-async function loadLandlordListings(landlordAddr) {
+async function loadLandlordListings(landlordAddr, options = {}) {
+  const { silent = false } = options;
   const container = els.landlordListings;
-  if (!container) return;
+  if (!container) return false;
   const normalized = typeof landlordAddr === 'string' ? landlordAddr.toLowerCase() : '';
-  if (!normalized) return;
+  if (!normalized) return false;
 
   if (landlordListingsLoading) {
     try {
-      await landlordListingsLoading;
+      const result = await landlordListingsLoading;
+      return Boolean(result);
     } catch {
-      // ignore
+      return false;
     }
-    return;
   }
 
   const setMessage = (msg) => {
+    if (silent) return;
     container.classList.add('muted');
     container.textContent = msg;
   };
 
   landlordListingsLoading = (async () => {
-    setMessage('Loading your listings…');
+    if (!silent) {
+      setMessage('Loading your listings…');
+    }
 
     let abi;
     try {
@@ -1887,8 +2093,10 @@ async function loadLandlordListings(landlordAddr) {
 
     if (!cleaned.length) {
       setLandlordListingRecords([]);
-      notify({ message: 'No listings yet — create your first property.', variant: 'info', role: 'landlord', timeout: 5000 });
-      return;
+      if (!silent) {
+        notify({ message: 'No listings yet — create your first property.', variant: 'info', role: 'landlord', timeout: 5000 });
+      }
+      return true;
     }
 
     const infos = await Promise.all(cleaned.map((addr, index) => fetchListingInfo(addr, index)));
@@ -1897,21 +2105,29 @@ async function loadLandlordListings(landlordAddr) {
 
     if (!matches.length) {
       setLandlordListingRecords([]);
-      notify({ message: 'No listings yet — create your first property.', variant: 'info', role: 'landlord', timeout: 5000 });
-      return;
+      if (!silent) {
+        notify({ message: 'No listings yet — create your first property.', variant: 'info', role: 'landlord', timeout: 5000 });
+      }
+      return true;
     }
 
     setLandlordListingRecords(matches);
-    notify({
-      message: `Loaded ${matches.length} listing${matches.length === 1 ? '' : 's'}.`,
-      variant: 'success',
-      role: 'landlord',
-      timeout: 5000,
-    });
+    if (!silent) {
+      notify({
+        message: `Loaded ${matches.length} listing${matches.length === 1 ? '' : 's'}.`,
+        variant: 'success',
+        role: 'landlord',
+        timeout: 5000,
+      });
+    }
+    return true;
   })();
 
   try {
-    await landlordListingsLoading;
+    const result = await landlordListingsLoading;
+    return Boolean(result);
+  } catch {
+    return false;
   } finally {
     landlordListingsLoading = null;
   }
@@ -2589,6 +2805,13 @@ els.connect.onclick = async () => {
     const [from] = (await provider.request({ method: 'eth_accounts' })) || [];
     if (!from) throw new Error('No wallet account connected.');
     const landlordAddr = getAddress(from);
+    const previousNormalised = normaliseAddress(currentLandlordAddress);
+    const nextNormalised = normaliseAddress(landlordAddr);
+    if (!previousNormalised || previousNormalised !== nextNormalised) {
+      clearLandlordEventWatchers();
+    }
+    resetLandlordRefreshQueue();
+    currentLandlordAddress = landlordAddr;
     setConnectButtonState(true, 'Wallet Connected');
     walletConnected = true;
     if (depositEls.propose) {
@@ -2623,6 +2846,9 @@ els.connect.onclick = async () => {
     info(e?.message || 'Wallet connection failed.');
     notify({ message: e?.message || 'Wallet connection failed.', variant: 'error', role: 'landlord', timeout: 6000 });
     updateOnboardingProgress();
+    resetLandlordRefreshQueue();
+    clearLandlordEventWatchers();
+    currentLandlordAddress = null;
   }
 };
 
