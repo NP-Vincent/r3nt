@@ -302,6 +302,77 @@
     <div id="depositBookingInfo" class="muted"></div>
   </section>
 
+  <section id="tokenTools" class="guided-section">
+    <h2>Tokenisation proposals</h2>
+    <p class="section-subtext">Define SQMU supply, pricing and cadence for bookings you manage. Platform approval is required before investors can participate.</p>
+
+    <div class="field-grid columns-3">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Listing ID</span>
+          <span class="field-hint">Matches the ID shown on your listing card.</span>
+          <input id="tokenListingId" inputmode="numeric" placeholder="1">
+        </div>
+      </label>
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Booking ID</span>
+          <span class="field-hint">Active booking you want to tokenise.</span>
+          <input id="tokenBookingId" inputmode="numeric" placeholder="1">
+        </div>
+      </label>
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Total SQMU</span>
+          <span class="field-hint">Whole SQMU-R supply for this booking.</span>
+          <input id="tokenTotalSqmu" inputmode="numeric" placeholder="1000">
+        </div>
+      </label>
+    </div>
+
+    <div class="field-grid columns-3">
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Price per SQMU (USDC)</span>
+          <span class="field-hint">Up to 6 decimals.</span>
+          <input id="tokenPricePerSqmu" inputmode="decimal" placeholder="500.00">
+        </div>
+      </label>
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Platform fee (bps)</span>
+          <span class="field-hint">0 – 10000 basis points.</span>
+          <input id="tokenFeeBps" inputmode="numeric" value="0">
+        </div>
+      </label>
+      <label class="field-option">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div class="field-content">
+          <span class="field-title">Distribution period</span>
+          <span class="field-hint">Matches the rent cadence.</span>
+          <select id="tokenPeriodSelect">
+            <option value="">Select period…</option>
+            <option value="day">Daily</option>
+            <option value="week">Weekly</option>
+            <option value="month">Monthly</option>
+          </select>
+        </div>
+      </label>
+    </div>
+
+    <div class="token-proposal-actions">
+      <button id="tokenLoad" type="button" disabled>Load Booking Details</button>
+      <button id="tokenPropose" type="button" disabled>Propose Tokenisation</button>
+      <span id="tokenStatus" class="token-proposal-status" aria-live="polite"></span>
+    </div>
+    <div id="tokenBookingInfo" class="muted"></div>
+  </section>
+
   <footer>
     r3nt by SQMU. USDC. Arbitrum.
   </footer>

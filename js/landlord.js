@@ -28,6 +28,11 @@ const LAT_LON_FILTER_PATTERN = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*
 const DEFAULT_SORT_MODE = 'created-desc';
 const BOOKING_STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
 const BOOKING_PERIOD_LABELS = ['Unspecified', 'Daily', 'Weekly', 'Monthly'];
+const PERIOD_OPTIONS = {
+  day: { label: 'Daily', value: 1n },
+  week: { label: 'Weekly', value: 2n },
+  month: { label: 'Monthly', value: 3n },
+};
 
 const UINT64_MAX = (1n << 64n) - 1n;
 const utf8Encoder = new TextEncoder();
@@ -35,6 +40,27 @@ let platformAbi = Array.isArray(PLATFORM_ABI) && PLATFORM_ABI.length ? PLATFORM_
 let listingPriceCache;
 let listingPriceLoading;
 let locationUpdateSource = null;
+
+function getPeriodKeyFromValue(periodValue) {
+  let value;
+  try {
+    value = typeof periodValue === 'bigint' ? periodValue : BigInt(periodValue || 0);
+  } catch {
+    value = 0n;
+  }
+  for (const [key, info] of Object.entries(PERIOD_OPTIONS)) {
+    if (info.value === value) {
+      return key;
+    }
+  }
+  return '';
+}
+
+function addressesEqual(a, b) {
+  const left = typeof a === 'string' ? a.toLowerCase() : '';
+  const right = typeof b === 'string' ? b.toLowerCase() : '';
+  return left === right;
+}
 
 // -------------------- UI handles --------------------
 const els = {
@@ -82,6 +108,19 @@ const depositEls = {
   bookingInfo: document.getElementById('depositBookingInfo'),
   status: document.getElementById('depositStatus'),
 };
+const tokenEls = {
+  section: document.getElementById('tokenTools'),
+  listingId: document.getElementById('tokenListingId'),
+  bookingId: document.getElementById('tokenBookingId'),
+  totalSqmu: document.getElementById('tokenTotalSqmu'),
+  pricePerSqmu: document.getElementById('tokenPricePerSqmu'),
+  feeBps: document.getElementById('tokenFeeBps'),
+  period: document.getElementById('tokenPeriodSelect'),
+  load: document.getElementById('tokenLoad'),
+  propose: document.getElementById('tokenPropose'),
+  bookingInfo: document.getElementById('tokenBookingInfo'),
+  status: document.getElementById('tokenStatus'),
+};
 const info = (t) => (els.status.textContent = t);
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'landlord' });
@@ -94,6 +133,19 @@ if (depositEls.load) {
 }
 if (depositEls.propose) {
   depositEls.propose.disabled = true;
+}
+
+if (tokenEls.status) {
+  setTokenStatus('Sign in with Farcaster to manage tokenisation.');
+}
+if (tokenEls.load) {
+  tokenEls.load.disabled = true;
+}
+if (tokenEls.propose) {
+  tokenEls.propose.disabled = true;
+}
+if (tokenEls.period && !tokenEls.period.value) {
+  tokenEls.period.value = 'month';
 }
 
 const backButton = document.querySelector('[data-back-button]');
@@ -127,6 +179,7 @@ let walletConnected = false;
 let landlordListingRecords = [];
 let listingSortMode = DEFAULT_SORT_MODE;
 let listingLocationFilterValue = '';
+let tokenToolContext = null;
 
 const onboardingFields = [
   'title',
@@ -1571,6 +1624,358 @@ if (depositEls.propose) {
   });
 }
 
+// -------------------- Tokenisation tools --------------------
+function setTokenStatus(message) {
+  if (tokenEls.status) {
+    tokenEls.status.textContent = message || '';
+  }
+}
+
+function updateTokenStatus(message, variant = 'info') {
+  setTokenStatus(message);
+  if (message) {
+    notify({ message, variant, role: 'landlord', timeout: variant === 'error' ? 7000 : 5000 });
+  }
+}
+
+function clearTokenBookingInfo() {
+  if (tokenEls.bookingInfo) {
+    tokenEls.bookingInfo.innerHTML = '';
+  }
+}
+
+function parseTokenListingId() {
+  if (!tokenEls.listingId) throw new Error('Listing ID input missing.');
+  const raw = tokenEls.listingId.value.trim();
+  if (!/^\d+$/.test(raw)) throw new Error('Listing ID must be a whole number.');
+  const id = BigInt(raw);
+  if (id === 0n) throw new Error('Listing ID must be at least 1.');
+  return id;
+}
+
+function parseTokenBookingId() {
+  if (!tokenEls.bookingId) throw new Error('Booking ID input missing.');
+  const raw = tokenEls.bookingId.value.trim();
+  if (!/^\d+$/.test(raw)) throw new Error('Booking ID must be a whole number.');
+  return BigInt(raw);
+}
+
+function parseTokenTotalSqmu() {
+  if (!tokenEls.totalSqmu) throw new Error('Total SQMU input missing.');
+  const raw = tokenEls.totalSqmu.value.trim().replace(/,/g, '');
+  if (!raw) throw new Error('Enter the total SQMU supply.');
+  if (!/^\d+$/.test(raw)) throw new Error('Total SQMU must be a whole number.');
+  const value = BigInt(raw);
+  if (value === 0n) throw new Error('Total SQMU must be greater than zero.');
+  return value;
+}
+
+function parseTokenPricePerSqmu() {
+  if (!tokenEls.pricePerSqmu) throw new Error('Price per SQMU input missing.');
+  const raw = tokenEls.pricePerSqmu.value;
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw new Error('Enter the price per SQMU.');
+  }
+  let value;
+  try {
+    value = parseDec6(raw);
+  } catch (err) {
+    throw new Error('Enter the price per SQMU using up to 6 decimals.');
+  }
+  if (value <= 0n) {
+    throw new Error('Price per SQMU must be greater than zero.');
+  }
+  return value;
+}
+
+function parseTokenFeeBps() {
+  if (!tokenEls.feeBps) throw new Error('Platform fee input missing.');
+  const raw = tokenEls.feeBps.value.trim();
+  if (!/^\d+$/.test(raw)) throw new Error('Platform fee must be whole basis points.');
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 10_000) {
+    throw new Error('Platform fee must be between 0 and 10000 basis points.');
+  }
+  return value;
+}
+
+function parseTokenPeriodOption() {
+  if (!tokenEls.period) throw new Error('Distribution period selector missing.');
+  const key = tokenEls.period.value || '';
+  const option = PERIOD_OPTIONS[key];
+  if (!option) {
+    throw new Error('Select a distribution period.');
+  }
+  return option;
+}
+
+function applyBookingToTokenForm(booking) {
+  if (!booking) return;
+  if (tokenEls.totalSqmu) {
+    tokenEls.totalSqmu.value = booking.totalSqmu > 0n ? booking.totalSqmu.toString() : '';
+  }
+  if (tokenEls.pricePerSqmu) {
+    tokenEls.pricePerSqmu.value = booking.pricePerSqmu > 0n ? formatUsdc(booking.pricePerSqmu) : '';
+  }
+  if (tokenEls.feeBps) {
+    tokenEls.feeBps.value = booking.feeBps > 0n ? booking.feeBps.toString() : (tokenEls.feeBps.value || '0');
+  }
+  if (tokenEls.period) {
+    const periodKey = getPeriodKeyFromValue(booking.period);
+    if (periodKey && tokenEls.period.querySelector(`option[value="${periodKey}"]`)) {
+      tokenEls.period.value = periodKey;
+    } else if (tokenEls.period.querySelector('option[value="month"]')) {
+      tokenEls.period.value = 'month';
+    }
+  }
+}
+
+function renderTokenBookingInfo(listingAddr, bookingId, booking, pending) {
+  if (!tokenEls.bookingInfo) return;
+  const statusIndex = Number(booking.status || 0n);
+  const statusLabel = BOOKING_STATUS_LABELS[statusIndex] || `Unknown (${statusIndex})`;
+  const durationSeconds = (booking.end || 0n) - (booking.start || 0n);
+  const periodIndex = toNumberOr(booking.period, 0);
+  const periodLabel = BOOKING_PERIOD_LABELS[periodIndex] || `Custom (${periodIndex})`;
+  const lines = [
+    `Listing: ${listingAddr}`,
+    `Booking ID: ${bookingId.toString()}`,
+    `Status: ${statusLabel}`,
+    `Tenant: ${booking.tenant}`,
+    `Range: ${formatTimestamp(booking.start)} → ${formatTimestamp(booking.end)} (${formatDuration(durationSeconds)})`,
+    `Gross rent: ${formatUsdc(booking.grossRent)} USDC`,
+    `Net rent expected: ${formatUsdc(booking.expectedNetRent)} USDC`,
+    `Rent paid so far: ${formatUsdc(booking.rentPaid)} USDC`,
+    `Tokenisation: ${booking.tokenised ? 'Enabled' : 'Not enabled'}`,
+  ];
+  if (booking.totalSqmu > 0n) {
+    lines.push(
+      `Configured SQMU: ${formatSqmu(booking.totalSqmu)} @ ${formatUsdc(booking.pricePerSqmu)} USDC`,
+      `Fee: ${formatBasisPoints(booking.feeBps)}`,
+      `Cadence: ${periodLabel}`,
+    );
+  }
+  const proposer = booking.proposer && !/^0x0+$/i.test(booking.proposer) ? booking.proposer : '—';
+  lines.push(`Last proposer: ${proposer}`);
+  if (pending?.exists) {
+    const pendingPeriodIndex = toNumberOr(pending.period, 0);
+    const pendingPeriodLabel = BOOKING_PERIOD_LABELS[pendingPeriodIndex] || `Custom (${pendingPeriodIndex})`;
+    lines.push(
+      `Pending proposal: ${formatSqmu(pending.totalSqmu)} SQMU @ ${formatUsdc(pending.pricePerSqmu)} USDC · Fee ${formatBasisPoints(pending.feeBps)} · ${pendingPeriodLabel} · proposer ${pending.proposer}`,
+    );
+  } else {
+    lines.push('Pending proposal: none');
+  }
+  tokenEls.bookingInfo.innerHTML = lines.map((line) => escapeHtml(line)).join('<br>');
+}
+
+async function fetchTokenBookingDetails(listingAddr, bookingId) {
+  const [bookingRaw, pendingRaw] = await Promise.all([
+    pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'bookingInfo', args: [bookingId] }),
+    pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'pendingTokenisation', args: [bookingId] }),
+  ]);
+  const booking = {
+    tenant: bookingRaw.tenant,
+    start: bookingRaw.start,
+    end: bookingRaw.end,
+    grossRent: bookingRaw.grossRent,
+    expectedNetRent: bookingRaw.expectedNetRent,
+    rentPaid: bookingRaw.rentPaid,
+    deposit: bookingRaw.deposit,
+    status: bookingRaw.status,
+    tokenised: bookingRaw.tokenised,
+    totalSqmu: bookingRaw.totalSqmu,
+    soldSqmu: bookingRaw.soldSqmu,
+    pricePerSqmu: bookingRaw.pricePerSqmu,
+    feeBps: bookingRaw.feeBps,
+    period: bookingRaw.period,
+    proposer: bookingRaw.proposer,
+  };
+  const pending = pendingRaw
+    ? {
+        exists: pendingRaw.exists,
+        proposer: pendingRaw.proposer,
+        totalSqmu: pendingRaw.totalSqmu,
+        pricePerSqmu: pendingRaw.pricePerSqmu,
+        feeBps: pendingRaw.feeBps,
+        period: pendingRaw.period,
+      }
+    : { exists: false };
+  return { booking, pending };
+}
+
+function setTokenFormDisabled(disabled) {
+  const flag = Boolean(disabled);
+  if (tokenEls.listingId) tokenEls.listingId.disabled = flag;
+  if (tokenEls.bookingId) tokenEls.bookingId.disabled = flag;
+  if (tokenEls.totalSqmu) tokenEls.totalSqmu.disabled = flag;
+  if (tokenEls.pricePerSqmu) tokenEls.pricePerSqmu.disabled = flag;
+  if (tokenEls.feeBps) tokenEls.feeBps.disabled = flag;
+  if (tokenEls.period) tokenEls.period.disabled = flag;
+}
+
+async function loadTokenBookingDetails() {
+  if (!tokenEls.load) return;
+  const originalLabel = tokenEls.load.textContent;
+  tokenEls.load.disabled = true;
+  tokenEls.load.textContent = 'Loading…';
+  setTokenStatus('Loading booking details…');
+  try {
+    const listingId = parseTokenListingId();
+    const bookingId = parseTokenBookingId();
+    const listingAddr = await getListingAddressById(listingId);
+    const { booking, pending } = await fetchTokenBookingDetails(listingAddr, bookingId);
+    renderTokenBookingInfo(listingAddr, bookingId, booking, pending);
+    applyBookingToTokenForm(booking);
+    tokenToolContext = { listingId, listingAddr, bookingId };
+    updateTokenStatus('Booking details loaded.', 'success');
+  } catch (err) {
+    clearTokenBookingInfo();
+    updateTokenStatus(err?.message || 'Unable to load booking details.', 'error');
+  } finally {
+    tokenEls.load.disabled = false;
+    tokenEls.load.textContent = originalLabel;
+  }
+}
+
+async function assertListingOwnership(listingAddr, walletAddr) {
+  const listingRecord = landlordListingRecords.find((entry) => addressesEqual(entry?.address, listingAddr));
+  if (listingRecord && addressesEqual(listingRecord.landlord, walletAddr)) {
+    return;
+  }
+  try {
+    const owner = await pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'landlord' });
+    if (!addressesEqual(owner, walletAddr)) {
+      throw new Error('Connected wallet is not the landlord for this listing.');
+    }
+  } catch (err) {
+    if (err?.message === 'Connected wallet is not the landlord for this listing.') {
+      throw err;
+    }
+    throw new Error('Unable to verify listing ownership.');
+  }
+}
+
+async function proposeTokenisationForLandlord() {
+  if (!provider) {
+    updateTokenStatus('Connect wallet before proposing tokenisation.', 'error');
+    return;
+  }
+
+  const originalLabel = tokenEls.propose ? tokenEls.propose.textContent : '';
+  const loadDisabledBefore = tokenEls.load ? tokenEls.load.disabled : false;
+  setTokenFormDisabled(true);
+  if (tokenEls.load) tokenEls.load.disabled = true;
+  if (tokenEls.propose) {
+    tokenEls.propose.disabled = true;
+    tokenEls.propose.textContent = 'Submitting…';
+  }
+  setTokenStatus('Preparing tokenisation proposal…');
+
+  try {
+    const accounts = await provider.request({ method: 'eth_accounts' });
+    const [from] = Array.isArray(accounts) ? accounts : [];
+    if (!from) throw new Error('No wallet account connected.');
+    await ensureArbitrum(provider);
+
+    const listingId = parseTokenListingId();
+    const bookingId = parseTokenBookingId();
+    const totalSqmu = parseTokenTotalSqmu();
+    const pricePerSqmu = parseTokenPricePerSqmu();
+    const feeBps = parseTokenFeeBps();
+    const periodInfo = parseTokenPeriodOption();
+    const listingAddr = await getListingAddressById(listingId);
+
+    await assertListingOwnership(listingAddr, from);
+
+    const args = [bookingId, totalSqmu, pricePerSqmu, BigInt(feeBps), periodInfo.value];
+
+    try {
+      await pub.simulateContract({
+        address: listingAddr,
+        abi: LISTING_ABI,
+        functionName: 'proposeTokenisation',
+        args,
+        account: from,
+      });
+    } catch (err) {
+      const detail = err?.shortMessage || err?.message || 'Tokenisation proposal simulation failed.';
+      throw new Error(detail);
+    }
+
+    const data = encodeFunctionData({
+      abi: LISTING_ABI,
+      functionName: 'proposeTokenisation',
+      args,
+    });
+
+    updateTokenStatus('Submitting tokenisation proposal…');
+
+    let walletSendUnsupported = false;
+    let batchedSuccess = false;
+    try {
+      const { unsupported } = await requestWalletSendCalls(provider, {
+        calls: [{ to: listingAddr, data }],
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      walletSendUnsupported = unsupported;
+      batchedSuccess = !unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        updateTokenStatus('Tokenisation proposal cancelled.', 'warning');
+        return;
+      }
+      throw err;
+    }
+
+    if (!batchedSuccess && walletSendUnsupported) {
+      await provider.request({
+        method: 'eth_sendTransaction',
+        params: [{ from, to: listingAddr, data }],
+      });
+    }
+
+    updateTokenStatus('Tokenisation proposal submitted. Awaiting platform approval.', 'success');
+    notify({ message: 'Tokenisation proposal submitted.', variant: 'success', role: 'landlord', timeout: 6000 });
+
+    try {
+      const { booking, pending } = await fetchTokenBookingDetails(listingAddr, bookingId);
+      renderTokenBookingInfo(listingAddr, bookingId, booking, pending);
+      applyBookingToTokenForm(booking);
+      tokenToolContext = { listingId, listingAddr, bookingId };
+    } catch (err) {
+      console.error('Failed to refresh token booking details after proposal', err);
+    }
+  } catch (err) {
+    console.error('Tokenisation proposal failed', err);
+    const message = err?.message || 'Tokenisation proposal failed.';
+    const variant = isUserRejectedRequestError(err) ? 'warning' : 'error';
+    updateTokenStatus(message, variant);
+  } finally {
+    setTokenFormDisabled(false);
+    if (tokenEls.propose) {
+      tokenEls.propose.disabled = false;
+      tokenEls.propose.textContent = originalLabel;
+    }
+    if (tokenEls.load) {
+      tokenEls.load.disabled = loadDisabledBefore;
+    }
+  }
+}
+
+if (tokenEls.load) {
+  tokenEls.load.addEventListener('click', () => {
+    loadTokenBookingDetails();
+  });
+}
+
+if (tokenEls.propose) {
+  tokenEls.propose.addEventListener('click', () => {
+    proposeTokenisationForLandlord();
+  });
+}
+
 // -------------------- Boot --------------------
 (async () => {
   try {
@@ -1592,6 +1997,14 @@ if (depositEls.propose) {
     if (depositEls.load) {
       depositEls.load.disabled = true;
     }
+    if (tokenEls.load) {
+      tokenEls.load.disabled = true;
+    }
+    if (tokenEls.propose) {
+      tokenEls.propose.disabled = true;
+    }
+    setTokenStatus('QuickAuth failed. Open inside a Farcaster client.');
+    clearTokenBookingInfo();
     setDepositStatus('QuickAuth failed. Open inside a Farcaster client.');
     return;
   }
@@ -1599,6 +2012,13 @@ if (depositEls.propose) {
   if (depositEls.load) {
     depositEls.load.disabled = false;
   }
+  if (tokenEls.load) {
+    tokenEls.load.disabled = false;
+  }
+  if (tokenEls.propose) {
+    tokenEls.propose.disabled = true;
+  }
+  setTokenStatus('Connect wallet to propose tokenisation.');
   setDepositStatus('Connect wallet to manage deposit splits.');
   els.connect.disabled = false;
   updateOnboardingProgress();
@@ -1660,6 +2080,10 @@ els.connect.onclick = async () => {
     if (depositEls.propose) {
       depositEls.propose.disabled = false;
     }
+    if (tokenEls.propose) {
+      tokenEls.propose.disabled = false;
+    }
+    setTokenStatus('Wallet connected. Load a booking to review tokenisation.');
     setDepositStatus('Wallet connected. Load a booking to review its deposit.');
     updateOnboardingProgress();
     info('Wallet ready. Loading your listings…');
@@ -1675,9 +2099,13 @@ els.connect.onclick = async () => {
     if (depositEls.propose) {
       depositEls.propose.disabled = true;
     }
+    if (tokenEls.propose) {
+      tokenEls.propose.disabled = true;
+    }
     if (depositEls.load && depositEls.load.disabled === false) {
       setDepositStatus(e?.message || 'Wallet connection failed.');
     }
+    setTokenStatus(e?.message || 'Wallet connection failed.');
     info(e?.message || 'Wallet connection failed.');
     notify({ message: e?.message || 'Wallet connection failed.', variant: 'error', role: 'landlord', timeout: 6000 });
     updateOnboardingProgress();

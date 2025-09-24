@@ -47,6 +47,25 @@ const els = {
   },
 };
 
+const tokenEls = {
+  panel: document.getElementById('tokenProposalPanel'),
+  form: document.getElementById('tokenProposalForm'),
+  total: document.getElementById('tokenTotalSqmu'),
+  price: document.getElementById('tokenPricePerSqmu'),
+  fee: document.getElementById('tokenFeeBps'),
+  period: document.getElementById('tokenPeriod'),
+  submit: document.getElementById('tokenProposalSubmit'),
+  cancel: document.getElementById('tokenProposalCancel'),
+  status: document.getElementById('tokenProposalStatus'),
+  context: document.querySelector('[data-token-proposal-context]'),
+  meta: document.querySelector('[data-token-proposal-meta]'),
+};
+
+const tokenProposalDefaults = {
+  context: tokenEls.context ? tokenEls.context.textContent : '',
+  meta: tokenEls.meta ? tokenEls.meta.textContent : '',
+};
+
 if (els.connect && !els.connect.dataset.defaultLabel) {
   const initialLabel = (els.connect.textContent || '').trim();
   if (initialLabel) {
@@ -70,6 +89,7 @@ let bookingsRendered = false;
 
 const listingInfoCache = new Map();
 const bookingRecords = new Map();
+let tokenProposalContext = null;
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
 
@@ -94,6 +114,21 @@ if (els.period) {
   els.period.addEventListener('change', updateSummary);
 }
 
+if (tokenEls.period && !tokenEls.period.value) {
+  tokenEls.period.value = 'month';
+}
+
+if (tokenEls.cancel) {
+  tokenEls.cancel.addEventListener('click', (event) => {
+    event.preventDefault();
+    closeTokenProposalPanel();
+  });
+}
+
+if (tokenEls.form) {
+  tokenEls.form.addEventListener('submit', submitTokenisationProposalForTenant);
+}
+
 updateSummary();
 
 const setVersionBadge = () => {
@@ -115,6 +150,21 @@ const PERIOD_OPTIONS = {
   week: { label: 'Weekly', value: 2n, days: 7n },
   month: { label: 'Monthly', value: 3n, days: 30n },
 };
+
+function getPeriodKeyFromValue(periodValue) {
+  let value;
+  try {
+    value = typeof periodValue === 'bigint' ? periodValue : BigInt(periodValue || 0);
+  } catch {
+    value = 0n;
+  }
+  for (const [key, info] of Object.entries(PERIOD_OPTIONS)) {
+    if (info.value === value) {
+      return key;
+    }
+  }
+  return '';
+}
 const MULTICALL_CHUNK = 120;
 const BOOKING_STATUS_META = {
   0: { label: 'Pending', className: 'pending' },
@@ -273,6 +323,12 @@ function setConnectedAccount(addr) {
   }
   const original = typeof addr === 'string' ? addr : '';
   connectedAccount = original || null;
+  if (tokenProposalContext) {
+    const contextRecord = bookingRecords.get(tokenProposalContext.recordKey);
+    if (!contextRecord || !isTokenisationEligible(contextRecord, addr)) {
+      closeTokenProposalPanel();
+    }
+  }
   if (els.bookings?.refresh) {
     els.bookings.refresh.disabled = !next;
   }
@@ -363,6 +419,34 @@ function parseUsdcInput(raw) {
     return null;
   }
   return whole * USDC_SCALAR + fraction;
+}
+
+function parseSqmuInput(raw) {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw.trim().replace(/,/g, '');
+  if (!cleaned) return null;
+  if (!/^\d+$/.test(cleaned)) {
+    return null;
+  }
+  try {
+    return BigInt(cleaned);
+  } catch {
+    return null;
+  }
+}
+
+function parseBpsInput(raw) {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw.trim();
+  if (!cleaned) return null;
+  if (!/^\d+$/.test(cleaned)) {
+    return null;
+  }
+  const value = Number.parseInt(cleaned, 10);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return value;
 }
 
 function normaliseBookingStruct(raw) {
@@ -1030,6 +1114,10 @@ function buildBookingRecord(meta, data, listingInfo) {
   const tenant = typeof data.tenant === 'string' ? data.tenant : '0x0000000000000000000000000000000000000000';
   const rentDue = grossRent > rentPaid ? grossRent - rentPaid : 0n;
   const listingTitle = listingInfo ? getListingTitle(listingInfo) : `Listing ${short(listingAddress)}`;
+  const landlord = listingInfo && typeof listingInfo.landlord === 'string'
+    ? listingInfo.landlord
+    : '0x0000000000000000000000000000000000000000';
+  const landlordLower = normaliseAddress(landlord);
   const start = toBigInt(data.start, 0n);
   const end = toBigInt(data.end, 0n);
   const expectedNetRent = toBigInt(data.expectedNetRent, 0n);
@@ -1079,12 +1167,323 @@ function buildBookingRecord(meta, data, listingInfo) {
     tokenised,
     tenant,
     tenantLower: normaliseAddress(tenant),
+    landlord,
+    landlordLower,
     listingInfo: listingInfo || null,
     canPayRent: statusValue === 1 && rentDue > 0n,
     isActive,
     canCancel,
     cancelDisabledReason,
   };
+}
+
+function setTokenProposalStatus(message) {
+  if (tokenEls.status) {
+    tokenEls.status.textContent = message || '';
+  }
+}
+
+function setTokenProposalInputsDisabled(disabled) {
+  const flag = Boolean(disabled);
+  if (tokenEls.total) tokenEls.total.disabled = flag;
+  if (tokenEls.price) tokenEls.price.disabled = flag;
+  if (tokenEls.fee) tokenEls.fee.disabled = flag;
+  if (tokenEls.period) tokenEls.period.disabled = flag;
+}
+
+function resetTokenProposalForm() {
+  setTokenProposalInputsDisabled(false);
+  if (tokenEls.total) tokenEls.total.value = '';
+  if (tokenEls.price) tokenEls.price.value = '';
+  if (tokenEls.fee) tokenEls.fee.value = '';
+  if (tokenEls.period) {
+    if (tokenEls.period.querySelector('option[value="month"]')) {
+      tokenEls.period.value = 'month';
+    } else {
+      tokenEls.period.selectedIndex = 0;
+    }
+  }
+  setTokenProposalStatus('');
+}
+
+function updateTokenProposalContext(record) {
+  if (tokenEls.context) {
+    if (record) {
+      const bookingLabel = record.bookingIdText ? `Booking #${record.bookingIdText}` : 'Booking';
+      tokenEls.context.textContent = `${bookingLabel} · ${record.listingTitle}`;
+    } else {
+      tokenEls.context.textContent = tokenProposalDefaults.context || 'Select a booking to propose tokenisation.';
+    }
+  }
+  if (tokenEls.meta) {
+    if (record) {
+      const rentText = `${formatUsdc(record.grossRent)} USDC`;
+      tokenEls.meta.textContent = `Stay: ${record.startLabel} → ${record.endLabel} · Rent ${rentText}`;
+    } else {
+      tokenEls.meta.textContent = tokenProposalDefaults.meta || '';
+    }
+  }
+}
+
+function isTokenisationEligible(record, account = connectedAccount) {
+  if (!record || record.tokenised) return false;
+  const candidate = normaliseAddress(account);
+  if (!candidate) return false;
+  return candidate === record.tenantLower || candidate === record.landlordLower;
+}
+
+function openTokenProposalPanel(recordKey) {
+  const record = bookingRecords.get(recordKey);
+  if (!record) {
+    setTokenProposalStatus('Booking details unavailable. Refresh your bookings.');
+    notify({ message: 'Unable to find booking details for tokenisation.', variant: 'error', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (!isTokenisationEligible(record)) {
+    setTokenProposalStatus('Connect with the tenant or landlord wallet to propose tokenisation.');
+    notify({ message: 'Tokenisation requires the tenant or landlord wallet.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  tokenProposalContext = {
+    recordKey: record.key,
+    listingAddress: record.listingAddress,
+    bookingId: record.bookingId,
+  };
+  resetTokenProposalForm();
+  if (record.totalSqmu > 0n && tokenEls.total) {
+    tokenEls.total.value = record.totalSqmu.toString();
+  }
+  if (record.pricePerSqmu > 0n && tokenEls.price) {
+    tokenEls.price.value = formatUsdc(record.pricePerSqmu);
+  }
+  if (record.feeBps > 0n && tokenEls.fee) {
+    tokenEls.fee.value = record.feeBps.toString();
+  }
+  if (tokenEls.period) {
+    const periodKey = getPeriodKeyFromValue(record.periodValue);
+    if (periodKey && tokenEls.period.querySelector(`option[value="${periodKey}"]`)) {
+      tokenEls.period.value = periodKey;
+    }
+  }
+  updateTokenProposalContext(record);
+  setTokenProposalStatus('Enter tokenisation details to continue.');
+  if (tokenEls.panel) {
+    tokenEls.panel.hidden = false;
+    tokenEls.panel.dataset.bookingKey = record.key;
+    try {
+      tokenEls.panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {}
+  }
+  if (tokenEls.total) {
+    tokenEls.total.focus();
+  }
+}
+
+function closeTokenProposalPanel() {
+  tokenProposalContext = null;
+  if (tokenEls.panel) {
+    tokenEls.panel.hidden = true;
+    delete tokenEls.panel.dataset.bookingKey;
+  }
+  resetTokenProposalForm();
+  updateTokenProposalContext(null);
+}
+
+async function submitTokenisationProposalForTenant(event) {
+  if (event) {
+    event.preventDefault();
+  }
+  if (!tokenProposalContext) {
+    setTokenProposalStatus('Select a booking before submitting.');
+    notify({ message: 'Select a booking before proposing tokenisation.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  const record = bookingRecords.get(tokenProposalContext.recordKey);
+  if (!record) {
+    setTokenProposalStatus('Booking details unavailable. Refresh and try again.');
+    notify({ message: 'Booking details unavailable. Refresh bookings and try again.', variant: 'error', role: 'tenant', timeout: 6000 });
+    closeTokenProposalPanel();
+    return;
+  }
+  if (record.tokenised) {
+    setTokenProposalStatus('Booking already tokenised.');
+    notify({ message: 'This booking is already tokenised.', variant: 'info', role: 'tenant', timeout: 4500 });
+    closeTokenProposalPanel();
+    return;
+  }
+  if (!isTokenisationEligible(record)) {
+    setTokenProposalStatus('Connect with the tenant or landlord wallet to continue.');
+    notify({ message: 'Connect with the tenant or landlord wallet to propose tokenisation.', variant: 'warning', role: 'tenant', timeout: 5500 });
+    return;
+  }
+
+  const totalSqmu = parseSqmuInput(tokenEls.total ? tokenEls.total.value : '');
+  if (totalSqmu === null || totalSqmu <= 0n) {
+    setTokenProposalStatus('Enter the total SQMU supply (whole number greater than 0).');
+    if (tokenEls.total) tokenEls.total.focus();
+    return;
+  }
+  const pricePerSqmu = parseUsdcInput(tokenEls.price ? tokenEls.price.value : '');
+  if (pricePerSqmu === null || pricePerSqmu <= 0n) {
+    setTokenProposalStatus('Price per SQMU must be greater than 0 USDC.');
+    if (tokenEls.price) tokenEls.price.focus();
+    return;
+  }
+  const feeBpsValue = parseBpsInput(tokenEls.fee ? tokenEls.fee.value : '');
+  if (feeBpsValue === null) {
+    setTokenProposalStatus('Enter the platform fee in basis points.');
+    if (tokenEls.fee) tokenEls.fee.focus();
+    return;
+  }
+  if (feeBpsValue < 0 || feeBpsValue > 10_000) {
+    setTokenProposalStatus('Platform fee must be between 0 and 10000 basis points.');
+    if (tokenEls.fee) tokenEls.fee.focus();
+    return;
+  }
+  const periodKey = tokenEls.period ? tokenEls.period.value : '';
+  const periodInfo = PERIOD_OPTIONS[periodKey];
+  if (!periodInfo) {
+    setTokenProposalStatus('Select a distribution period.');
+    if (tokenEls.period) tokenEls.period.focus();
+    return;
+  }
+  if (record.periodValue && Number(record.periodValue) > 0) {
+    const requiredKey = getPeriodKeyFromValue(record.periodValue);
+    if (requiredKey && requiredKey !== periodKey) {
+      setTokenProposalStatus(`Booking cadence is fixed to ${record.periodLabel.toLowerCase()}.`);
+      if (tokenEls.period) tokenEls.period.focus();
+      return;
+    }
+  }
+
+  setTokenProposalInputsDisabled(true);
+  const originalSubmitLabel = tokenEls.submit ? tokenEls.submit.textContent : '';
+  if (tokenEls.submit) {
+    tokenEls.submit.disabled = true;
+    tokenEls.submit.textContent = 'Submitting…';
+  }
+  const cancelPreviouslyDisabled = tokenEls.cancel ? tokenEls.cancel.disabled : false;
+  if (tokenEls.cancel) {
+    tokenEls.cancel.disabled = true;
+  }
+
+  setTokenProposalStatus('Preparing proposal…');
+
+  let proposalSubmitted = false;
+
+  try {
+    const p = await getProvider();
+    const accounts = (await p.request({ method: 'eth_accounts' })) || [];
+    const [from] = accounts;
+    if (!from) {
+      throw new Error('No wallet account connected.');
+    }
+    if (!isTokenisationEligible(record, from)) {
+      setTokenProposalStatus('Connected wallet does not match the tenant or landlord.');
+      notify({ message: 'Connected wallet does not match the tenant or landlord for this booking.', variant: 'error', role: 'tenant', timeout: 6000 });
+      return;
+    }
+
+    setConnectedAccount(from);
+    await ensureArbitrum(p);
+    await loadConfig();
+
+    const args = [
+      record.bookingId,
+      totalSqmu,
+      pricePerSqmu,
+      BigInt(feeBpsValue),
+      periodInfo.value,
+    ];
+
+    try {
+      await pub.simulateContract({
+        address: record.listingAddress,
+        abi: LISTING_ABI,
+        functionName: 'proposeTokenisation',
+        args,
+        account: from,
+      });
+    } catch (err) {
+      const detail = extractErrorMessage(err) || 'Tokenisation proposal not available right now.';
+      setTokenProposalStatus(detail);
+      notify({ message: `Unable to submit tokenisation proposal: ${detail}`, variant: 'error', role: 'tenant', timeout: 6500 });
+      return;
+    }
+
+    const data = encodeFunctionData({
+      abi: LISTING_ABI,
+      functionName: 'proposeTokenisation',
+      args,
+    });
+
+    els.status.textContent = 'Submitting tokenisation proposal…';
+    setTokenProposalStatus('Submitting proposal via wallet…');
+    notify({ message: 'Submitting tokenisation proposal…', variant: 'info', role: 'tenant', timeout: 4500 });
+
+    let walletSendUnsupported = false;
+    let batchedSuccess = false;
+    try {
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls: [{ to: record.listingAddress, data }],
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      walletSendUnsupported = unsupported;
+      batchedSuccess = !unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        setTokenProposalStatus('Tokenisation proposal cancelled by user.');
+        els.status.textContent = 'Tokenisation proposal cancelled.';
+        notify({ message: 'Tokenisation proposal cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+        return;
+      }
+      throw err;
+    }
+
+    if (!batchedSuccess && walletSendUnsupported) {
+      await p.request({
+        method: 'eth_sendTransaction',
+        params: [{ from, to: record.listingAddress, data }],
+      });
+    }
+
+    proposalSubmitted = true;
+    setTokenProposalStatus('Proposal submitted. Awaiting platform approval.');
+    els.status.textContent = `Tokenisation proposal submitted for booking #${record.bookingIdText}.`;
+    notify({
+      message: `Tokenisation proposal submitted for booking #${record.bookingIdText}.`,
+      variant: 'success',
+      role: 'tenant',
+      timeout: 6000,
+    });
+  } catch (err) {
+    console.error('Tokenisation proposal failed', err);
+    if (!isUserRejectedRequestError(err)) {
+      const message = extractErrorMessage(err) || err?.message || 'Tokenisation proposal failed.';
+      setTokenProposalStatus(message);
+      els.status.textContent = `Tokenisation proposal failed: ${message}`;
+      notify({ message: `Tokenisation proposal failed: ${message}`, variant: 'error', role: 'tenant', timeout: 6500 });
+    }
+  } finally {
+    setTokenProposalInputsDisabled(false);
+    if (tokenEls.submit) {
+      tokenEls.submit.disabled = false;
+      tokenEls.submit.textContent = originalSubmitLabel;
+    }
+    if (tokenEls.cancel) {
+      tokenEls.cancel.disabled = cancelPreviouslyDisabled;
+    }
+  }
+
+  if (proposalSubmitted) {
+    closeTokenProposalPanel();
+    try {
+      await loadTenantBookings(connectedAccount, { force: true, showBusyLabel: true });
+    } catch (err) {
+      console.error('Failed to refresh bookings after tokenisation proposal', err);
+    }
+  }
 }
 
 function renderBookingCard(record) {
@@ -1172,6 +1571,9 @@ function renderBookingCard(record) {
   actions.className = 'booking-actions';
   let hasActions = false;
 
+  const tenantConnected = addressesEqual(connectedAccount, record.tenantLower);
+  const landlordConnected = addressesEqual(connectedAccount, record.landlordLower);
+
   if (record.canPayRent) {
     const amountInput = document.createElement('input');
     amountInput.type = 'text';
@@ -1198,7 +1600,21 @@ function renderBookingCard(record) {
     outstandingLine.textContent += ` (status ${record.statusLabel.toLowerCase()} — payments disabled)`;
   }
 
-  const tenantConnected = addressesEqual(connectedAccount, record.tenantLower);
+  if (!record.tokenised && (tenantConnected || landlordConnected)) {
+    const proposeBtn = document.createElement('button');
+    proposeBtn.type = 'button';
+    proposeBtn.textContent = 'Propose tokenisation';
+    proposeBtn.onclick = () => openTokenProposalPanel(record.key);
+    actions.appendChild(proposeBtn);
+
+    const proposeNote = document.createElement('div');
+    proposeNote.className = 'booking-helper-text';
+    proposeNote.textContent = 'Set SQMU supply, pricing and cadence for platform review.';
+    actions.appendChild(proposeNote);
+
+    hasActions = true;
+  }
+
   if (tenantConnected && record.canCancel) {
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
@@ -1233,6 +1649,14 @@ function renderBookingCard(record) {
       cancelInfo.textContent = cancellationMessage;
       card.appendChild(cancelInfo);
     }
+  }
+
+  const hasAccount = Boolean(normaliseAddress(connectedAccount));
+  if (!record.tokenised && hasAccount && !(tenantConnected || landlordConnected)) {
+    const tokenInfo = document.createElement('div');
+    tokenInfo.className = 'booking-helper-text';
+    tokenInfo.textContent = 'Tokenisation proposals can be submitted by the booking tenant or landlord wallet.';
+    card.appendChild(tokenInfo);
   }
 
   return card;
@@ -1593,6 +2017,9 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
     if (statusEl) {
       statusEl.textContent = emptyMessage;
     }
+    if (tokenProposalContext) {
+      closeTokenProposalPanel();
+    }
     return;
   }
   const sorted = [...records];
@@ -1609,6 +2036,17 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
   }
   if (statusEl) {
     statusEl.textContent = `Showing ${sorted.length} booking${sorted.length === 1 ? '' : 's'}.`;
+  }
+
+  if (tokenProposalContext) {
+    const contextRecord = bookingRecords.get(tokenProposalContext.recordKey);
+    if (!contextRecord || contextRecord.tokenised || !isTokenisationEligible(contextRecord)) {
+      closeTokenProposalPanel();
+    } else {
+      tokenProposalContext.listingAddress = contextRecord.listingAddress;
+      tokenProposalContext.bookingId = contextRecord.bookingId;
+      updateTokenProposalContext(contextRecord);
+    }
   }
 }
 
