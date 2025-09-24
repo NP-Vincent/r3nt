@@ -81,62 +81,7 @@
     </div>
     <div class="bookings-status" data-bookings-status>Connect wallet to view bookings.</div>
     <div id="bookingsList" class="bookings-list"></div>
-    <div id="tokenProposalPanel" class="token-proposal-card" hidden>
-      <h3>Propose tokenisation</h3>
-      <div class="token-proposal-context">
-        <strong data-token-proposal-context>Select a booking to propose tokenisation.</strong>
-        <div class="token-proposal-meta" data-token-proposal-meta></div>
-      </div>
-      <div class="muted token-proposal-note">Set the SQMU supply, price and cadence to request platform approval for tokenising this stay.</div>
-      <form id="tokenProposalForm" class="token-proposal-form">
-        <div class="field-grid columns-2">
-          <label class="field-option">
-            <span class="status-dot" aria-hidden="true"></span>
-            <div class="field-content">
-              <span class="field-title">Total SQMU</span>
-              <span class="field-hint">Number of SQMU-R tokens to mint if approved.</span>
-              <input id="tokenTotalSqmu" inputmode="numeric" pattern="[0-9]*" placeholder="1000">
-            </div>
-          </label>
-          <label class="field-option">
-            <span class="status-dot" aria-hidden="true"></span>
-            <div class="field-content">
-              <span class="field-title">Price per SQMU (USDC)</span>
-              <span class="field-hint">Up to 6 decimals.</span>
-              <input id="tokenPricePerSqmu" inputmode="decimal" placeholder="500.00">
-            </div>
-          </label>
-        </div>
-        <div class="field-grid columns-2">
-          <label class="field-option">
-            <span class="status-dot" aria-hidden="true"></span>
-            <div class="field-content">
-              <span class="field-title">Platform fee (bps)</span>
-              <span class="field-hint">0 – 10000 basis points.</span>
-              <input id="tokenFeeBps" inputmode="numeric" pattern="[0-9]*" placeholder="250">
-            </div>
-          </label>
-          <label class="field-option">
-            <span class="status-dot" aria-hidden="true"></span>
-            <div class="field-content">
-              <span class="field-title">Distribution period</span>
-              <span class="field-hint">Matches the rent cadence.</span>
-              <select id="tokenPeriod">
-                <option value="">Select period…</option>
-                <option value="day">Daily</option>
-                <option value="week">Weekly</option>
-                <option value="month">Monthly</option>
-              </select>
-            </div>
-          </label>
-        </div>
-        <div class="token-proposal-actions">
-          <button type="submit" id="tokenProposalSubmit">Submit proposal</button>
-          <button type="button" id="tokenProposalCancel" class="inline-button">Cancel</button>
-          <span id="tokenProposalStatus" class="token-proposal-status" aria-live="polite"></span>
-        </div>
-      </form>
-    </div>
+    <div id="tokenProposalPanel" class="token-proposal-card" hidden></div>
   </section>
   <h2>Listings</h2>
   <div id="listings"></div>

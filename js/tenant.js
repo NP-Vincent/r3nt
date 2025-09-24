@@ -5,6 +5,8 @@ import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './too
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
+import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
+import { el } from './ui/dom.js';
 import {
   RPC_URL,
   REGISTRY_ADDRESS,
@@ -46,25 +48,7 @@ const els = {
     refresh: document.getElementById('refreshBookings'),
   },
 };
-
-const tokenEls = {
-  panel: document.getElementById('tokenProposalPanel'),
-  form: document.getElementById('tokenProposalForm'),
-  total: document.getElementById('tokenTotalSqmu'),
-  price: document.getElementById('tokenPricePerSqmu'),
-  fee: document.getElementById('tokenFeeBps'),
-  period: document.getElementById('tokenPeriod'),
-  submit: document.getElementById('tokenProposalSubmit'),
-  cancel: document.getElementById('tokenProposalCancel'),
-  status: document.getElementById('tokenProposalStatus'),
-  context: document.querySelector('[data-token-proposal-context]'),
-  meta: document.querySelector('[data-token-proposal-meta]'),
-};
-
-const tokenProposalDefaults = {
-  context: tokenEls.context ? tokenEls.context.textContent : '',
-  meta: tokenEls.meta ? tokenEls.meta.textContent : '',
-};
+const tokenProposalHost = document.getElementById('tokenProposalPanel');
 
 if (els.connect && !els.connect.dataset.defaultLabel) {
   const initialLabel = (els.connect.textContent || '').trim();
@@ -89,7 +73,8 @@ let bookingsRendered = false;
 
 const listingInfoCache = new Map();
 const bookingRecords = new Map();
-let tokenProposalContext = null;
+const listingRecords = new Map();
+let activeTokenProposalKey = null;
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
 
@@ -112,21 +97,6 @@ if (els.end) {
 }
 if (els.period) {
   els.period.addEventListener('change', updateSummary);
-}
-
-if (tokenEls.period && !tokenEls.period.value) {
-  tokenEls.period.value = 'month';
-}
-
-if (tokenEls.cancel) {
-  tokenEls.cancel.addEventListener('click', (event) => {
-    event.preventDefault();
-    closeTokenProposalPanel();
-  });
-}
-
-if (tokenEls.form) {
-  tokenEls.form.addEventListener('submit', submitTokenisationProposalForTenant);
 }
 
 updateSummary();
@@ -331,10 +301,10 @@ function setConnectedAccount(addr) {
   }
   const original = typeof addr === 'string' ? addr : '';
   connectedAccount = original || null;
-  if (tokenProposalContext) {
-    const contextRecord = bookingRecords.get(tokenProposalContext.recordKey);
+  if (activeTokenProposalKey) {
+    const contextRecord = bookingRecords.get(activeTokenProposalKey);
     if (!contextRecord || !isTokenisationEligible(contextRecord, addr)) {
-      closeTokenProposalPanel();
+      closeTokenProposal();
     }
   }
   if (els.bookings?.refresh) {
@@ -380,6 +350,15 @@ function toBigInt(value, fallback = 0n) {
     }
   }
   return fallback;
+}
+
+function toUsdcNumber(value) {
+  const amount = toBigInt(value, 0n);
+  const numeric = Number(amount);
+  if (!Number.isFinite(numeric) || Number.isNaN(numeric)) {
+    return 0;
+  }
+  return numeric / 1_000_000;
 }
 
 function formatDateLabel(seconds) {
@@ -683,13 +662,13 @@ function setSelectedListing(info, card) {
     clearSelection();
     return;
   }
-  const alreadySelected = selectedListing && selectedListing.address === info.address;
+  const alreadySelected = selectedListing && addressesEqual(selectedListing.address, info.address);
   if (selectedCard && selectedCard !== card) {
     selectedCard.classList.remove('selected');
   }
   selectedListing = info;
-  selectedCard = card || null;
-  selectedListingTitle = card?.dataset.displayTitle || getListingTitle(info);
+  selectedCard = card || (info?.id ? els.listings?.querySelector(`[data-id="${info.id}"]`) : null);
+  selectedListingTitle = info?.displayTitle || getListingTitle(info);
   if (selectedCard) {
     selectedCard.classList.add('selected');
   }
@@ -708,6 +687,30 @@ function setSelectedListing(info, card) {
     });
   }
   backController.update();
+}
+
+function selectListing(listing) {
+  if (!listing) {
+    clearSelection();
+    return;
+  }
+  const record = listingRecords.get(listing.id) || listingRecords.get(listing.address) || listing;
+  const card = record?.id && els.listings
+    ? els.listings.querySelector(`[data-id="${record.id}"]`)
+    : null;
+  setSelectedListing(record, card);
+}
+
+function openBookingFlow(listing) {
+  selectListing(listing);
+  if (els.summary?.container) {
+    try {
+      els.summary.container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {}
+  }
+  if (els.confirmBooking) {
+    els.confirmBooking.focus();
+  }
 }
 
 function updateBuyLabel() {
@@ -939,186 +942,135 @@ async function fetchListingInfo(listingAddr){
   }
 }
 
-function renderListingCard(info){
-  const card = document.createElement('div');
-  card.className = 'card';
+function getListingLocationPill(info) {
+  if (info && Number.isFinite(info.lat) && Number.isFinite(info.lon)) {
+    return `${info.lat.toFixed(2)}°, ${info.lon.toFixed(2)}°`;
+  }
+  if (info && typeof info.geohash === 'string' && info.geohash.trim()) {
+    return `Geohash ${info.geohash.trim()}`;
+  }
+  return 'Location pending';
+}
 
-  const title = document.createElement('div');
-  title.className = 'listing-title';
+function buildListingRecord(info) {
+  if (!info) return null;
+  const id = normaliseAddress(info.address) || info.address || '';
   const displayTitle = getListingTitle(info);
-  title.textContent = displayTitle;
-  card.dataset.displayTitle = displayTitle;
-  card.appendChild(title);
-
-  if (info && typeof info.description === 'string') {
-    const trimmed = info.description.trim();
-    if (trimmed && trimmed !== displayTitle && trimmed !== info.address) {
-      const summary = document.createElement('div');
-      summary.className = 'listing-summary';
-      summary.textContent = trimmed;
-      card.appendChild(summary);
-    }
-  }
-
-  const rateLine = document.createElement('div');
-  rateLine.textContent = `Base rate: ${formatUsdc(info.baseDailyRate)} USDC / day`;
-  card.appendChild(rateLine);
-
-  const depositLine = document.createElement('div');
-  depositLine.textContent = `Security deposit: ${formatUsdc(info.depositAmount)} USDC`;
-  card.appendChild(depositLine);
-
-  if (Number.isFinite(info.areaSqm) && info.areaSqm > 0) {
-    const areaLine = document.createElement('div');
-    areaLine.textContent = `Area: ${info.areaSqm} m²`;
-    card.appendChild(areaLine);
-  }
-
-  const noticeLine = document.createElement('div');
-  const minNoticeText = formatDuration(info.minBookingNotice);
-  const maxWindowText = info.maxBookingWindow > 0n ? formatDuration(info.maxBookingWindow) : 'Unlimited';
-  noticeLine.textContent = `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`;
-  card.appendChild(noticeLine);
-
-  if (info.geohash) {
-    const geoLine = document.createElement('div');
-    geoLine.className = 'listing-geo';
-    const label = document.createElement('span');
-    let preciseCoords = null;
-    if (Number.isFinite(info.lat) && Number.isFinite(info.lon)) {
-      const latText = info.lat.toFixed(5);
-      const lonText = info.lon.toFixed(5);
-      preciseCoords = `${info.lat.toFixed(6)},${info.lon.toFixed(6)}`;
-      label.textContent = `Location: ${latText}°, ${lonText}°`;
-    } else {
-      label.textContent = 'Location: —';
-    }
-    geoLine.appendChild(label);
-
-    if (preciseCoords) {
-      const copyBtn = document.createElement('button');
-      copyBtn.type = 'button';
-      copyBtn.className = 'inline-button geo-copy-button';
-      copyBtn.textContent = 'Copy';
-      if (navigator?.clipboard?.writeText) {
-        copyBtn.onclick = async () => {
-          try {
-            await navigator.clipboard.writeText(preciseCoords);
-            notify({
-              message: 'Coordinates copied to clipboard.',
-              variant: 'success',
-              role: 'tenant',
-              timeout: 4000,
-            });
-          } catch (err) {
-            console.error('Failed to copy coordinates', err);
-            notify({
-              message: 'Unable to copy coordinates.',
-              variant: 'error',
-              role: 'tenant',
-              timeout: 5000,
-            });
-          }
-        };
-      } else {
-        copyBtn.disabled = true;
-        copyBtn.title = 'Clipboard unavailable';
-      }
-      geoLine.appendChild(copyBtn);
-
-      const mapLink = document.createElement('a');
-      mapLink.href = `https://www.google.com/maps/search/?api=1&query=${preciseCoords}`;
-      mapLink.target = '_blank';
-      mapLink.rel = 'noopener';
-      mapLink.className = 'geo-map-link';
-      mapLink.textContent = 'Open map';
-      geoLine.appendChild(mapLink);
-    }
-
-    card.appendChild(geoLine);
-  }
-
-  if (info.metadataURI) {
-    const metaLink = document.createElement('a');
-    metaLink.href = info.metadataURI;
-    metaLink.target = '_blank';
-    metaLink.rel = 'noopener';
-    metaLink.textContent = 'Metadata';
-    metaLink.className = 'listing-link';
-    card.appendChild(metaLink);
-  }
-
-  const actions = document.createElement('div');
-  actions.className = 'listing-actions';
-  const planBtn = document.createElement('button');
-  planBtn.type = 'button';
-  planBtn.textContent = 'Plan stay';
-  planBtn.onclick = () => setSelectedListing(info, card);
-  actions.appendChild(planBtn);
-  card.appendChild(actions);
-
-  const farcasterUrl = buildFarcasterCastUrl(info.fid, info.castHash);
-  const viewLink = document.createElement('a');
-  viewLink.href = farcasterUrl;
-  viewLink.target = '_blank';
-  viewLink.rel = 'noopener';
-  viewLink.textContent = 'View full details on Farcaster';
-  viewLink.className = 'listing-link';
-  viewLink.onclick = (ev) => {
-    ev.preventDefault();
-    openCast(info.fid, info.castHash, farcasterUrl);
+  return {
+    ...info,
+    id,
+    displayTitle,
+    locationPill: getListingLocationPill(info),
+    deposit: info.depositAmount,
+    active: true,
   };
-  card.appendChild(viewLink);
-
-  return card;
 }
 
-function createCopyButton(text, { label = 'Copy', successMessage = 'Copied to clipboard.', errorMessage = 'Unable to copy.', role = 'tenant' } = {}) {
-  const trimmed = typeof text === 'string' ? text.trim() : String(text ?? '').trim();
-  if (!trimmed || !navigator?.clipboard?.writeText) {
-    return null;
-  }
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'copy-button';
-  button.textContent = '⧉';
-  button.title = label;
-  button.setAttribute('aria-label', label);
-  button.addEventListener('click', async (event) => {
-    event.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(trimmed);
-      notify({ message: successMessage, variant: 'success', role, timeout: 4000 });
-    } catch (err) {
-      console.error('Failed to copy text', err);
-      notify({ message: errorMessage, variant: 'error', role, timeout: 5000 });
-    }
-  });
-  return button;
-}
-
-function createDetailElement(label, value, options = {}) {
-  const wrapper = document.createElement('div');
-  const labelEl = document.createElement('div');
-  labelEl.className = 'booking-detail-label';
-  labelEl.textContent = label;
-  const valueEl = document.createElement('div');
-  valueEl.className = 'booking-detail-value';
-  valueEl.textContent = value;
-  if (options && options.copyText) {
-    const copyBtn = createCopyButton(options.copyText, {
-      label: options.copyLabel || 'Copy',
-      successMessage: options.copySuccessMessage || 'Copied to clipboard.',
-      errorMessage: options.copyErrorMessage || 'Unable to copy.',
-      role: options.role || 'tenant',
+function renderListings(listings) {
+  const container = document.getElementById('listings');
+  if (!container) return;
+  container.innerHTML = '';
+  listings.forEach((L) => {
+    const record = listingRecords.get(L.id) || L;
+    const card = ListingCard({
+      id: record.id,
+      title: record.displayTitle || record.title || getListingTitle(record),
+      location: record.locationPill || getListingLocationPill(record),
+      pricePerDayUSDC: toUsdcNumber(record.baseDailyRate),
+      areaSqm: Number.isFinite(record.areaSqm) ? record.areaSqm : undefined,
+      depositUSDC: toUsdcNumber(record.deposit ?? record.depositAmount),
+      status: record.active ? 'Active' : 'Inactive',
+      actions: [
+        { label: 'Preview totals', onClick: () => selectListing(record) },
+        { label: 'Book', onClick: () => openBookingFlow(record), visible: record.active },
+      ],
     });
-    if (copyBtn) {
-      valueEl.appendChild(copyBtn);
+    card.dataset.address = record.address || '';
+    card.dataset.displayTitle = record.displayTitle || '';
+
+    if (record && typeof record.description === 'string') {
+      const trimmed = record.description.trim();
+      if (trimmed && trimmed !== record.displayTitle && trimmed !== record.address) {
+        card.append(el('div', { class: 'card-footnote listing-summary' }, trimmed));
+      }
     }
-  }
-  wrapper.appendChild(labelEl);
-  wrapper.appendChild(valueEl);
-  return wrapper;
+
+    const minNoticeText = formatDuration(record.minBookingNotice);
+    const maxWindowText = record.maxBookingWindow > 0n ? formatDuration(record.maxBookingWindow) : 'Unlimited';
+    card.append(el('div', { class: 'card-footnote' }, `Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`));
+
+    if (record.geohash || (Number.isFinite(record.lat) && Number.isFinite(record.lon))) {
+      const geoLine = el('div', { class: 'card-footnote listing-geo' }, []);
+      let preciseCoords = null;
+      if (Number.isFinite(record.lat) && Number.isFinite(record.lon)) {
+        const latText = record.lat.toFixed(5);
+        const lonText = record.lon.toFixed(5);
+        geoLine.append(el('span', {}, `Location: ${latText}°, ${lonText}°`));
+        preciseCoords = `${record.lat.toFixed(6)},${record.lon.toFixed(6)}`;
+      } else {
+        geoLine.append(el('span', {}, 'Location: —'));
+      }
+      if (preciseCoords) {
+        const copyBtn = el('button', { type: 'button', class: 'inline-button geo-copy-button' }, 'Copy');
+        if (navigator?.clipboard?.writeText) {
+          copyBtn.addEventListener('click', async () => {
+            try {
+              await navigator.clipboard.writeText(preciseCoords);
+              notify({ message: 'Coordinates copied to clipboard.', variant: 'success', role: 'tenant', timeout: 4000 });
+            } catch (err) {
+              console.error('Failed to copy coordinates', err);
+              notify({ message: 'Unable to copy coordinates.', variant: 'error', role: 'tenant', timeout: 5000 });
+            }
+          });
+        } else {
+          copyBtn.disabled = true;
+          copyBtn.title = 'Clipboard unavailable';
+        }
+        geoLine.append(copyBtn);
+        geoLine.append(
+          el('a', {
+            href: `https://www.google.com/maps/search/?api=1&query=${preciseCoords}`,
+            target: '_blank',
+            rel: 'noopener',
+            class: 'geo-map-link',
+          }, 'Open map'),
+        );
+      }
+      card.append(geoLine);
+    }
+
+    if (record.metadataURI) {
+      card.append(
+        el('a', {
+          href: record.metadataURI,
+          target: '_blank',
+          rel: 'noopener',
+          class: 'listing-link',
+        }, 'Metadata'),
+      );
+    }
+
+    const farcasterUrl = buildFarcasterCastUrl(record.fid, record.castHash);
+    card.append(
+      el('a', {
+        href: farcasterUrl,
+        target: '_blank',
+        rel: 'noopener',
+        class: 'listing-link',
+        onClick: (ev) => {
+          ev.preventDefault();
+          openCast(record.fid, record.castHash, farcasterUrl);
+        },
+      }, 'View full details on Farcaster'),
+    );
+
+    if (selectedListing && selectedListing.address && addressesEqual(selectedListing.address, record.address)) {
+      card.classList.add('selected');
+      selectedCard = card;
+    }
+
+    container.append(card);
+  });
 }
 
 function buildBookingRecord(meta, data, pending, listingInfo) {
@@ -1223,54 +1175,6 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
   };
 }
 
-function setTokenProposalStatus(message) {
-  if (tokenEls.status) {
-    tokenEls.status.textContent = message || '';
-  }
-}
-
-function setTokenProposalInputsDisabled(disabled) {
-  const flag = Boolean(disabled);
-  if (tokenEls.total) tokenEls.total.disabled = flag;
-  if (tokenEls.price) tokenEls.price.disabled = flag;
-  if (tokenEls.fee) tokenEls.fee.disabled = flag;
-  if (tokenEls.period) tokenEls.period.disabled = flag;
-}
-
-function resetTokenProposalForm() {
-  setTokenProposalInputsDisabled(false);
-  if (tokenEls.total) tokenEls.total.value = '';
-  if (tokenEls.price) tokenEls.price.value = '';
-  if (tokenEls.fee) tokenEls.fee.value = '';
-  if (tokenEls.period) {
-    if (tokenEls.period.querySelector('option[value="month"]')) {
-      tokenEls.period.value = 'month';
-    } else {
-      tokenEls.period.selectedIndex = 0;
-    }
-  }
-  setTokenProposalStatus('');
-}
-
-function updateTokenProposalContext(record) {
-  if (tokenEls.context) {
-    if (record) {
-      const bookingLabel = record.bookingIdText ? `Booking #${record.bookingIdText}` : 'Booking';
-      tokenEls.context.textContent = `${bookingLabel} · ${record.listingTitle}`;
-    } else {
-      tokenEls.context.textContent = tokenProposalDefaults.context || 'Select a booking to propose tokenisation.';
-    }
-  }
-  if (tokenEls.meta) {
-    if (record) {
-      const rentText = `${formatUsdc(record.grossRent)} USDC`;
-      tokenEls.meta.textContent = `Stay: ${record.startLabel} → ${record.endLabel} · Rent ${rentText}`;
-    } else {
-      tokenEls.meta.textContent = tokenProposalDefaults.meta || '';
-    }
-  }
-}
-
 function isTokenisationEligible(record, account = connectedAccount) {
   if (!record || record.tokenised || record.pendingTokenisationExists) return false;
   const candidate = normaliseAddress(account);
@@ -1278,154 +1182,124 @@ function isTokenisationEligible(record, account = connectedAccount) {
   return candidate === record.tenantLower || candidate === record.landlordLower;
 }
 
-function openTokenProposalPanel(recordKey) {
-  const record = bookingRecords.get(recordKey);
+function closeTokenProposal() {
+  activeTokenProposalKey = null;
+  if (tokenProposalHost) {
+    tokenProposalHost.innerHTML = '';
+    tokenProposalHost.hidden = true;
+  }
+}
+
+function openTokenProposal(booking) {
+  const record = booking && booking.key ? bookingRecords.get(booking.key) || booking : booking;
   if (!record) {
-    setTokenProposalStatus('Booking details unavailable. Refresh your bookings.');
     notify({ message: 'Unable to find booking details for tokenisation.', variant: 'error', role: 'tenant', timeout: 5000 });
     return;
   }
-  if (record.pendingTokenisationExists && !record.tokenised) {
-    setTokenProposalStatus('Waiting for platform approval before submitting a new proposal.');
-    notify({
-      message: 'Tokenisation proposal pending platform approval.',
-      variant: 'info',
-      role: 'tenant',
-      timeout: 5000,
-    });
+  if (record.tokenised) {
+    notify({ message: 'This booking is already tokenised.', variant: 'info', role: 'tenant', timeout: 4500 });
+    return;
+  }
+  if (record.pendingTokenisationExists) {
+    notify({ message: 'Tokenisation proposal pending platform approval.', variant: 'info', role: 'tenant', timeout: 5000 });
     return;
   }
   if (!isTokenisationEligible(record)) {
-    setTokenProposalStatus('Connect with the tenant or landlord wallet to propose tokenisation.');
     notify({ message: 'Tokenisation requires the tenant or landlord wallet.', variant: 'warning', role: 'tenant', timeout: 5000 });
     return;
   }
-  tokenProposalContext = {
-    recordKey: record.key,
-    listingAddress: record.listingAddress,
-    bookingId: record.bookingId,
-  };
-  resetTokenProposalForm();
-  if (record.totalSqmu > 0n && tokenEls.total) {
-    tokenEls.total.value = record.totalSqmu.toString();
-  }
-  if (record.pricePerSqmu > 0n && tokenEls.price) {
-    tokenEls.price.value = formatUsdc(record.pricePerSqmu);
-  }
-  if (record.feeBps > 0n && tokenEls.fee) {
-    tokenEls.fee.value = record.feeBps.toString();
-  }
-  if (tokenEls.period) {
-    const periodKey = getPeriodKeyFromValue(record.periodValue);
-    if (periodKey && tokenEls.period.querySelector(`option[value="${periodKey}"]`)) {
-      tokenEls.period.value = periodKey;
+
+  activeTokenProposalKey = record.key;
+  if (tokenProposalHost) {
+    tokenProposalHost.hidden = false;
+    tokenProposalHost.innerHTML = '';
+
+    const summary = el('div', { class: 'card-footnote' }, `Stay: ${record.startLabel} → ${record.endLabel} · Rent ${formatUsdc(record.grossRent)} USDC`);
+
+    let form;
+    form = TokenisationCard({
+      bookingId: record.bookingIdText || record.bookingId.toString(),
+      mode: 'propose',
+      onSubmit: async (values) => {
+        const controls = Array.from(form.querySelectorAll('input, select, button'));
+        controls.forEach((node) => { node.disabled = true; });
+        try {
+          const success = await submitTokenisationProposalForTenant(record, values);
+          if (success) {
+            closeTokenProposal();
+            try {
+              await loadTenantBookings(connectedAccount, { force: true, showBusyLabel: true });
+            } catch (err) {
+              console.warn('Failed to refresh bookings after tokenisation proposal', err);
+            }
+          }
+        } finally {
+          controls.forEach((node) => { node.disabled = false; });
+        }
+      },
+    });
+
+    const periodSelect = form.querySelector('select[name="period"]');
+    const requiredKey = getPeriodKeyFromValue(record.periodValue);
+    if (periodSelect && requiredKey && periodSelect.querySelector(`option[value="${requiredKey}"]`)) {
+      periodSelect.value = requiredKey;
     }
-  }
-  updateTokenProposalContext(record);
-  setTokenProposalStatus('Enter tokenisation details to continue.');
-  if (tokenEls.panel) {
-    tokenEls.panel.hidden = false;
-    tokenEls.panel.dataset.bookingKey = record.key;
+
+    tokenProposalHost.append(form);
+    tokenProposalHost.append(summary);
+
     try {
-      tokenEls.panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch {}
   }
-  if (tokenEls.total) {
-    tokenEls.total.focus();
-  }
 }
 
-function closeTokenProposalPanel() {
-  tokenProposalContext = null;
-  if (tokenEls.panel) {
-    tokenEls.panel.hidden = true;
-    delete tokenEls.panel.dataset.bookingKey;
+async function submitTokenisationProposalForTenant(record, { amount, totalSqmu, price, pricePerSqmu, fee, feeBps, period }) {
+  const target = record && record.key ? bookingRecords.get(record.key) || record : record;
+  if (!target) {
+    notify({ message: 'Booking details unavailable. Refresh and try again.', variant: 'error', role: 'tenant', timeout: 6000 });
+    return false;
   }
-  resetTokenProposalForm();
-  updateTokenProposalContext(null);
-}
-
-async function submitTokenisationProposalForTenant(event) {
-  if (event) {
-    event.preventDefault();
-  }
-  if (!tokenProposalContext) {
-    setTokenProposalStatus('Select a booking before submitting.');
-    notify({ message: 'Select a booking before proposing tokenisation.', variant: 'warning', role: 'tenant', timeout: 5000 });
-    return;
-  }
-  const record = bookingRecords.get(tokenProposalContext.recordKey);
-  if (!record) {
-    setTokenProposalStatus('Booking details unavailable. Refresh and try again.');
-    notify({ message: 'Booking details unavailable. Refresh bookings and try again.', variant: 'error', role: 'tenant', timeout: 6000 });
-    closeTokenProposalPanel();
-    return;
-  }
-  if (record.tokenised) {
-    setTokenProposalStatus('Booking already tokenised.');
+  if (target.tokenised) {
     notify({ message: 'This booking is already tokenised.', variant: 'info', role: 'tenant', timeout: 4500 });
-    closeTokenProposalPanel();
-    return;
+    return false;
   }
-  if (!isTokenisationEligible(record)) {
-    setTokenProposalStatus('Connect with the tenant or landlord wallet to continue.');
-    notify({ message: 'Connect with the tenant or landlord wallet to propose tokenisation.', variant: 'warning', role: 'tenant', timeout: 5500 });
-    return;
+  if (target.pendingTokenisationExists) {
+    notify({ message: 'Tokenisation proposal pending platform approval.', variant: 'info', role: 'tenant', timeout: 5000 });
+    return false;
   }
 
-  const totalSqmu = parseSqmuInput(tokenEls.total ? tokenEls.total.value : '');
-  if (totalSqmu === null || totalSqmu <= 0n) {
-    setTokenProposalStatus('Enter the total SQMU supply (whole number greater than 0).');
-    if (tokenEls.total) tokenEls.total.focus();
-    return;
+  const totalSqmuValue = parseSqmuInput(amount ?? totalSqmu ?? '');
+  if (totalSqmuValue === null || totalSqmuValue <= 0n) {
+    notify({ message: 'Enter the total SQMU supply (whole number greater than 0).', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return false;
   }
-  const pricePerSqmu = parseUsdcInput(tokenEls.price ? tokenEls.price.value : '');
-  if (pricePerSqmu === null || pricePerSqmu <= 0n) {
-    setTokenProposalStatus('Price per SQMU must be greater than 0 USDC.');
-    if (tokenEls.price) tokenEls.price.focus();
-    return;
+  const priceValue = parseUsdcInput(price ?? pricePerSqmu ?? '');
+  if (priceValue === null || priceValue <= 0n) {
+    notify({ message: 'Price per SQMU must be greater than 0 USDC.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return false;
   }
-  const feeBpsValue = parseBpsInput(tokenEls.fee ? tokenEls.fee.value : '');
-  if (feeBpsValue === null) {
-    setTokenProposalStatus('Enter the platform fee in basis points.');
-    if (tokenEls.fee) tokenEls.fee.focus();
-    return;
+  const feeValue = parseBpsInput(fee ?? feeBps ?? '');
+  if (feeValue === null) {
+    notify({ message: 'Enter the platform fee in basis points.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return false;
   }
-  if (feeBpsValue < 0 || feeBpsValue > 10_000) {
-    setTokenProposalStatus('Platform fee must be between 0 and 10000 basis points.');
-    if (tokenEls.fee) tokenEls.fee.focus();
-    return;
+  if (feeValue < 0 || feeValue > 10_000) {
+    notify({ message: 'Platform fee must be between 0 and 10000 basis points.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return false;
   }
-  const periodKey = tokenEls.period ? tokenEls.period.value : '';
+
+  const periodKey = typeof period === 'string' ? period : '';
   const periodInfo = PERIOD_OPTIONS[periodKey];
   if (!periodInfo) {
-    setTokenProposalStatus('Select a distribution period.');
-    if (tokenEls.period) tokenEls.period.focus();
-    return;
+    notify({ message: 'Select a distribution period.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return false;
   }
-  if (record.periodValue && Number(record.periodValue) > 0) {
-    const requiredKey = getPeriodKeyFromValue(record.periodValue);
-    if (requiredKey && requiredKey !== periodKey) {
-      setTokenProposalStatus(`Booking cadence is fixed to ${record.periodLabel.toLowerCase()}.`);
-      if (tokenEls.period) tokenEls.period.focus();
-      return;
-    }
+  const requiredKey = getPeriodKeyFromValue(target.periodValue);
+  if (requiredKey && requiredKey !== periodKey) {
+    notify({ message: `Booking cadence is fixed to ${target.periodLabel.toLowerCase()}.`, variant: 'warning', role: 'tenant', timeout: 5000 });
+    return false;
   }
-
-  setTokenProposalInputsDisabled(true);
-  const originalSubmitLabel = tokenEls.submit ? tokenEls.submit.textContent : '';
-  if (tokenEls.submit) {
-    tokenEls.submit.disabled = true;
-    tokenEls.submit.textContent = 'Submitting…';
-  }
-  const cancelPreviouslyDisabled = tokenEls.cancel ? tokenEls.cancel.disabled : false;
-  if (tokenEls.cancel) {
-    tokenEls.cancel.disabled = true;
-  }
-
-  setTokenProposalStatus('Preparing proposal…');
-
-  let proposalSubmitted = false;
 
   try {
     const p = await getProvider();
@@ -1434,10 +1308,9 @@ async function submitTokenisationProposalForTenant(event) {
     if (!from) {
       throw new Error('No wallet account connected.');
     }
-    if (!isTokenisationEligible(record, from)) {
-      setTokenProposalStatus('Connected wallet does not match the tenant or landlord.');
+    if (!isTokenisationEligible(target, from)) {
       notify({ message: 'Connected wallet does not match the tenant or landlord for this booking.', variant: 'error', role: 'tenant', timeout: 6000 });
-      return;
+      return false;
     }
 
     setConnectedAccount(from);
@@ -1445,16 +1318,16 @@ async function submitTokenisationProposalForTenant(event) {
     await loadConfig();
 
     const args = [
-      record.bookingId,
-      totalSqmu,
-      pricePerSqmu,
-      BigInt(feeBpsValue),
+      target.bookingId,
+      totalSqmuValue,
+      priceValue,
+      BigInt(feeValue),
       periodInfo.value,
     ];
 
     try {
       await pub.simulateContract({
-        address: record.listingAddress,
+        address: target.listingAddress,
         abi: LISTING_ABI,
         functionName: 'proposeTokenisation',
         args,
@@ -1462,9 +1335,8 @@ async function submitTokenisationProposalForTenant(event) {
       });
     } catch (err) {
       const detail = extractErrorMessage(err) || 'Tokenisation proposal not available right now.';
-      setTokenProposalStatus(detail);
       notify({ message: `Unable to submit tokenisation proposal: ${detail}`, variant: 'error', role: 'tenant', timeout: 6500 });
-      return;
+      return false;
     }
 
     const data = encodeFunctionData({
@@ -1474,14 +1346,13 @@ async function submitTokenisationProposalForTenant(event) {
     });
 
     els.status.textContent = 'Submitting tokenisation proposal…';
-    setTokenProposalStatus('Submitting proposal via wallet…');
     notify({ message: 'Submitting tokenisation proposal…', variant: 'info', role: 'tenant', timeout: 4500 });
 
     let walletSendUnsupported = false;
     let batchedSuccess = false;
     try {
       const { unsupported } = await requestWalletSendCalls(p, {
-        calls: [{ to: record.listingAddress, data }],
+        calls: [{ to: target.listingAddress, data }],
         from,
         chainId: ARBITRUM_HEX,
       });
@@ -1489,431 +1360,39 @@ async function submitTokenisationProposalForTenant(event) {
       batchedSuccess = !unsupported;
     } catch (err) {
       if (isUserRejectedRequestError(err)) {
-        setTokenProposalStatus('Tokenisation proposal cancelled by user.');
-        els.status.textContent = 'Tokenisation proposal cancelled.';
+        els.status.textContent = 'Tokenisation proposal cancelled by user.';
         notify({ message: 'Tokenisation proposal cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
-        return;
+        return false;
       }
       throw err;
     }
 
     if (!batchedSuccess && walletSendUnsupported) {
-      await p.request({
-        method: 'eth_sendTransaction',
-        params: [{ from, to: record.listingAddress, data }],
-      });
+      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: target.listingAddress, data }] });
     }
 
-    proposalSubmitted = true;
-    setTokenProposalStatus('Proposal submitted. Awaiting platform approval.');
-    els.status.textContent = `Tokenisation proposal submitted for booking #${record.bookingIdText}.`;
+    els.status.textContent = `Tokenisation proposal submitted for booking #${target.bookingIdText}.`;
     notify({
-      message: `Tokenisation proposal submitted for booking #${record.bookingIdText}.`,
+      message: `Tokenisation proposal submitted for booking #${target.bookingIdText}.`,
       variant: 'success',
       role: 'tenant',
       timeout: 6000,
     });
+    return true;
   } catch (err) {
     console.error('Tokenisation proposal failed', err);
     if (!isUserRejectedRequestError(err)) {
       const message = extractErrorMessage(err) || err?.message || 'Tokenisation proposal failed.';
-      setTokenProposalStatus(message);
       els.status.textContent = `Tokenisation proposal failed: ${message}`;
       notify({ message: `Tokenisation proposal failed: ${message}`, variant: 'error', role: 'tenant', timeout: 6500 });
     }
-  } finally {
-    setTokenProposalInputsDisabled(false);
-    if (tokenEls.submit) {
-      tokenEls.submit.disabled = false;
-      tokenEls.submit.textContent = originalSubmitLabel;
-    }
-    if (tokenEls.cancel) {
-      tokenEls.cancel.disabled = cancelPreviouslyDisabled;
-    }
-  }
-
-  if (proposalSubmitted) {
-    closeTokenProposalPanel();
-    try {
-      await loadTenantBookings(connectedAccount, { force: true, showBusyLabel: true });
-    } catch (err) {
-      console.error('Failed to refresh bookings after tokenisation proposal', err);
-    }
+    return false;
   }
 }
 
-function renderBookingCard(record) {
-  const card = document.createElement('div');
-  card.className = 'booking-entry';
-  card.dataset.bookingKey = record.key;
-
-  const header = document.createElement('div');
-  header.className = 'booking-entry-header';
-
-  const title = document.createElement('div');
-  title.className = 'booking-entry-title';
-  title.textContent = record.listingTitle;
-  header.appendChild(title);
-
-  const status = document.createElement('span');
-  const statusClass = record.statusClass ? ` booking-status-${record.statusClass}` : '';
-  status.className = `booking-status-badge${statusClass}`;
-  status.textContent = record.statusLabel;
-  header.appendChild(status);
-
-  card.appendChild(header);
-
-  const dates = document.createElement('div');
-  dates.className = 'booking-entry-dates';
-  dates.textContent = `Stay: ${record.startLabel} → ${record.endLabel}`;
-  card.appendChild(dates);
-
-  const details = document.createElement('div');
-  details.className = 'booking-details';
-  details.appendChild(
-    createDetailElement('Booking ID', `#${record.bookingIdText}`, {
-      copyText: record.bookingIdText,
-      copyLabel: 'Copy booking ID',
-      copySuccessMessage: 'Booking ID copied to clipboard.',
-      copyErrorMessage: 'Unable to copy booking ID.',
-    })
-  );
-  details.appendChild(createDetailElement('Payment cadence', record.periodLabel));
-  details.appendChild(createDetailElement('Gross rent', `${formatUsdc(record.grossRent)} USDC`));
-  details.appendChild(createDetailElement('Paid so far', `${formatUsdc(record.rentPaid)} USDC`));
-  details.appendChild(createDetailElement('Outstanding rent', `${formatUsdc(record.rentDue)} USDC`));
-  const depositText = record.deposit > 0n
-    ? `${formatUsdc(record.deposit)} USDC${record.depositReleased ? ' · Released' : ' · Escrowed'}`
-    : 'No deposit';
-  details.appendChild(createDetailElement('Deposit', depositText));
-  card.appendChild(details);
-
-  const tokenSection = document.createElement('div');
-  tokenSection.className = 'booking-tokenisation-section';
-
-  const tokenHeading = document.createElement('div');
-  tokenHeading.className = 'booking-tokenisation-title';
-  tokenHeading.textContent = 'Tokenisation';
-  tokenSection.appendChild(tokenHeading);
-
-  const pendingApproval = record.pendingTokenisationExists && !record.tokenised;
-
-  if (record.tokenised) {
-    const tokenDetails = document.createElement('div');
-    tokenDetails.className = 'booking-details';
-    tokenDetails.appendChild(createDetailElement('Total SQMU', formatSqmu(record.totalSqmu)));
-    tokenDetails.appendChild(createDetailElement('Sold SQMU', formatSqmu(record.soldSqmu)));
-    tokenDetails.appendChild(createDetailElement('Price per SQMU', `${formatUsdc(record.pricePerSqmu)} USDC`));
-    tokenDetails.appendChild(createDetailElement('Tokenisation fee', formatBps(record.feeBps)));
-    tokenDetails.appendChild(createDetailElement('Token period', record.periodLabel));
-    tokenSection.appendChild(tokenDetails);
-  } else if (pendingApproval && record.pendingTokenisation) {
-    const alert = document.createElement('div');
-    alert.className = 'booking-tokenisation-alert';
-    alert.textContent = 'Waiting for platform approval';
-    tokenSection.appendChild(alert);
-
-    const pendingDetails = document.createElement('div');
-    pendingDetails.className = 'booking-details';
-    pendingDetails.appendChild(
-      createDetailElement('Proposed SQMU', formatSqmu(record.pendingTokenisation.totalSqmu))
-    );
-    pendingDetails.appendChild(
-      createDetailElement('Proposed price', `${formatUsdc(record.pendingTokenisation.pricePerSqmu)} USDC`)
-    );
-    pendingDetails.appendChild(createDetailElement('Proposed fee', formatBps(record.pendingTokenisation.feeBps)));
-    const cadenceLabel = record.pendingTokenisation.periodLabel || 'Custom';
-    pendingDetails.appendChild(createDetailElement('Proposed cadence', cadenceLabel));
-    const proposerShort = short(record.pendingTokenisation.proposer);
-    pendingDetails.appendChild(
-      createDetailElement('Proposer', proposerShort || record.pendingTokenisation.proposer, {
-        copyText: record.pendingTokenisation.proposer,
-        copyLabel: 'Copy proposer address',
-        copySuccessMessage: 'Proposer address copied to clipboard.',
-        copyErrorMessage: 'Unable to copy proposer address.',
-      })
-    );
-    tokenSection.appendChild(pendingDetails);
-
-    const pendingNotice = document.createElement('div');
-    pendingNotice.className = 'booking-helper-text';
-    pendingNotice.textContent = 'Tokenisation proposal submitted. Investors can join after platform approval.';
-    tokenSection.appendChild(pendingNotice);
-  } else {
-    const tokenEmpty = document.createElement('div');
-    tokenEmpty.className = 'booking-tokenisation-empty';
-    tokenEmpty.textContent = 'Not tokenised';
-    tokenSection.appendChild(tokenEmpty);
-  }
-
-  card.appendChild(tokenSection);
-
-  const outstandingLine = document.createElement('div');
-  outstandingLine.className = 'booking-helper-text';
-  if (record.rentDue > 0n) {
-    outstandingLine.textContent = `Outstanding rent: ${formatUsdc(record.rentDue)} USDC`;
-  } else {
-    outstandingLine.textContent = 'All rent settled.';
-  }
-  card.appendChild(outstandingLine);
-
-  const actions = document.createElement('div');
-  actions.className = 'booking-actions';
-  let hasActions = false;
-
-  const tenantConnected = addressesEqual(connectedAccount, record.tenantLower);
-  const landlordConnected = addressesEqual(connectedAccount, record.landlordLower);
-
-  if (record.canPayRent) {
-    const amountInput = document.createElement('input');
-    amountInput.type = 'text';
-    amountInput.inputMode = 'decimal';
-    amountInput.pattern = "\\d*(\\.\\d{0,6})?";
-    amountInput.placeholder = 'Amount in USDC';
-    amountInput.className = 'booking-amount-input';
-    amountInput.value = formatUsdc(record.rentDue);
-    actions.appendChild(amountInput);
-
-    const actionNote = document.createElement('div');
-    actionNote.className = 'booking-helper-text';
-    actionNote.textContent = `Enter the amount you want to pay (max ${formatUsdc(record.rentDue)} USDC).`;
-    actions.appendChild(actionNote);
-
-    const payBtn = document.createElement('button');
-    payBtn.type = 'button';
-    payBtn.textContent = 'Pay rent';
-    payBtn.onclick = () => payRentForBooking(record.key, amountInput, payBtn);
-    actions.appendChild(payBtn);
-
-    hasActions = true;
-  } else if (record.rentDue > 0n) {
-    outstandingLine.textContent += ` (status ${record.statusLabel.toLowerCase()} — payments disabled)`;
-  }
-
-  if (!record.tokenised && !pendingApproval && (tenantConnected || landlordConnected)) {
-    const proposeBtn = document.createElement('button');
-    proposeBtn.type = 'button';
-    proposeBtn.textContent = 'Propose tokenisation';
-    proposeBtn.onclick = () => openTokenProposalPanel(record.key);
-    actions.appendChild(proposeBtn);
-
-    const proposeNote = document.createElement('div');
-    proposeNote.className = 'booking-helper-text';
-    proposeNote.textContent = 'Set SQMU supply, pricing and cadence for platform review.';
-    actions.appendChild(proposeNote);
-
-    hasActions = true;
-  }
-
-  if (tenantConnected && record.canCancel) {
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.textContent = 'Cancel booking';
-    cancelBtn.onclick = () => cancelBookingForTenant(record.key, cancelBtn);
-    actions.appendChild(cancelBtn);
-
-    const cancelNote = document.createElement('div');
-    cancelNote.className = 'booking-helper-text';
-    cancelNote.textContent = record.deposit > 0n
-      ? `Cancel before the stay begins to automatically refund your ${formatUsdc(record.deposit)} USDC deposit.`
-      : 'Cancel before the stay begins to free up the calendar.';
-    actions.appendChild(cancelNote);
-
-    hasActions = true;
-  }
-
-  if (hasActions) {
-    card.appendChild(actions);
-  }
-
-  if (!(tenantConnected && record.canCancel)) {
-    let cancellationMessage = '';
-    if (!tenantConnected && record.canCancel) {
-      cancellationMessage = 'Connect with your tenant wallet to cancel this booking.';
-    } else if (record.cancelDisabledReason) {
-      cancellationMessage = record.cancelDisabledReason;
-    }
-    if (cancellationMessage) {
-      const cancelInfo = document.createElement('div');
-      cancelInfo.className = 'booking-helper-text';
-      cancelInfo.textContent = cancellationMessage;
-      card.appendChild(cancelInfo);
-    }
-  }
-
-  const hasAccount = Boolean(normaliseAddress(connectedAccount));
-  if (!record.tokenised && !pendingApproval && hasAccount && !(tenantConnected || landlordConnected)) {
-    const tokenInfo = document.createElement('div');
-    tokenInfo.className = 'booking-helper-text';
-    tokenInfo.textContent = 'Tokenisation proposals can be submitted by the booking tenant or landlord wallet.';
-    card.appendChild(tokenInfo);
-  }
-
-  if (pendingApproval && (tenantConnected || landlordConnected)) {
-    const waitingInfo = document.createElement('div');
-    waitingInfo.className = 'booking-helper-text';
-    waitingInfo.textContent = 'Platform review in progress. You will be able to manage investments once approval is granted.';
-    card.appendChild(waitingInfo);
-  }
-
-  return card;
-}
-
-async function payRentForBooking(recordKey, amountInput, submitButton) {
-  const record = bookingRecords.get(recordKey);
-  if (!record) {
-    notify({ message: 'Unable to find booking details for payment.', variant: 'error', role: 'tenant', timeout: 5000 });
-    return;
-  }
-  if (!record.canPayRent) {
-    notify({ message: 'This booking is not accepting rent payments right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
-    return;
-  }
-  if (!amountInput || !submitButton) {
-    notify({ message: 'Payment controls unavailable for this booking.', variant: 'error', role: 'tenant', timeout: 5000 });
-    return;
-  }
-  const parsedAmount = parseUsdcInput(amountInput.value || '');
-  if (parsedAmount === null) {
-    notify({ message: 'Enter a valid USDC amount (up to 6 decimals).', variant: 'warning', role: 'tenant', timeout: 4500 });
-    amountInput.focus();
-    return;
-  }
-  if (parsedAmount <= 0n) {
-    notify({ message: 'Rent payments must be greater than 0 USDC.', variant: 'warning', role: 'tenant', timeout: 4500 });
-    amountInput.focus();
-    return;
-  }
-  if (record.rentDue > 0n && parsedAmount > record.rentDue) {
-    notify({
-      message: `You can pay at most ${formatUsdc(record.rentDue)} USDC right now.`,
-      variant: 'warning',
-      role: 'tenant',
-      timeout: 5000,
-    });
-    amountInput.focus();
-    return;
-  }
-
-  const originalText = submitButton.textContent;
-  submitButton.disabled = true;
-  amountInput.disabled = true;
-  submitButton.textContent = 'Paying…';
-
-  try {
-    const p = await getProvider();
-    const accounts = (await p.request({ method: 'eth_accounts' })) || [];
-    const [from] = accounts;
-    if (!from) {
-      throw new Error('No wallet account connected.');
-    }
-    if (!addressesEqual(from, record.tenantLower)) {
-      const message = 'Connected wallet does not match the booking tenant.';
-      els.status.textContent = message;
-      notify({ message, variant: 'error', role: 'tenant', timeout: 6000 });
-      return;
-    }
-    setConnectedAccount(from);
-    await ensureArbitrum(p);
-    await loadConfig();
-
-    let allowance = 0n;
-    try {
-      const allowanceRaw = await pub.readContract({
-        address: USDC_ADDRESS,
-        abi: erc20Abi,
-        functionName: 'allowance',
-        args: [from, record.listingAddress],
-      });
-      allowance = toBigInt(allowanceRaw, 0n);
-    } catch (err) {
-      console.warn('Failed to read USDC allowance before rent payment', err);
-      allowance = 0n;
-    }
-
-    const needsApproval = allowance < parsedAmount;
-    let approveData;
-    const calls = [];
-    if (needsApproval) {
-      approveData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [record.listingAddress, parsedAmount],
-      });
-      calls.push({ to: USDC_ADDRESS, data: approveData });
-    }
-    const payData = encodeFunctionData({
-      abi: LISTING_ABI,
-      functionName: 'payRent',
-      args: [record.bookingId, parsedAmount],
-    });
-    calls.push({ to: record.listingAddress, data: payData });
-
-    els.status.textContent = `Submitting rent payment (${formatUsdc(parsedAmount)} USDC)…`;
-
-    let walletSendUnsupported = false;
-    let batchedSuccess = false;
-    try {
-      const { unsupported } = await requestWalletSendCalls(p, {
-        calls,
-        from,
-        chainId: ARBITRUM_HEX,
-      });
-      batchedSuccess = !unsupported;
-      walletSendUnsupported = unsupported;
-    } catch (err) {
-      if (isUserRejectedRequestError(err)) {
-        els.status.textContent = 'Rent payment cancelled by user.';
-        notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
-        return;
-      }
-      throw err;
-    }
-
-    if (!batchedSuccess && walletSendUnsupported) {
-      if (needsApproval && approveData) {
-        els.status.textContent = `Approve USDC, then confirm rent payment (${formatUsdc(parsedAmount)} USDC).`;
-        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
-      } else {
-        els.status.textContent = `Confirm rent payment (${formatUsdc(parsedAmount)} USDC).`;
-      }
-      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: record.listingAddress, data: payData }] });
-      batchedSuccess = true;
-    }
-
-    els.status.textContent = 'Rent payment submitted.';
-    notify({
-      message: `Rent payment sent (${formatUsdc(parsedAmount)} USDC).`,
-      variant: 'success',
-      role: 'tenant',
-      timeout: 6000,
-    });
-    amountInput.value = '';
-    await loadTenantBookings(connectedAccount, { force: true });
-  } catch (err) {
-    console.error('Rent payment failed', err);
-    if (isUserRejectedRequestError(err)) {
-      els.status.textContent = 'Rent payment cancelled by user.';
-      notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
-    } else {
-      const message = err?.message || err;
-      els.status.textContent = `Rent payment failed: ${message}`;
-      notify({
-        message: message ? `Rent payment failed: ${message}` : 'Rent payment failed.',
-        variant: 'error',
-        role: 'tenant',
-        timeout: 6000,
-      });
-    }
-  } finally {
-    submitButton.disabled = false;
-    amountInput.disabled = false;
-    submitButton.textContent = originalText;
-  }
-}
-
-async function cancelBookingForTenant(recordKey, button) {
-  const record = bookingRecords.get(recordKey);
+async function cancelBookingForTenant(recordKeyOrRecord, button) {
+  const key = typeof recordKeyOrRecord === 'object' ? recordKeyOrRecord?.key : recordKeyOrRecord;
+  const record = typeof recordKeyOrRecord === 'object' ? recordKeyOrRecord : bookingRecords.get(key);
   if (!record) {
     notify({ message: 'Unable to find booking details for cancellation.', variant: 'error', role: 'tenant', timeout: 5000 });
     return;
@@ -1962,9 +1441,9 @@ async function cancelBookingForTenant(recordKey, button) {
     return;
   }
 
-  const confirmationMessage = record.deposit > 0n
-    ? `Cancel booking #${record.bookingIdText}? Your ${formatUsdc(record.deposit)} USDC deposit will be refunded automatically.`
-    : `Cancel booking #${record.bookingIdText}? This frees up the stay for other tenants.`;
+    const confirmationMessage = record.deposit > 0n
+      ? `Cancel booking #${record.bookingIdText}? Your ${formatUsdc(record.deposit)} USDC deposit will be refunded automatically.`
+      : `Cancel booking #${record.bookingIdText}? This frees up the stay for other tenants.`;
   const confirmed = window.confirm(confirmationMessage);
   if (!confirmed) {
     els.status.textContent = 'Cancellation dismissed.';
@@ -2114,9 +1593,7 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
     if (statusEl) {
       statusEl.textContent = emptyMessage;
     }
-    if (tokenProposalContext) {
-      closeTokenProposalPanel();
-    }
+    closeTokenProposal();
     return;
   }
   const sorted = [...records];
@@ -2129,20 +1606,72 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
   });
   for (const record of sorted) {
     bookingRecords.set(record.key, record);
-    listEl.appendChild(renderBookingCard(record));
+    const actions = [
+      { label: 'Pay rent', onClick: () => payRent(record), visible: record.canPayRent },
+      {
+        label: 'Propose tokenisation',
+        onClick: () => openTokenProposal(record),
+        visible: !record.tokenised && !record.pendingTokenisationExists && isTokenisationEligible(record),
+      },
+    ];
+    const tenantConnected = addressesEqual(connectedAccount, record.tenantLower);
+    if (tenantConnected && record.canCancel) {
+      actions.push({
+        label: 'Cancel booking',
+        onClick: (event) => cancelBookingForTenant(record, event?.currentTarget || null),
+        visible: true,
+      });
+    }
+    const card = BookingCard({
+      bookingId: record.bookingIdText || record.bookingId.toString(),
+      listingId: record.listingTitle || short(record.listingAddress),
+      dates: `${record.startLabel} → ${record.endLabel}`,
+      period: record.periodLabel,
+      depositUSDC: toUsdcNumber(record.deposit),
+      rentUSDC: toUsdcNumber(record.grossRent),
+      status: record.statusLabel,
+      actions,
+    });
+    card.dataset.bookingKey = record.key;
+    card.append(el('div', { class: 'card-footnote' }, record.listingTitle));
+    const rentFootnote = record.rentDue > 0n
+      ? `Outstanding rent: ${formatUsdc(record.rentDue)} USDC`
+      : 'All rent settled.';
+    card.append(el('div', { class: 'card-footnote' }, rentFootnote));
+    if (record.tokenised) {
+      card.append(
+        el('div', { class: 'card-footnote' }, `Tokenised · ${formatSqmu(record.totalSqmu)} SQMU · ${formatUsdc(record.pricePerSqmu)} USDC`),
+      );
+    } else if (record.pendingTokenisationExists && record.pendingTokenisation) {
+      card.append(
+        el(
+          'div',
+          { class: 'card-footnote' },
+          `Pending tokenisation · ${formatSqmu(record.pendingTokenisation.totalSqmu)} SQMU @ ${formatUsdc(record.pendingTokenisation.pricePerSqmu)} USDC (${formatBps(record.pendingTokenisation.feeBps)})`,
+        ),
+      );
+    } else if (!isTokenisationEligible(record)) {
+      card.append(
+        el('div', { class: 'card-footnote' }, 'Tokenisation proposals require the tenant or landlord wallet.'),
+      );
+    }
+    if (!tenantConnected && record.canCancel) {
+      card.append(
+        el('div', { class: 'card-footnote' }, 'Connect with your tenant wallet to cancel this booking.'),
+      );
+    } else if (!record.canCancel && record.cancelDisabledReason) {
+      card.append(el('div', { class: 'card-footnote' }, record.cancelDisabledReason));
+    }
+    listEl.append(card);
   }
   if (statusEl) {
     statusEl.textContent = `Showing ${sorted.length} booking${sorted.length === 1 ? '' : 's'}.`;
   }
 
-  if (tokenProposalContext) {
-    const contextRecord = bookingRecords.get(tokenProposalContext.recordKey);
-    if (!contextRecord || contextRecord.tokenised || !isTokenisationEligible(contextRecord)) {
-      closeTokenProposalPanel();
-    } else {
-      tokenProposalContext.listingAddress = contextRecord.listingAddress;
-      tokenProposalContext.bookingId = contextRecord.bookingId;
-      updateTokenProposalContext(contextRecord);
+  if (activeTokenProposalKey) {
+    const contextRecord = bookingRecords.get(activeTokenProposalKey);
+    if (!contextRecord || contextRecord.tokenised || contextRecord.pendingTokenisationExists || !isTokenisationEligible(contextRecord)) {
+      closeTokenProposal();
     }
   }
 }
@@ -2303,6 +1832,7 @@ async function loadListings(){
   await loadConfig();
   els.listings.textContent = 'Loading listings…';
   clearSelection();
+  listingRecords.clear();
   let addresses;
   try {
     const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allListings' });
@@ -2320,17 +1850,24 @@ async function loadListings(){
   }
   const infos = await Promise.all(cleaned.map((addr) => fetchListingInfo(addr)));
   const valid = infos.filter(Boolean);
-  els.listings.innerHTML = '';
   if (!valid.length) {
+    els.listings.innerHTML = '';
     els.listings.textContent = 'No active listings.';
     notify({ message: 'No active listings right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
     return;
   }
-  for (const info of valid) {
-    els.listings.appendChild(renderListingCard(info));
-  }
+  const entries = valid.map((info) => {
+    const record = buildListingRecord(info);
+    listingRecords.set(record.id, record);
+    if (record.address) {
+      listingRecords.set(normaliseAddress(record.address), record);
+      listingRecords.set(record.address, record);
+    }
+    return record;
+  });
+  renderListings(entries);
   notify({
-    message: `Loaded ${valid.length} listing${valid.length === 1 ? '' : 's'}.`,
+    message: `Loaded ${entries.length} listing${entries.length === 1 ? '' : 's'}.`,
     variant: 'success',
     role: 'tenant',
     timeout: 4500,
@@ -2741,4 +2278,145 @@ els.buy.onclick = async () => {
 };
 
 loadConfig().catch((err) => console.error('Initial config load failed', err));
+
+async function payRent(record, options = {}) {
+  const target = record && record.key ? bookingRecords.get(record.key) || record : record;
+  if (!target) {
+    notify({ message: 'Unable to find booking details for payment.', variant: 'error', role: 'tenant', timeout: 5000 });
+    return;
+  }
+  if (!target.canPayRent) {
+    notify({ message: 'This booking is not accepting rent payments right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    return;
+  }
+
+  const defaultAmount = target.rentDue > 0n ? formatUsdc(target.rentDue) : '';
+  const promptValue = options.amount ?? window.prompt('Enter rent amount in USDC', defaultAmount);
+  if (promptValue === null || promptValue === undefined) {
+    return;
+  }
+  const parsedAmount = parseUsdcInput(String(promptValue));
+  if (parsedAmount === null) {
+    notify({ message: 'Enter a valid USDC amount (up to 6 decimals).', variant: 'warning', role: 'tenant', timeout: 4500 });
+    return;
+  }
+  if (parsedAmount <= 0n) {
+    notify({ message: 'Rent payments must be greater than 0 USDC.', variant: 'warning', role: 'tenant', timeout: 4500 });
+    return;
+  }
+  if (target.rentDue > 0n && parsedAmount > target.rentDue) {
+    notify({
+      message: `You can pay at most ${formatUsdc(target.rentDue)} USDC right now.`,
+      variant: 'warning',
+      role: 'tenant',
+      timeout: 5000,
+    });
+    return;
+  }
+
+  try {
+    const p = await getProvider();
+    const accounts = (await p.request({ method: 'eth_accounts' })) || [];
+    const [from] = accounts;
+    if (!from) {
+      throw new Error('No wallet account connected.');
+    }
+    if (!addressesEqual(from, target.tenantLower)) {
+      const message = 'Connected wallet does not match the booking tenant.';
+      els.status.textContent = message;
+      notify({ message, variant: 'error', role: 'tenant', timeout: 6000 });
+      return;
+    }
+    setConnectedAccount(from);
+    await ensureArbitrum(p);
+    await loadConfig();
+
+    let allowance = 0n;
+    try {
+      const allowanceRaw = await pub.readContract({
+        address: USDC_ADDRESS,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [from, target.listingAddress],
+      });
+      allowance = toBigInt(allowanceRaw, 0n);
+    } catch (err) {
+      console.warn('Failed to read USDC allowance before rent payment', err);
+      allowance = 0n;
+    }
+
+    const needsApproval = allowance < parsedAmount;
+    let approveData;
+    const calls = [];
+    if (needsApproval) {
+      approveData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [target.listingAddress, parsedAmount],
+      });
+      calls.push({ to: USDC_ADDRESS, data: approveData });
+    }
+    const payData = encodeFunctionData({
+      abi: LISTING_ABI,
+      functionName: 'payRent',
+      args: [target.bookingId, parsedAmount],
+    });
+    calls.push({ to: target.listingAddress, data: payData });
+
+    els.status.textContent = `Submitting rent payment (${formatUsdc(parsedAmount)} USDC)…`;
+
+    let walletSendUnsupported = false;
+    let batchedSuccess = false;
+    try {
+      const { unsupported } = await requestWalletSendCalls(p, {
+        calls,
+        from,
+        chainId: ARBITRUM_HEX,
+      });
+      batchedSuccess = !unsupported;
+      walletSendUnsupported = unsupported;
+    } catch (err) {
+      if (isUserRejectedRequestError(err)) {
+        els.status.textContent = 'Rent payment cancelled by user.';
+        notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+        return;
+      }
+      throw err;
+    }
+
+    if (!batchedSuccess && walletSendUnsupported) {
+      if (needsApproval && approveData) {
+        els.status.textContent = `Approve USDC, then confirm rent payment (${formatUsdc(parsedAmount)} USDC).`;
+        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+      } else {
+        els.status.textContent = `Confirm rent payment (${formatUsdc(parsedAmount)} USDC).`;
+      }
+      await p.request({ method: 'eth_sendTransaction', params: [{ from, to: target.listingAddress, data: payData }] });
+    }
+
+    els.status.textContent = 'Rent payment submitted.';
+    notify({
+      message: `Rent payment of ${formatUsdc(parsedAmount)} USDC submitted.`,
+      variant: 'success',
+      role: 'tenant',
+      timeout: 6000,
+    });
+
+    try {
+      await loadTenantBookings(connectedAccount, { force: true, showBusyLabel: true });
+    } catch (err) {
+      console.warn('Failed to refresh bookings after rent payment', err);
+    }
+  } catch (err) {
+    console.error('Rent payment failed', err);
+    if (isUserRejectedRequestError(err)) {
+      els.status.textContent = 'Rent payment cancelled by user.';
+      notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+    } else {
+      const message = extractErrorMessage(err) || err?.message || 'Rent payment failed.';
+      els.status.textContent = `Rent payment failed: ${message}`;
+      notify({ message: `Rent payment failed: ${message}`, variant: 'error', role: 'tenant', timeout: 6500 });
+    }
+  }
+}
 
