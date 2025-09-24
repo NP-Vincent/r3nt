@@ -48,192 +48,216 @@
   <div id="notificationTray" class="notification-tray"></div>
   <h1>r3nt — Create Listing</h1>
 
-  <div id="contextBar" class="muted">Starting…</div>
-  <div id="feeInfo" class="muted">Listing price: — USDC</div>
-
-  <button id="connect" disabled>Connect Wallet</button>
+  <section class="card" data-collapsible data-open="1">
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      Wallet &amp; platform setup
+    </button>
+    <div data-collapsible-content>
+      <p class="muted">Connect to view platform fees and start a new property listing.</p>
+      <div id="contextBar" class="muted">Starting…</div>
+      <div id="feeInfo" class="muted">Listing price: — USDC</div>
+      <button id="connect" disabled>Connect Wallet</button>
+      <div id="status" class="muted"></div>
+    </div>
+  </section>
 
   <!-- Removed manual Cast URL/Hash field. We will compose and capture the hash automatically. -->
 
-  <section class="onboarding-guide">
-    <h2>Guided property onboarding</h2>
-    <p>Complete each checkpoint to unlock Create Listing. We keep track of the essentials for you.</p>
-    <ul class="checklist" id="onboardingChecklist">
-      <li data-check="basics">
-        <span class="status-dot"></span>
-        <div>
-          <strong>Basics</strong>
-          <small>Set the title and short description.</small>
-        </div>
-      </li>
-      <li data-check="location">
-        <span class="status-dot"></span>
-        <div>
-          <strong>Location & size</strong>
-          <small>Add latitude, longitude and square metre area.</small>
-        </div>
-      </li>
-      <li data-check="pricing">
-        <span class="status-dot"></span>
-        <div>
-          <strong>Pricing</strong>
-          <small>Deposit plus at least one rent installment.</small>
-        </div>
-      </li>
-      <li data-check="policies">
-        <span class="status-dot"></span>
-        <div>
-          <strong>Policies</strong>
-          <small>Minimum notice and booking window configured.</small>
-        </div>
-      </li>
-    </ul>
-    <div id="onboardingHints" class="onboarding-hints muted">Start with the basics — headline and short description.</div>
+  <section class="card" data-collapsible>
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      Guided onboarding checklist
+    </button>
+    <div data-collapsible-content>
+      <div class="onboarding-guide">
+        <p>Complete each checkpoint to unlock Create Listing. We keep track of the essentials for you.</p>
+        <ul class="checklist" id="onboardingChecklist">
+          <li data-check="basics">
+            <span class="status-dot"></span>
+            <div>
+              <strong>Basics</strong>
+              <small>Set the title and short description.</small>
+            </div>
+          </li>
+          <li data-check="location">
+            <span class="status-dot"></span>
+            <div>
+              <strong>Location &amp; size</strong>
+              <small>Add latitude, longitude and square metre area.</small>
+            </div>
+          </li>
+          <li data-check="pricing">
+            <span class="status-dot"></span>
+            <div>
+              <strong>Pricing</strong>
+              <small>Deposit plus at least one rent installment.</small>
+            </div>
+          </li>
+          <li data-check="policies">
+            <span class="status-dot"></span>
+            <div>
+              <strong>Policies</strong>
+              <small>Minimum notice and booking window configured.</small>
+            </div>
+          </li>
+        </ul>
+        <div id="onboardingHints" class="onboarding-hints muted">Start with the basics — headline and short description.</div>
+      </div>
+    </div>
   </section>
 
-  <div class="guided-section">
-    <h3>1. Property basics</h3>
-    <p class="section-subtext">We use these details to generate your Farcaster cast and metadata.</p>
-    <div class="field-grid columns-2">
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Latitude</span>
-          <span class="field-hint">Decimal degrees, e.g. 25.2048</span>
-          <input id="lat" placeholder="25.2048" inputmode="decimal">
+  <section class="card" data-collapsible>
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      Configure new listing
+    </button>
+    <div data-collapsible-content>
+      <div class="guided-section">
+        <h3>1. Property basics</h3>
+        <p class="section-subtext">We use these details to generate your Farcaster cast and metadata.</p>
+        <div class="field-grid columns-2">
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Latitude</span>
+              <span class="field-hint">Decimal degrees, e.g. 25.2048</span>
+              <input id="lat" placeholder="25.2048" inputmode="decimal">
+            </div>
+          </label>
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Longitude</span>
+              <span class="field-hint">Decimal degrees, e.g. 55.2708</span>
+              <div class="field-inline">
+                <input id="lon" placeholder="55.2708" inputmode="decimal">
+                <button type="button" id="useLocation" class="inline-button location-detect">Use my current location</button>
+              </div>
+            </div>
+          </label>
         </div>
-      </label>
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Longitude</span>
-          <span class="field-hint">Decimal degrees, e.g. 55.2708</span>
-          <div class="field-inline">
-            <input id="lon" placeholder="55.2708" inputmode="decimal">
-            <button type="button" id="useLocation" class="inline-button location-detect">Use my current location</button>
-          </div>
+        <div class="muted location-tip" id="locationTip"><small>Need coordinates? <a href="https://support.google.com/maps/answer/18539" target="_blank" rel="noopener">Right-click → “What’s here?” in Google Maps</a>.</small></div>
+        <div class="field-grid">
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Title (max 64 chars)</span>
+              <span class="field-hint">Appears as the property headline inside your cast.</span>
+              <input id="title" maxlength="64" placeholder="Cozy studio near metro">
+            </div>
+          </label>
+
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Short description (max 140 chars)</span>
+              <span class="field-hint">Short summary shown on previews and share cards.</span>
+              <input id="shortDesc" maxlength="140" placeholder="Furnished, walk to metro, fast Wi‑Fi">
+            </div>
+          </label>
         </div>
-      </label>
+      </div>
+
+      <div class="guided-section">
+        <h3>2. Pricing &amp; size</h3>
+        <p class="section-subtext">Share the deposit, footprint and daily rate you want to accept.</p>
+        <div class="field-grid columns-2">
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Deposit (USDC)</span>
+              <span class="field-hint">Escrowed upfront and released after platform approval.</span>
+              <input id="deposit" placeholder="100.00" inputmode="decimal">
+            </div>
+          </label>
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Property size (m²)</span>
+              <span class="field-hint">Square metre footprint used when tokenising bookings.</span>
+              <input id="areaSqm" placeholder="85" inputmode="numeric">
+            </div>
+          </label>
+        </div>
+        <div class="field-grid">
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Daily (USDC)</span>
+              <span class="field-hint">Required — sets the on-chain price per day.</span>
+              <input id="rateDaily" value="0" inputmode="decimal">
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="guided-section">
+        <h3>3. Booking policies</h3>
+        <p class="section-subtext">Control how soon tenants can book and how far in advance your calendar opens.</p>
+        <div class="field-grid columns-2">
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Min booking notice (hours)</span>
+              <span class="field-hint">Minimum time before check-in that bookings are allowed.</span>
+              <input id="minNotice" value="24" inputmode="numeric">
+            </div>
+          </label>
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Booking window (days, 0 = none)</span>
+              <span class="field-hint">How far into the future tenants can reserve.</span>
+              <input id="maxWindow" value="90" inputmode="numeric">
+            </div>
+          </label>
+        </div>
+        <div class="muted"><small>Adjust how soon and how far ahead tenants can reserve.</small></div>
+      </div>
+
+      <div class="guided-section">
+        <h3>4. Metadata (optional)</h3>
+        <p class="section-subtext">Leave blank and we’ll generate a JSON payload with your inputs.</p>
+        <div class="field-grid">
+          <label class="field-option">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="field-content">
+              <span class="field-title">Metadata URL (optional)</span>
+              <span class="field-hint">Provide hosted JSON if you manage metadata externally. Leave blank and we’ll auto-generate it.</span>
+              <input id="metadataUrl" placeholder="https://example.com/listing.json">
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="muted" style="margin-top:16px;"><small class="mono">Listings deploy via the Platform contract. Your wallet address becomes the landlord.</small></div>
+      <button id="create" disabled>Create Listing</button>
     </div>
-    <div class="muted location-tip" id="locationTip"><small>Need coordinates? <a href="https://support.google.com/maps/answer/18539" target="_blank" rel="noopener">Right-click → “What’s here?” in Google Maps</a>.</small></div>
-    <div class="field-grid">
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Title (max 64 chars)</span>
-          <span class="field-hint">Appears as the property headline inside your cast.</span>
-          <input id="title" maxlength="64" placeholder="Cozy studio near metro">
-        </div>
-      </label>
+  </section>
 
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Short description (max 140 chars)</span>
-          <span class="field-hint">Short summary shown on previews and share cards.</span>
-          <input id="shortDesc" maxlength="140" placeholder="Furnished, walk to metro, fast Wi‑Fi">
-        </div>
-      </label>
+  <section class="card" data-collapsible>
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      Manage existing listings
+    </button>
+    <div data-collapsible-content>
+      <div class="muted"><small>Check availability for each listing below.</small></div>
+      <div id="listingControls" class="listing-controls" hidden>
+        <label>
+          <span>Sort by</span>
+          <select id="listingSort">
+            <option value="created-desc">Newest → Oldest</option>
+            <option value="created-asc">Oldest → Newest</option>
+            <option value="price-asc">Base price: Low → High</option>
+            <option value="price-desc">Base price: High → Low</option>
+          </select>
+        </label>
+        <label>
+          <span>Location filter</span>
+          <input id="listingLocationFilter" placeholder="Latitude,Longitude" autocomplete="off" spellcheck="false" />
+        </label>
+        <button type="button" id="listingLocationClear" class="inline-button">Clear</button>
+      </div>
+      <div id="landlordListings" class="muted">Connect wallet to load your listings.</div>
     </div>
-  </div>
-
-  <div class="guided-section">
-    <h3>2. Pricing & size</h3>
-    <p class="section-subtext">Share the deposit, footprint and daily rate you want to accept.</p>
-    <div class="field-grid columns-2">
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Deposit (USDC)</span>
-          <span class="field-hint">Escrowed upfront and released after platform approval.</span>
-          <input id="deposit" placeholder="100.00" inputmode="decimal">
-        </div>
-      </label>
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Property size (m²)</span>
-          <span class="field-hint">Square metre footprint used when tokenising bookings.</span>
-          <input id="areaSqm" placeholder="85" inputmode="numeric">
-        </div>
-      </label>
-    </div>
-    <div class="field-grid">
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Daily (USDC)</span>
-          <span class="field-hint">Required — sets the on-chain price per day.</span>
-          <input id="rateDaily" value="0" inputmode="decimal">
-        </div>
-      </label>
-    </div>
-  </div>
-
-  <div class="guided-section">
-    <h3>3. Booking policies</h3>
-    <p class="section-subtext">Control how soon tenants can book and how far in advance your calendar opens.</p>
-    <div class="field-grid columns-2">
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Min booking notice (hours)</span>
-          <span class="field-hint">Minimum time before check-in that bookings are allowed.</span>
-          <input id="minNotice" value="24" inputmode="numeric">
-        </div>
-      </label>
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Booking window (days, 0 = none)</span>
-          <span class="field-hint">How far into the future tenants can reserve.</span>
-          <input id="maxWindow" value="90" inputmode="numeric">
-        </div>
-      </label>
-    </div>
-    <div class="muted"><small>Adjust how soon and how far ahead tenants can reserve.</small></div>
-  </div>
-
-  <div class="guided-section">
-    <h3>4. Metadata (optional)</h3>
-    <p class="section-subtext">Leave blank and we’ll generate a JSON payload with your inputs.</p>
-    <div class="field-grid">
-      <label class="field-option">
-        <span class="status-dot" aria-hidden="true"></span>
-        <div class="field-content">
-          <span class="field-title">Metadata URL (optional)</span>
-          <span class="field-hint">Provide hosted JSON if you manage metadata externally. Leave blank and we’ll auto-generate it.</span>
-          <input id="metadataUrl" placeholder="https://example.com/listing.json">
-        </div>
-      </label>
-    </div>
-  </div>
-
-  <div class="muted" style="margin-top:16px;"><small class="mono">Listings deploy via the Platform contract. Your wallet address becomes the landlord.</small></div>
-
-  <button id="create" disabled>Create Listing</button>
-  <div id="status"></div>
-
-  <div class="divider"></div>
-  <h2>Your Listings</h2>
-  <div class="muted"><small>Check availability for each listing below.</small></div>
-  <div id="listingControls" class="listing-controls" hidden>
-    <label>
-      <span>Sort by</span>
-      <select id="listingSort">
-        <option value="created-desc">Newest → Oldest</option>
-        <option value="created-asc">Oldest → Newest</option>
-        <option value="price-asc">Base price: Low → High</option>
-        <option value="price-desc">Base price: High → Low</option>
-      </select>
-    </label>
-    <label>
-      <span>Location filter</span>
-      <input id="listingLocationFilter" placeholder="Latitude,Longitude" autocomplete="off" spellcheck="false" />
-    </label>
-    <button type="button" id="listingLocationClear" class="inline-button">Clear</button>
-  </div>
-  <div id="landlordListings" class="muted">Connect wallet to load your listings.</div>
+  </section>
 
   <footer>
     r3nt by SQMU. USDC. Arbitrum.

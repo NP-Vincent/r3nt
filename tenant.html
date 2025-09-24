@@ -33,58 +33,90 @@
   </nav>
   <div id="notificationTray" class="notification-tray"></div>
   <h1>r3nt View Pass</h1>
-  <button id="connect">Connect Wallet</button>
-  <div id="address">Not connected</div>
-  <button id="buy" disabled>Buy View Pass</button>
-  <div id="status">Loading…</div>
-  <div class="planner-card">
-    <h2>Plan your stay</h2>
-    <p>Choose dates and how often you'd like to pay to preview totals before booking.</p>
-    <div class="planner-grid">
-      <div class="planner-inputs">
-        <label>Check-in
-          <input type="date" id="startDate">
-        </label>
-        <label>Check-out
-          <input type="date" id="endDate">
-        </label>
-        <label>How often you'll pay rent
-          <select id="paymentPeriod">
-            <option value="">Select how often…</option>
-            <option value="day">Daily</option>
-            <option value="week">Weekly</option>
-            <option value="month">Monthly</option>
-          </select>
-        </label>
-      </div>
-      <div class="planner-summary" id="bookingSummary">
-        <div class="summary-header">
-          <div class="summary-title" data-summary-title>No listing selected</div>
-          <div class="summary-subtitle" data-summary-subtitle>Select a property to preview totals.</div>
-        </div>
-        <dl class="summary-breakdown">
-          <div><dt>Stay length</dt><dd data-summary-nights>—</dd></div>
-          <div><dt>Deposit <span class="info-dot" title="Deposits are escrowed on-chain and require landlord and platform approval before release.">?</span></dt><dd data-summary-deposit>—</dd></div>
-          <div><dt>Total rent</dt><dd data-summary-rent>—</dd></div>
-          <div><dt>Installments</dt><dd data-summary-installment>—</dd></div>
-          <div><dt>Due today</dt><dd data-summary-total>—</dd></div>
-        </dl>
-        <button id="confirmBooking" disabled>Confirm booking</button>
-        <div class="summary-footnote" data-summary-notice>Select stay dates to continue.</div>
-      </div>
+
+  <section class="card" data-collapsible data-open="1">
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      Wallet connection
+    </button>
+    <div data-collapsible-content>
+      <p class="muted">Connect your wallet to unlock bookings and manage your stays.</p>
+      <button id="connect">Connect Wallet</button>
+      <div id="address">Not connected</div>
+      <div id="status">Loading…</div>
     </div>
-  </div>
-  <section id="bookingsSection" class="bookings-card">
-    <div class="bookings-header">
-      <h2>Your bookings</h2>
-      <button type="button" id="refreshBookings" class="inline-button small" disabled>Refresh</button>
-    </div>
-    <div class="bookings-status" data-bookings-status>Connect wallet to view bookings.</div>
-    <div id="bookingsList" class="bookings-list"></div>
-    <div id="tokenProposalPanel" class="token-proposal-card" hidden></div>
   </section>
-  <h2>Listings</h2>
-  <div id="listings"></div>
+
+  <section class="card" data-collapsible>
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      View pass access
+    </button>
+    <div data-collapsible-content>
+      <p class="muted">Purchase or renew your View Pass before confirming a booking.</p>
+      <button id="buy" disabled>Buy View Pass</button>
+    </div>
+  </section>
+
+  <section class="card" data-collapsible>
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      Plan your stay
+    </button>
+    <div data-collapsible-content>
+      <p>Choose dates and how often you'd like to pay to preview totals before booking.</p>
+      <div class="planner-grid">
+        <div class="planner-inputs">
+          <label>Check-in
+            <input type="date" id="startDate">
+          </label>
+          <label>Check-out
+            <input type="date" id="endDate">
+          </label>
+          <label>How often you'll pay rent
+            <select id="paymentPeriod">
+              <option value="">Select how often…</option>
+              <option value="day">Daily</option>
+              <option value="week">Weekly</option>
+              <option value="month">Monthly</option>
+            </select>
+          </label>
+        </div>
+        <div class="planner-summary" id="bookingSummary">
+          <div class="summary-header">
+            <div class="summary-title" data-summary-title>No listing selected</div>
+            <div class="summary-subtitle" data-summary-subtitle>Select a property to preview totals.</div>
+          </div>
+          <dl class="summary-breakdown">
+            <div><dt>Stay length</dt><dd data-summary-nights>—</dd></div>
+            <div><dt>Deposit <span class="info-dot" title="Deposits are escrowed on-chain and require landlord and platform approval before release.">?</span></dt><dd data-summary-deposit>—</dd></div>
+            <div><dt>Total rent</dt><dd data-summary-rent>—</dd></div>
+            <div><dt>Installments</dt><dd data-summary-installment>—</dd></div>
+            <div><dt>Due today</dt><dd data-summary-total>—</dd></div>
+          </dl>
+          <button id="confirmBooking" disabled>Confirm booking</button>
+          <div class="summary-footnote" data-summary-notice>Select stay dates to continue.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="bookingsSection" class="card" data-collapsible>
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      Your bookings
+    </button>
+    <div data-collapsible-content>
+      <div class="bookings-status" data-bookings-status>Connect wallet to view bookings.</div>
+      <div id="bookingsList" class="bookings-list"></div>
+      <div id="tokenProposalPanel" class="token-proposal-card" hidden></div>
+    </div>
+  </section>
+
+  <section class="card" data-collapsible>
+    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
+      Browse listings
+    </button>
+    <div data-collapsible-content>
+      <div id="listings"></div>
+    </div>
+  </section>
   <footer>
     r3nt by SQMU. USDC. Arbitrum.
   </footer>
