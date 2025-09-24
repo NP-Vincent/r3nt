@@ -15,6 +15,7 @@ import {
 } from './config.js';
 import createBackController from './back-navigation.js';
 import { BookingCard, TokenisationCard } from './ui/cards.js';
+import { actionsFor } from './ui/actions.js';
 
 const ARBITRUM_HEX = '0xa4b1';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -723,6 +724,20 @@ function renderHoldings(entries) {
   for (const entry of entries) {
     const statusLabel = formatBookingStatus(entry.status);
     const periodLabel = (entry.periodLabel || '').trim() || formatPeriodLabel(entry.period);
+    const actions = actionsFor({
+      role: 'investor',
+      entity: 'booking',
+      perms: {
+        onClaim: (event) => claimRent(entry, event?.currentTarget),
+        canClaim: true,
+      },
+    }).map((action) => {
+      if (action.label === 'Claim rent' && entry.claimable > 0n) {
+        return { ...action, label: `Claim ${formatUsdc(entry.claimable)} USDC` };
+      }
+      return action;
+    });
+
     const card = BookingCard({
       bookingId: entry.bookingId,
       listingId: shortAddress(entry.listingAddress),
@@ -731,12 +746,7 @@ function renderHoldings(entries) {
       depositUSDC: null,
       rentUSDC: null,
       status: statusLabel,
-      actions: [
-        {
-          label: entry.claimable > 0n ? `Claim ${formatUsdc(entry.claimable)} USDC` : 'Claim rent',
-          onClick: (event) => claimRent(entry, event?.currentTarget),
-        },
-      ],
+      actions,
     });
 
     const header = card.querySelector('.card-header');

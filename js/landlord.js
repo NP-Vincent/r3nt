@@ -5,6 +5,7 @@ import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32F
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { ListingCard, TokenisationCard } from './ui/cards.js';
+import { actionsFor } from './ui/actions.js';
 import { makeCollapsible } from './ui/accordion.js';
 import {
   PLATFORM_ADDRESS,
@@ -1304,11 +1305,17 @@ function renderLandlordListingCard(listing) {
   let focusAvailabilitySection = () => {};
   let openTokenSection = () => {};
 
-  const actions = [
-    { label: 'Check availability', onClick: () => focusAvailabilitySection() },
-    { label: 'Deactivate', onClick: () => handleDeactivateListing(listing) },
-    { label: 'Propose tokenisation', onClick: () => openTokenSection() },
-  ];
+  const actions = actionsFor({
+    role: 'landlord',
+    entity: 'listing',
+    perms: {
+      onCheck: () => focusAvailabilitySection(),
+      onToggleActive: () => handleDeactivateListing(listing),
+      active: listing?.active !== false,
+      onPropose: () => openTokenSection(),
+      canPropose: true,
+    },
+  });
 
   const card = ListingCard({
     id: listingIdText || shortAddress(listing?.address || '') || `listing-${listing?.order ?? 0}`,
