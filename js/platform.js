@@ -785,12 +785,16 @@ async function handleTokenProposalAction(record, action, controls = {}) {
     statusLine.textContent = action === 'approve' ? 'Submitting approval…' : 'Rejecting proposal…';
   }
   try {
-    const listingContract = new Contract(record.listingAddress, LISTING_ABI, signer);
+    const listingId = record?.listingId;
+    const bookingId = record?.bookingId;
+    if (!listingId || !bookingId) {
+      throw new Error('Missing listing or booking id for tokenisation action.');
+    }
     const tx =
       action === 'approve'
-        ? await listingContract.approveTokenisation(record.bookingId)
-        : await listingContract.rejectTokenisation(record.bookingId);
-    setTokenProposalStatus('Waiting for confirmation…', 'info');
+        ? await platformWrite.approveTokenisation(listingId, bookingId)
+        : await platformWrite.rejectTokenisation(listingId, bookingId);
+    setTokenProposalStatus('Waiting for platform confirmation…', 'info');
     await tx.wait();
     const actionText = action === 'approve' ? 'approved' : 'rejected';
     const message = `Tokenisation ${actionText} for listing #${record.listingIdText} booking #${record.bookingIdText}.`;
