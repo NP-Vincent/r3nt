@@ -15,7 +15,6 @@ export function actionsFor({ role, entity, perms }) {
       },
       { label:'Check availability', onClick: perms.onCheck, visible: role==='landlord' },
       { label: perms.active ? 'Deactivate' : 'Activate', onClick: perms.onToggleActive, visible: role==='landlord' },
-      { label:'Propose tokenisation', onClick: perms.onPropose, visible: perms.canPropose },
     ];
   }
   if (entity === 'booking') {
