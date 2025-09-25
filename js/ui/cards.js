@@ -45,12 +45,14 @@ export function BookingCard({
   statusClass,
   actions = [],
 }) {
+  const periodText = (periodLabel(period) || '').trim();
+  const showPeriod = Boolean(periodText) && periodText !== '—';
   return el('div', { class: 'card data-card booking-entry', dataset: { bookingId, listingId } }, [
     el('div', { class: 'card-header' }, [
       el('strong', {}, `Booking #${bookingId}`),
       el('div', { class: 'card-meta' }, [
         Pill(dates || '—'),
-        Pill(periodLabel(period)),
+        showPeriod ? Pill(periodText) : null,
         depositUSDC != null ? Pill(`Deposit ${fmt.usdc(depositUSDC)} USDC`) : null,
         rentUSDC != null ? Pill(`Rent ${fmt.usdc(rentUSDC)} USDC`) : null,
         status

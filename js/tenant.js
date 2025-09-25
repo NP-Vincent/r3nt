@@ -7,7 +7,7 @@ import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
 import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
-import { createCollapsibleSection, mountCollapsibles } from './ui/accordion.js';
+import { createCollapsibleSection, makeCollapsible, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
 import {
   RPC_URL,
@@ -57,6 +57,8 @@ const els = {
 };
 const tokenProposalHost = document.getElementById('tokenProposalPanel');
 
+let collapseTenantSections = () => {};
+
 if (tokenProposalHost) {
   tokenProposalHost.hidden = true;
   tokenProposalHost.innerHTML = '';
@@ -92,6 +94,20 @@ let activeTokenProposalCard = null;
 
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
 mountCollapsibles();
+
+const collapsibleControls = {
+  bookings: makeCollapsible(els.bookings?.section),
+  planner: makeCollapsible(els.planner?.card),
+};
+
+collapseTenantSections = () => {
+  if (collapsibleControls.bookings) {
+    collapsibleControls.bookings.setOpen(false);
+  }
+  if (collapsibleControls.planner) {
+    collapsibleControls.planner.setOpen(false);
+  }
+};
 
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
@@ -253,12 +269,17 @@ function addressesEqual(a, b) {
 function setConnectedAccount(addr) {
   const previous = normaliseAddress(connectedAccount);
   const next = normaliseAddress(addr);
+  const wasConnected = Boolean(previous);
+  const isConnected = Boolean(next);
   if (previous !== next) {
     bookingsRendered = false;
     lastBookingsAccount = '';
   }
   const original = typeof addr === 'string' ? addr : '';
   connectedAccount = original || null;
+  if (!wasConnected && isConnected) {
+    collapseTenantSections();
+  }
   if (activeTokenProposalKey) {
     const contextRecord = bookingRecords.get(activeTokenProposalKey);
     if (!contextRecord || !isTokenisationEligible(contextRecord, addr)) {
@@ -266,7 +287,7 @@ function setConnectedAccount(addr) {
     }
   }
   if (els.bookings?.refresh) {
-    els.bookings.refresh.disabled = !next;
+    els.bookings.refresh.disabled = !isConnected;
   }
   if (els.connect) {
     if (!els.connect.dataset.defaultLabel) {
@@ -275,8 +296,8 @@ function setConnectedAccount(addr) {
         els.connect.dataset.defaultLabel = initialLabel;
       }
     }
-    els.connect.classList.toggle('is-connected', Boolean(next));
-    if (next) {
+    els.connect.classList.toggle('is-connected', isConnected);
+    if (isConnected) {
       els.connect.textContent = `Connected ${short(original)}`;
     } else {
       const fallback = els.connect.dataset.defaultLabel || 'Connect Wallet';
@@ -284,7 +305,7 @@ function setConnectedAccount(addr) {
     }
   }
   if (els.addr) {
-    if (next) {
+    if (isConnected) {
       els.addr.textContent = `Connected: ${short(original)}`;
     } else {
       els.addr.textContent = 'Not connected';
