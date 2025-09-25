@@ -46,13 +46,14 @@ export function makeCollapsible(section, { defaultOpen } = {}) {
   toggle.addEventListener('click', handleToggle);
   toggle.addEventListener('keydown', handleKey);
 
+  const datasetPreference = section.dataset.open;
+  const ariaPreference = toggle.getAttribute('aria-expanded');
   const initialOpen =
     toBoolean(defaultOpen, null) ??
-    (section.dataset.open ? section.dataset.open === '1' : null) ??
-    (toggle.getAttribute('aria-expanded') === 'true' ? true : null) ??
-    !content.hidden;
+    (datasetPreference !== undefined ? datasetPreference === '1' : null) ??
+    (ariaPreference !== null ? ariaPreference === 'true' : null);
 
-  setOpen(Boolean(initialOpen));
+  setOpen(initialOpen ?? false);
 
   const control = { section, content, toggle, setOpen };
   section[COLLAPSIBLE_CONTROL] = control;
