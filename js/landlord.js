@@ -5,7 +5,6 @@ import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32F
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
-import { actionsFor } from './ui/actions.js';
 import { createCollapsibleSection, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
 import {
@@ -1083,21 +1082,6 @@ function renderLandlordListingCard(listing) {
     Number.isFinite(listing?.lat) && Number.isFinite(listing?.lon)
       ? `${Number(listing.lat).toFixed(5)}, ${Number(listing.lon).toFixed(5)}`
       : '—';
-  let focusAvailabilitySection = () => {};
-  let openTokenSection = () => {};
-
-  const actions = actionsFor({
-    role: 'landlord',
-    entity: 'listing',
-    perms: {
-      onCheck: () => focusAvailabilitySection(),
-      onToggleActive: () => handleDeactivateListing(listing),
-      active: listing?.active !== false,
-      onPropose: () => openTokenSection(),
-      canPropose: true,
-    },
-  });
-
   const card = ListingCard({
     id: listingIdText || shortAddress(listing?.address || '') || `listing-${listing?.order ?? 0}`,
     title: listing?.title,
@@ -1106,7 +1090,6 @@ function renderLandlordListingCard(listing) {
     areaSqm: areaValue > 0 ? areaValue : undefined,
     depositUSDC: listing.depositAmount,
     status: listing?.active === false ? 'Inactive' : 'Active',
-    actions,
   });
 
   card.classList.add('landlord-listing-card');
@@ -1240,13 +1223,6 @@ function renderLandlordListingCard(listing) {
   availabilityPanel.content.append(dateRow, checkBtn, result);
   sections.append(availabilityPanel.section);
 
-  focusAvailabilitySection = () => {
-    availabilityPanel.setOpen(true);
-    try {
-      availabilityPanel.section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch {}
-  };
-
   checkBtn.onclick = () =>
     disableWhile(checkBtn, async () => {
       try {
@@ -1289,7 +1265,6 @@ function renderLandlordListingCard(listing) {
 
   const tokenTools = createTokenTools(listing);
   sections.append(tokenTools.section);
-  openTokenSection = () => tokenTools.controller.openPanel({ focus: true });
 
   const controller = {
     listing,
