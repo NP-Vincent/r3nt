@@ -380,29 +380,46 @@ function createSelectionFromEntry(entry) {
 }
 
 const BOOKING_STATUS_LABELS = {
-  0: 'Unknown',
+  0: 'Pending',
   1: 'Active',
   2: 'Completed',
   3: 'Cancelled',
   4: 'Defaulted',
 };
 
-function formatBookingStatus(statusValue) {
-  let numeric = 0;
+const BOOKING_STATUS_CLASS_MAP = {
+  0: 'pending',
+  1: 'active',
+  2: 'completed',
+  3: 'cancelled',
+  4: 'defaulted',
+};
+
+function normaliseStatusValue(statusValue) {
   if (typeof statusValue === 'bigint') {
-    numeric = Number(statusValue);
-  } else if (typeof statusValue === 'number') {
-    numeric = statusValue;
-  } else if (typeof statusValue === 'string' && statusValue.trim()) {
+    const numeric = Number(statusValue);
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+  if (typeof statusValue === 'number' && Number.isFinite(statusValue)) {
+    return statusValue;
+  }
+  if (typeof statusValue === 'string' && statusValue.trim()) {
     const parsed = Number.parseInt(statusValue, 10);
     if (Number.isFinite(parsed)) {
-      numeric = parsed;
+      return parsed;
     }
   }
-  if (!Number.isFinite(numeric)) {
-    numeric = 0;
-  }
+  return 0;
+}
+
+function formatBookingStatus(statusValue) {
+  const numeric = normaliseStatusValue(statusValue);
   return BOOKING_STATUS_LABELS[numeric] || BOOKING_STATUS_LABELS[0];
+}
+
+function getBookingStatusClass(statusValue) {
+  const numeric = normaliseStatusValue(statusValue);
+  return BOOKING_STATUS_CLASS_MAP[numeric] || '';
 }
 
 function formatBookingDates(startSeconds, endSeconds) {
@@ -723,6 +740,7 @@ function renderHoldings(entries) {
   }
   for (const entry of entries) {
     const statusLabel = formatBookingStatus(entry.status);
+    const statusClass = getBookingStatusClass(entry.status);
     const periodLabel = (entry.periodLabel || '').trim() || formatPeriodLabel(entry.period);
     const actions = actionsFor({
       role: 'investor',
@@ -746,8 +764,13 @@ function renderHoldings(entries) {
       depositUSDC: null,
       rentUSDC: null,
       status: statusLabel,
+      statusClass,
       actions,
     });
+
+    if (statusClass) {
+      card.classList.add(`booking-status-${statusClass}`);
+    }
 
     const header = card.querySelector('.card-header');
     if (header) {

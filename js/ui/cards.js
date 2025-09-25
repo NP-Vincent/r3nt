@@ -1,6 +1,9 @@
 import { el, fmt } from './dom.js';
 
-const Pill = (text) => el('span', { class: 'pill' }, text);
+const Pill = (text, extraClass = '') => {
+  const className = extraClass ? `pill ${extraClass}` : 'pill';
+  return el('span', { class: className }, text);
+};
 
 const periodLabel = (value) => {
   if (value === undefined || value === null || value === '') return '—';
@@ -31,7 +34,17 @@ export function ListingCard({ id, title, location, pricePerDayUSDC, areaSqm, dep
   ]);
 }
 
-export function BookingCard({ bookingId, listingId, dates, period, depositUSDC, rentUSDC, status, actions = [] }) {
+export function BookingCard({
+  bookingId,
+  listingId,
+  dates,
+  period,
+  depositUSDC,
+  rentUSDC,
+  status,
+  statusClass,
+  actions = [],
+}) {
   return el('div', { class: 'card data-card booking-entry', dataset: { bookingId, listingId } }, [
     el('div', { class: 'card-header' }, [
       el('strong', {}, `Booking #${bookingId}`),
@@ -40,7 +53,14 @@ export function BookingCard({ bookingId, listingId, dates, period, depositUSDC, 
         Pill(periodLabel(period)),
         depositUSDC != null ? Pill(`Deposit ${fmt.usdc(depositUSDC)} USDC`) : null,
         rentUSDC != null ? Pill(`Rent ${fmt.usdc(rentUSDC)} USDC`) : null,
-        status ? Pill(status) : null,
+        status
+          ? Pill(
+              status,
+              ['booking-status-badge', statusClass ? `booking-status-${statusClass}` : '']
+                .filter(Boolean)
+                .join(' '),
+            )
+          : null,
       ].filter(Boolean)),
     ]),
     el(

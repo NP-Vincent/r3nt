@@ -1046,6 +1046,9 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
     : '0x0000000000000000000000000000000000000000';
   const now = BigInt(Math.floor(Date.now() / 1000));
   const isActive = statusValue === 1;
+  const isCompleted = statusValue === 2;
+  const isCancelled = statusValue === 3;
+  const isDefaulted = statusValue === 4;
   const isUpcoming = start > now;
   let canCancel = false;
   let cancelDisabledReason = '';
@@ -1093,6 +1096,9 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
     listingInfo: listingInfo || null,
     canPayRent: statusValue === 1 && rentDue > 0n,
     isActive,
+    isCompleted,
+    isCancelled,
+    isDefaulted,
     canCancel,
     cancelDisabledReason,
     pendingTokenisationExists: pendingExists && !tokenised,
@@ -1591,14 +1597,23 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
       depositUSDC: record.deposit,
       rentUSDC: record.grossRent,
       status: record.statusLabel,
+      statusClass: record.statusClass,
       actions,
     });
     card.dataset.bookingKey = record.key;
+    if (record.statusClass) {
+      card.classList.add(`booking-status-${record.statusClass}`);
+    }
     card.append(el('div', { class: 'card-footnote' }, record.listingTitle));
     const rentFootnote = record.rentDue > 0n
       ? `Outstanding rent: ${fmt.usdc(record.rentDue)} USDC`
       : 'All rent settled.';
     card.append(el('div', { class: 'card-footnote' }, rentFootnote));
+    if (record.isCancelled) {
+      card.append(el('div', { class: 'card-footnote' }, 'Booking cancelled. Record kept for reference.'));
+    } else if (record.isDefaulted) {
+      card.append(el('div', { class: 'card-footnote' }, 'Booking defaulted. Contact the platform for support.'));
+    }
     if (record.tokenised) {
       card.append(
         el('div', { class: 'card-footnote' }, `Tokenised · ${fmt.sqmu(record.totalSqmu)} SQMU · ${fmt.usdc(record.pricePerSqmu)} USDC`),

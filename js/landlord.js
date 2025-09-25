@@ -989,6 +989,7 @@ function renderLandlordBookingEntry(listing, record) {
     depositUSDC: record.deposit,
     rentUSDC: record.grossRent,
     status: record.statusLabel,
+    statusClass: record.statusClass,
     actions: [
       {
         label: record.tokenActionLabel,

@@ -1162,6 +1162,11 @@ dl.summary-breakdown dd {
   color: #3f3f45;
 }
 
+.booking-status-pending {
+  background: #ede8f6;
+  color: #4a3d66;
+}
+
 .booking-status-active {
   background: #e7f0ea;
   color: #314635;
