@@ -28,6 +28,11 @@ const els = {
   addr: document.getElementById('address'),
   status: document.getElementById('status'),
   listings: document.getElementById('listings'),
+  planner: {
+    card: document.querySelector('[data-planner-card]'),
+    form: document.querySelector('[data-planner-form]'),
+    empty: document.querySelector('[data-planner-empty]'),
+  },
   start: document.getElementById('startDate'),
   end: document.getElementById('endDate'),
   period: document.getElementById('paymentPeriod'),
@@ -110,6 +115,7 @@ if (els.period) {
 }
 
 updateSummary();
+setPlannerFormVisible(false);
 
 const setVersionBadge = () => {
   const badge = document.querySelector('[data-version]');
@@ -469,6 +475,20 @@ function setText(node, value) {
   }
 }
 
+function setPlannerFormVisible(visible) {
+  const show = Boolean(visible);
+  const planner = els.planner || {};
+  if (planner.form) {
+    planner.form.hidden = !show;
+  }
+  if (planner.empty) {
+    planner.empty.hidden = show;
+  }
+  if (planner.card) {
+    planner.card.classList.toggle('planner-card-active', show);
+  }
+}
+
 function updateSummary() {
   const summary = els.summary || {};
   const listing = selectedListing;
@@ -577,6 +597,7 @@ function clearSelection(options = {}) {
   selectedCard = null;
   selectedListing = null;
   selectedListingTitle = '';
+  setPlannerFormVisible(false);
   updateSummary();
   if (!options.fromBack && selectionBackEntry) {
     selectionBackEntry = null;
@@ -597,6 +618,7 @@ function setSelectedListing(info, card) {
   selectedListing = info;
   selectedCard = card || (info?.id ? els.listings?.querySelector(`[data-id="${info.id}"]`) : null);
   selectedListingTitle = info?.displayTitle || getListingTitle(info);
+  setPlannerFormVisible(true);
   if (selectedCard) {
     selectedCard.classList.add('selected');
   }
@@ -636,7 +658,9 @@ function openBookingFlow(listing) {
       els.summary.container.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch {}
   }
-  if (els.confirmBooking) {
+  if (els.start) {
+    els.start.focus();
+  } else if (els.confirmBooking) {
     els.confirmBooking.focus();
   }
 }
@@ -898,13 +922,23 @@ function renderListings(listings) {
   const container = document.getElementById('listings');
   if (!container) return;
   container.innerHTML = '';
+  const plannerEmpty = els.planner?.empty;
+  if (plannerEmpty) {
+    if (!plannerEmpty.dataset.defaultText) {
+      plannerEmpty.dataset.defaultText = plannerEmpty.textContent || '';
+    }
+    if (!listings || listings.length === 0) {
+      plannerEmpty.textContent = 'No listings available right now.';
+    } else {
+      plannerEmpty.textContent = plannerEmpty.dataset.defaultText || 'Select a listing to open the booking form.';
+    }
+  }
   listings.forEach((L) => {
     const record = listingRecords.get(L.id) || L;
     const listingActions = actionsFor({
       role: 'tenant',
       entity: 'listing',
       perms: {
-        onPreview: () => selectListing(record),
         onBook: () => openBookingFlow(record),
         bookable: record.active !== false,
       },
@@ -1578,7 +1612,11 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
       {
         label: 'Propose tokenisation',
         onClick: () => openTokenProposal(record),
-        visible: !record.tokenised && !record.pendingTokenisationExists && isTokenisationEligible(record),
+        visible:
+          record.isActive &&
+          !record.tokenised &&
+          !record.pendingTokenisationExists &&
+          isTokenisationEligible(record),
       },
     ];
     const tenantConnected = addressesEqual(connectedAccount, record.tenantLower);
@@ -1625,6 +1663,10 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
           { class: 'card-footnote' },
           `Pending tokenisation · ${fmt.sqmu(record.pendingTokenisation.totalSqmu)} SQMU @ ${fmt.usdc(record.pendingTokenisation.pricePerSqmu)} USDC (${fmt.bps(record.pendingTokenisation.feeBps)})`,
         ),
+      );
+    } else if (!record.isActive) {
+      card.append(
+        el('div', { class: 'card-footnote' }, 'Tokenisation proposals are only available for active bookings.'),
       );
     } else if (!isTokenisationEligible(record)) {
       card.append(

@@ -34,87 +34,69 @@
   <div id="notificationTray" class="notification-tray"></div>
   <h1>r3nt View Pass</h1>
 
-  <section class="card" data-collapsible>
-    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
-      Wallet connection
-    </button>
-    <div data-collapsible-content hidden>
-      <p class="muted">Connect your wallet to unlock bookings and manage your stays.</p>
+  <section class="card">
+    <h2>Wallet &amp; View Pass</h2>
+    <p class="muted">Connect your wallet to unlock bookings, manage stays and keep your View Pass active.</p>
+    <div class="card-actions">
       <button id="connect">Connect Wallet</button>
-      <div id="address">Not connected</div>
-      <div id="status">Loading…</div>
-    </div>
-  </section>
-
-  <section class="card" data-collapsible>
-    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
-      View pass access
-    </button>
-    <div data-collapsible-content>
-      <p class="muted">Purchase or renew your View Pass before confirming a booking.</p>
       <button id="buy" disabled>Buy View Pass</button>
     </div>
+    <div id="address">Not connected</div>
+    <div id="status">Waiting for wallet connection.</div>
   </section>
 
-  <section class="card" data-collapsible>
-    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
-      Plan your stay
-    </button>
-    <div data-collapsible-content>
-      <p>Choose dates and how often you'd like to pay to preview totals before booking.</p>
-      <div class="planner-grid">
-        <div class="planner-inputs">
-          <label>Check-in
-            <input type="date" id="startDate">
-          </label>
-          <label>Check-out
-            <input type="date" id="endDate">
-          </label>
-          <label>How often you'll pay rent
-            <select id="paymentPeriod">
-              <option value="">Select how often…</option>
-              <option value="day">Daily</option>
-              <option value="week">Weekly</option>
-              <option value="month">Monthly</option>
-            </select>
-          </label>
-        </div>
-        <div class="planner-summary" id="bookingSummary">
-          <div class="summary-header">
-            <div class="summary-title" data-summary-title>No listing selected</div>
-            <div class="summary-subtitle" data-summary-subtitle>Select a property to preview totals.</div>
+  <section id="bookingsSection" class="card">
+    <h2>Your bookings</h2>
+    <p class="muted">Active and past stays linked to your connected wallet.</p>
+    <div class="bookings-status" data-bookings-status>Connect wallet to view bookings.</div>
+    <div id="bookingsList" class="bookings-list"></div>
+    <div id="tokenProposalPanel" class="token-proposal-card" hidden></div>
+  </section>
+
+  <section class="card planner-card" data-planner-card>
+    <h2>Plan your stay</h2>
+    <p class="muted">Explore listings and configure your stay details. The booking form appears when you choose a property.</p>
+    <div class="planner-layout">
+      <div class="planner-form" data-planner-form hidden>
+        <div class="planner-grid">
+          <div class="planner-inputs">
+            <label>Check-in
+              <input type="date" id="startDate">
+            </label>
+            <label>Check-out
+              <input type="date" id="endDate">
+            </label>
+            <label>How often you'll pay rent
+              <select id="paymentPeriod">
+                <option value="">Select how often…</option>
+                <option value="day">Daily</option>
+                <option value="week">Weekly</option>
+                <option value="month">Monthly</option>
+              </select>
+            </label>
           </div>
-          <dl class="summary-breakdown">
-            <div><dt>Stay length</dt><dd data-summary-nights>—</dd></div>
-            <div><dt>Deposit <span class="info-dot" title="Deposits are escrowed on-chain and require landlord and platform approval before release.">?</span></dt><dd data-summary-deposit>—</dd></div>
-            <div><dt>Total rent</dt><dd data-summary-rent>—</dd></div>
-            <div><dt>Installments</dt><dd data-summary-installment>—</dd></div>
-            <div><dt>Due today</dt><dd data-summary-total>—</dd></div>
-          </dl>
-          <button id="confirmBooking" disabled>Confirm booking</button>
-          <div class="summary-footnote" data-summary-notice>Select stay dates to continue.</div>
+          <div class="planner-summary" id="bookingSummary">
+            <div class="summary-header">
+              <div class="summary-title" data-summary-title>No listing selected</div>
+              <div class="summary-subtitle" data-summary-subtitle>Select a property to preview totals.</div>
+            </div>
+            <dl class="summary-breakdown">
+              <div><dt>Stay length</dt><dd data-summary-nights>—</dd></div>
+              <div><dt>Deposit <span class="info-dot" title="Deposits are escrowed on-chain and require landlord and platform approval before release.">?</span></dt><dd data-summary-deposit>—</dd></div>
+              <div><dt>Total rent</dt><dd data-summary-rent>—</dd></div>
+              <div><dt>Installments</dt><dd data-summary-installment>—</dd></div>
+              <div><dt>Due today</dt><dd data-summary-total>—</dd></div>
+            </dl>
+            <button id="confirmBooking" disabled>Confirm booking</button>
+            <div class="summary-footnote" data-summary-notice>Select stay dates to continue.</div>
+          </div>
         </div>
       </div>
-    </div>
-  </section>
-
-  <section id="bookingsSection" class="card" data-collapsible>
-    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
-      Your bookings
-    </button>
-    <div data-collapsible-content>
-      <div class="bookings-status" data-bookings-status>Connect wallet to view bookings.</div>
-      <div id="bookingsList" class="bookings-list"></div>
-      <div id="tokenProposalPanel" class="token-proposal-card" hidden></div>
-    </div>
-  </section>
-
-  <section class="card" data-collapsible>
-    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
-      Browse listings
-    </button>
-    <div data-collapsible-content>
-      <div id="listings"></div>
+      <div class="planner-listings">
+        <h3>Available listings</h3>
+        <p class="muted" data-planner-empty>Select a listing to open the booking form.</p>
+        <div id="listings"></div>
+      </div>
     </div>
   </section>
   <footer>
