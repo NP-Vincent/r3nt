@@ -94,8 +94,6 @@ const els = {
   maxWindow: document.getElementById('maxWindow'),
   metadataUrl: document.getElementById('metadataUrl'),
   landlordListings: document.getElementById('landlordListings'),
-  onboardingHints: document.getElementById('onboardingHints'),
-  onboardingChecklist: document.getElementById('onboardingChecklist'),
   listingControls: document.getElementById('listingControls'),
   listingSort: document.getElementById('listingSort'),
   listingLocationFilter: document.getElementById('listingLocationFilter'),
@@ -171,13 +169,6 @@ function handleDeactivateListing(listing) {
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
 backController.update();
-
-const checklistItems = {
-  basics: document.querySelector('[data-check="basics"]'),
-  location: document.querySelector('[data-check="location"]'),
-  pricing: document.querySelector('[data-check="pricing"]'),
-  policies: document.querySelector('[data-check="policies"]'),
-};
 
 const checkpointLabels = {
   basics: 'Basics',
@@ -612,30 +603,12 @@ function evaluateOnboardingSteps() {
 
 function updateOnboardingProgress() {
   const results = evaluateOnboardingSteps();
-  const hints = [];
-
-  if (!results.basics) hints.push('Add a title and short description.');
-  if (!results.location) hints.push('Provide latitude, longitude and area.');
-  if (!results.pricing) hints.push('Set a deposit and daily rent rate.');
-  if (!results.policies) hints.push('Configure booking notice and window.');
-
-  if (els.onboardingHints) {
-    if (hints.length) {
-      els.onboardingHints.textContent = `Next: ${hints.join(' ')}`;
-    } else {
-      els.onboardingHints.textContent = 'All checkpoints cleared — ready to deploy.';
-    }
-  }
 
   for (const step of Object.keys(results)) {
     const complete = results[step];
-    const node = checklistItems[step];
-    if (node) {
-      node.classList.toggle('complete', complete);
-    }
     if (complete && !checkpointState[step]) {
       notify({
-        message: `Checkpoint complete: ${checkpointLabels[step]}`,
+        message: `Requirement complete: ${checkpointLabels[step]}`,
         variant: 'success',
         role: 'landlord',
         timeout: 5000,
@@ -647,7 +620,7 @@ function updateOnboardingProgress() {
   const allComplete = Object.values(results).every(Boolean);
   if (allComplete && !lastAllComplete) {
     notify({
-      message: 'All onboarding checkpoints cleared. You can deploy your listing.',
+      message: 'All listing requirements met. You can deploy your listing.',
       variant: 'success',
       role: 'landlord',
       timeout: 6000,
@@ -2774,9 +2747,9 @@ els.create.onclick = () =>
     try {
       const allComplete = Object.values(checkpointState).every(Boolean);
       if (!walletConnected || !allComplete) {
-        info('Complete onboarding checkpoints before creating a listing.');
+        info('Complete the required fields before creating a listing.');
         notify({
-          message: 'Complete onboarding checkpoints before creating a listing.',
+          message: 'Complete the required fields before creating a listing.',
           variant: 'warning',
           role: 'landlord',
           timeout: 5000,
