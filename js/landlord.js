@@ -4,7 +4,7 @@ import { arbitrum } from 'https://esm.sh/viem/chains';
 import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
-import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
+import { BookingCard, TokenisationCard } from './ui/cards.js';
 import { createCollapsibleSection, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
 import {
@@ -1068,6 +1068,10 @@ async function openTokenToolsForBooking(listing, bookingId, options = {}) {
   }
   const { focus = true } = options;
   try {
+    controller.setSectionOpen?.(true);
+    if (focus) {
+      controller.focusSummary?.();
+    }
     await controller.token.openForBooking(bookingId, { focus });
   } catch (err) {
     console.error('Failed to open token tools via quick action', err);
@@ -1081,21 +1085,50 @@ function renderLandlordListingCard(listing) {
   const locationLabel =
     Number.isFinite(listing?.lat) && Number.isFinite(listing?.lon)
       ? `${Number(listing.lat).toFixed(5)}, ${Number(listing.lon).toFixed(5)}`
-      : '—';
-  const card = ListingCard({
-    id: listingIdText || shortAddress(listing?.address || '') || `listing-${listing?.order ?? 0}`,
-    title: listing?.title,
-    location: locationLabel,
-    pricePerDayUSDC: listing.baseDailyRate,
-    areaSqm: areaValue > 0 ? areaValue : undefined,
-    depositUSDC: listing.depositAmount,
-    status: listing?.active === false ? 'Inactive' : 'Active',
-  });
+      : '';
+  const fallbackId = listingIdText || shortAddress(listing?.address || '') || `listing-${listing?.order ?? 0}`;
+  const summaryFallbackLabel = listingIdText
+    ? `Listing #${listingIdText}`
+    : shortAddress(listing?.address || '') ||
+      (Number.isFinite(listing?.order) ? `Listing #${Number(listing.order) + 1}` : 'Listing');
+  const summaryTitle = listing?.title || summaryFallbackLabel || 'Listing';
 
-  card.classList.add('landlord-listing-card');
+  const summaryMetaTexts = [];
+  if (locationLabel) {
+    summaryMetaTexts.push(locationLabel);
+  }
+  if (listing.baseDailyRate != null) {
+    summaryMetaTexts.push(`Daily ${fmt.usdc(listing.baseDailyRate)} USDC`);
+  }
+  if (Number.isFinite(areaValue) && areaValue > 0) {
+    summaryMetaTexts.push(fmt.sqm(areaValue));
+  }
+  if (listing.depositAmount != null) {
+    summaryMetaTexts.push(`Deposit ${fmt.usdc(listing.depositAmount)} USDC`);
+  }
+  const statusText = listing?.active === false ? 'Inactive' : 'Active';
+  if (statusText) {
+    summaryMetaTexts.push(statusText);
+  }
+
+  const summaryMeta = summaryMetaTexts
+    .filter(Boolean)
+    .map((text) => el('span', { class: 'pill' }, text));
+  const summaryHeaderChildren = [el('strong', {}, summaryTitle)];
+  if (summaryMeta.length > 0) {
+    summaryHeaderChildren.push(el('div', { class: 'card-meta' }, summaryMeta));
+  }
+
+  const listingPanel = createCollapsibleSection(summaryTitle, { classes: ['listing-card', 'landlord-listing-card'] });
+  const { section, content, toggle } = listingPanel;
+  section.dataset.id = fallbackId;
+  toggle.classList.add('landlord-card-toggle');
+  toggle.textContent = '';
+  toggle.append(el('div', { class: 'card-header' }, summaryHeaderChildren));
+  toggle.setAttribute('aria-label', `Toggle tools for ${summaryTitle}`);
 
   const sections = el('div', { class: 'landlord-card-sections' });
-  card.append(sections);
+  content.append(sections);
 
   const details = el('div', { class: 'landlord-card-details' });
   sections.append(details);
@@ -1268,9 +1301,19 @@ function renderLandlordListingCard(listing) {
 
   const controller = {
     listing,
-    card,
+    card: section,
+    section,
+    toggle,
     deposit: depositTools.controller,
     token: tokenTools.controller,
+    setSectionOpen(value) {
+      listingPanel.setOpen(value);
+    },
+    focusSummary() {
+      if (typeof toggle.focus === 'function') {
+        toggle.focus();
+      }
+    },
     setQuickAuthReady(value) {
       depositTools.controller?.setQuickAuthReady(value);
       tokenTools.controller?.setQuickAuthReady(value);
@@ -1297,7 +1340,7 @@ function renderLandlordListingCard(listing) {
   }
   controller.setWalletConnected(walletConnected);
 
-  return card;
+  return section;
 }
 function toBigIntOrZero(value) {
   if (typeof value === 'bigint') return value;
