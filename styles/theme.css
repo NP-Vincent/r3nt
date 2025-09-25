@@ -657,6 +657,11 @@ footer {
   padding: 18px;
 }
 
+.planner-card-active {
+  border-color: var(--color-selected-border);
+  box-shadow: var(--color-selected-shadow);
+}
+
 #landlordListings,
 #listings,
 #bookingsList {
@@ -997,6 +1002,21 @@ footer {
   color: var(--color-pill-text);
   font-size: 0.75rem;
   margin-left: 6px;
+}
+
+.planner-layout {
+  display: grid;
+  gap: 24px;
+}
+
+.planner-listings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.planner-form[hidden] + .planner-listings {
+  grid-column: 1 / -1;
 }
 
 .planner-grid {
@@ -1517,6 +1537,13 @@ section.card:not([hidden]),
 
 .notification-tray + * {
   animation: fadeInUp var(--transition-base) both;
+}
+
+@media (min-width: 900px) {
+  .planner-layout {
+    grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
+    align-items: flex-start;
+  }
 }
 
 @media (min-width: 800px) {

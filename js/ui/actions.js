@@ -3,8 +3,16 @@ export function actionsFor({ role, entity, perms }) {
   // perms: capabilities computed from chain state
   if (entity === 'listing') {
     return [
-      { label:'Preview totals', onClick: perms.onPreview, visible: role==='tenant' },
-      { label:'Book', onClick: perms.onBook, visible: role==='tenant' && perms.bookable },
+      {
+        label: 'Preview totals',
+        onClick: perms.onPreview,
+        visible: role === 'tenant' && typeof perms.onPreview === 'function',
+      },
+      {
+        label: 'Book',
+        onClick: perms.onBook,
+        visible: role === 'tenant' && perms.bookable && typeof perms.onBook === 'function',
+      },
       { label:'Check availability', onClick: perms.onCheck, visible: role==='landlord' },
       { label: perms.active ? 'Deactivate' : 'Activate', onClick: perms.onToggleActive, visible: role==='landlord' },
       { label:'Propose tokenisation', onClick: perms.onPropose, visible: perms.canPropose },
