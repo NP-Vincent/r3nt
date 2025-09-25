@@ -13,7 +13,10 @@ const periodLabel = (value) => {
 };
 
 export function ListingCard({ id, title, location, pricePerDayUSDC, areaSqm, depositUSDC, status, actions = [] }) {
-  return el('div', { class: 'card listing-card', dataset: { id } }, [
+  const visibleActions = actions.filter((a) => a?.visible !== false);
+  const actionButtons = visibleActions.map((a) => el('button', { class: 'inline-button', onClick: a.onClick }, a.label));
+
+  const children = [
     el('div', { class: 'card-header' }, [
       el('strong', {}, title || `Listing #${id}`),
       el('div', { class: 'card-meta' }, [
@@ -24,14 +27,13 @@ export function ListingCard({ id, title, location, pricePerDayUSDC, areaSqm, dep
         status ? Pill(status) : null,
       ].filter(Boolean)),
     ]),
-    el(
-      'div',
-      { class: 'card-actions' },
-      actions
-        .filter((a) => a?.visible !== false)
-        .map((a) => el('button', { class: 'inline-button', onClick: a.onClick }, a.label)),
-    ),
-  ]);
+  ];
+
+  if (actionButtons.length > 0) {
+    children.push(el('div', { class: 'card-actions' }, actionButtons));
+  }
+
+  return el('div', { class: 'card listing-card', dataset: { id } }, children);
 }
 
 export function BookingCard({
