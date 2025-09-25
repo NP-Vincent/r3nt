@@ -48,26 +48,23 @@
   <div id="notificationTray" class="notification-tray"></div>
   <h1>r3nt — Create Listing</h1>
 
-  <section class="card" data-collapsible>
-    <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
-      Wallet &amp; platform setup
-    </button>
-    <div data-collapsible-content hidden>
-      <p class="muted">Connect to view platform fees and start a new property listing.</p>
-      <div id="contextBar" class="muted">Starting…</div>
-      <div id="feeInfo" class="muted">Listing price: — USDC</div>
-      <button id="connect" disabled>Connect Wallet</button>
-      <div id="status" class="muted"></div>
-    </div>
+  <section class="card">
+    <h2>Wallet &amp; platform setup</h2>
+    <p class="muted">Connect your wallet to load the latest platform fees and unlock listing tools.</p>
+    <div id="contextBar" class="muted">Starting…</div>
+    <div id="feeInfo" class="muted">Listing price: — USDC</div>
+    <button id="connect" disabled>Connect Wallet</button>
+    <div id="status" class="muted"></div>
   </section>
 
   <!-- Removed manual Cast URL/Hash field. We will compose and capture the hash automatically. -->
 
-  <section class="card" data-collapsible>
+  <section class="card" data-collapsible data-open="1">
     <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
       Configure new listing
     </button>
     <div data-collapsible-content>
+      <p class="muted">Follow the guided sections to publish a new property. Each step helps us generate on-chain metadata and your Farcaster cast.</p>
       <div class="guided-section">
         <h3>1. Property basics</h3>
         <p class="section-subtext">We use these details to generate your Farcaster cast and metadata.</p>
@@ -191,12 +188,12 @@
     </div>
   </section>
 
-  <section class="card" data-collapsible>
+  <section class="card" data-collapsible data-open="1">
     <button type="button" class="inline-button collapsible-toggle" data-collapsible-toggle>
       Manage existing listings
     </button>
     <div data-collapsible-content>
-      <div class="muted"><small>Check availability for each listing below.</small></div>
+      <p class="muted">Access live availability tools and filters for every property linked to your wallet.</p>
       <div id="listingControls" class="listing-controls" hidden>
         <label>
           <span>Sort by</span>
