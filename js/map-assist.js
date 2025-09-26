@@ -4,6 +4,11 @@
 
 const DEFAULT_FALLBACK_COORDS = Object.freeze({ lat: 25.1972, lon: 55.2744 });
 
+const MAP_PROVIDERS = Object.freeze({
+  apple: "apple",
+  google: "google",
+});
+
 /**
  * Detect the user's mobile platform from the provided user agent string.
  * @param {string} [userAgent]
@@ -28,60 +33,79 @@ function normaliseCoords(value) {
   return { lat, lon };
 }
 
-/**
- * Build the best mapping URL for the active platform.
- * @param {number} lat
- * @param {number} lon
- * @param {"ios"|"android"|"other"} [platform]
- */
-function buildNavigation(lat, lon, platform = detectPlatform()) {
+function buildAppleMapsUrl(lat, lon, label) {
   const q = `${lat},${lon}`;
-  if (platform === "ios") {
-    return { primary: `https://maps.apple.com/?q=${q}&ll=${q}&z=16` };
+  const encodedLabel = label ? encodeURIComponent(label) : encodeURIComponent(q);
+  return `https://maps.apple.com/?ll=${encodeURIComponent(q)}&q=${encodedLabel}`;
+}
+
+function buildGoogleMapsUrl(lat, lon, label) {
+  const q = `${lat},${lon}`;
+  const encoded = encodeURIComponent(label ? `${label} @ ${q}` : q);
+  return `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+}
+
+function openUrl(url, { openInNewTab = true } = {}) {
+  if (typeof window === "undefined") {
+    throw new Error("window is not available in this environment.");
   }
-  if (platform === "android") {
-    return {
-      primary: `geo:${q}?q=${q}`,
-      fallback: `https://maps.google.com/?q=${q}`,
-    };
+  if (openInNewTab && typeof window.open === "function") {
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (opened) {
+      return;
+    }
   }
-  return { primary: `https://maps.google.com/?q=${q}` };
+  if (!window.location) {
+    throw new Error("window.location is not available in this environment.");
+  }
+  window.location.assign(url);
+}
+
+function chooseProvider(preferred) {
+  const defaultPreference = preferred ?? (detectPlatform() === "ios" ? MAP_PROVIDERS.apple : MAP_PROVIDERS.google);
+
+  if (typeof window === "undefined" || typeof window.confirm !== "function") {
+    return defaultPreference;
+  }
+
+  if (defaultPreference === MAP_PROVIDERS.apple) {
+    const useApple = window.confirm("Open location in Apple Maps? Press Cancel for Google Maps.");
+    return useApple ? MAP_PROVIDERS.apple : MAP_PROVIDERS.google;
+  }
+
+  const useGoogle = window.confirm("Open location in Google Maps? Press Cancel for Apple Maps.");
+  return useGoogle ? MAP_PROVIDERS.google : MAP_PROVIDERS.apple;
 }
 
 /**
  * Attempt to open the mapping application for the provided coordinates.
- * Falls back to Google Maps on web/desktop.
+ * Presents the user with a choice of Apple Maps or Google Maps links.
  * @param {number} lat
  * @param {number} lon
- * @param {{ platform?: "ios"|"android"|"other", timeoutMs?: number }} [options]
+ * @param {{
+ *   provider?: "apple"|"google",
+ *   preferredProvider?: "apple"|"google",
+ *   label?: string,
+ *   openInNewTab?: boolean,
+ * }} [options]
  */
 export function openMapsAt(lat, lon, options = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     throw new Error("Latitude and longitude must be finite numbers.");
   }
-  const { platform = detectPlatform(), timeoutMs = 400 } = options;
+  const { provider, preferredProvider, label, openInNewTab = true } = options;
 
-  if (typeof window === "undefined" || !window.location) {
-    throw new Error("window.location is not available in this environment.");
-  }
+  const requestedProvider = provider ?? chooseProvider(preferredProvider);
+  const mapUrls = {
+    [MAP_PROVIDERS.apple]: buildAppleMapsUrl(lat, lon, label),
+    [MAP_PROVIDERS.google]: buildGoogleMapsUrl(lat, lon, label),
+  };
 
-  const { primary, fallback } = buildNavigation(lat, lon, platform);
-
-  if (platform === "android" && fallback) {
-    const timer = window.setTimeout(() => {
-      window.location.assign(fallback);
-    }, timeoutMs);
-    // Attempt to open the native maps application first.
-    try {
-      window.location.assign(primary);
-    } finally {
-      // If navigation succeeds the timer will never fire; no need to clear.
-      void timer;
-    }
-    return;
-  }
-
-  window.location.assign(primary);
+  const selectedProvider = Object.values(MAP_PROVIDERS).includes(requestedProvider)
+    ? requestedProvider
+    : chooseProvider(preferredProvider);
+  const url = mapUrls[selectedProvider];
+  openUrl(url, { openInNewTab });
 }
 
 /**
@@ -93,7 +117,10 @@ export function openMapsAt(lat, lon, options = {}) {
  *   fallbackCoords?: { lat: number, lon: number },
  *   highAccuracy?: boolean,
  *   timeoutMs?: number,
- *   platform?: "ios"|"android"|"other",
+ *   provider?: "apple"|"google",
+ *   preferredProvider?: "apple"|"google",
+ *   label?: string,
+ *   openInNewTab?: boolean,
  *   onError?: (err: unknown) => void,
  * }} [options]
  */
@@ -108,11 +135,15 @@ export function attachNavigateHandler(target, options = {}) {
     fallbackCoords = DEFAULT_FALLBACK_COORDS,
     highAccuracy = true,
     timeoutMs = 8000,
-    platform,
+    provider,
+    preferredProvider,
+    label,
+    openInNewTab,
     onError,
   } = options;
 
-  const invoke = (lat, lon) => openMapsAt(lat, lon, { platform });
+  const invoke = (lat, lon) =>
+    openMapsAt(lat, lon, { provider, preferredProvider, label, openInNewTab });
 
   const fallback = normaliseCoords(fallbackCoords) || DEFAULT_FALLBACK_COORDS;
 
@@ -205,7 +236,10 @@ export function createOpenMapButton({
   label = "Open in Map",
   className = "inline-button",
   disabledTitle = "Coordinates unavailable",
-  platform,
+  provider,
+  preferredProvider,
+  mapLabel,
+  openInNewTab,
   onError,
 } = {}) {
   if (typeof document === "undefined") {
@@ -222,7 +256,13 @@ export function createOpenMapButton({
   if (coords) {
     button.dataset.lat = String(coords.lat);
     button.dataset.lon = String(coords.lon);
-    attachNavigateHandler(button, { platform, onError });
+    attachNavigateHandler(button, {
+      provider,
+      preferredProvider,
+      label: mapLabel,
+      openInNewTab,
+      onError,
+    });
   } else {
     button.disabled = true;
     if (disabledTitle) {
