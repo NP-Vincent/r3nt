@@ -1130,12 +1130,15 @@ function renderListings(listings, options = {}) {
         }
         geoLine.append(copyBtn);
         geoLine.append(
-          el('a', {
-            href: `https://www.google.com/maps/search/?api=1&query=${preciseCoords}`,
-            target: '_blank',
-            rel: 'noopener',
-            class: 'geo-map-link',
-          }, 'Open map'),
+          el(
+            'a',
+            {
+              href: `geo:${preciseCoords}`,
+              class: 'geo-map-link',
+              title: 'Open in your preferred maps app',
+            },
+            'Open map',
+          ),
         );
       }
       card.append(geoLine);
