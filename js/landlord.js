@@ -13,6 +13,7 @@ import { notify, mountNotificationCenter } from './notifications.js';
 import { BookingCard, TokenisationCard } from './ui/cards.js';
 import { createCollapsibleSection, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
+import { createOpenMapButton } from './map-assist.js';
 import {
   PLATFORM_ADDRESS,
   PLATFORM_ABI,
@@ -1330,9 +1331,67 @@ function renderLandlordListingCard(listing) {
   details.append(addressRow);
 
   if (Number.isFinite(listing.lat) && Number.isFinite(listing.lon)) {
-    const latText = Number(listing.lat).toFixed(5);
-    const lonText = Number(listing.lon).toFixed(5);
-    appendDetail(`Coordinates: ${latText}°, ${lonText}°`);
+    const latNum = Number(listing.lat);
+    const lonNum = Number(listing.lon);
+    const latText = latNum.toFixed(5);
+    const lonText = lonNum.toFixed(5);
+    const preciseCoords = `${latNum.toFixed(6)},${lonNum.toFixed(6)}`;
+
+    const coordsRow = el('div', { class: 'landlord-card-detail landlord-card-coords' });
+    coordsRow.append(el('div', { class: 'landlord-card-coords-label' }, `Coordinates: ${latText}°, ${lonText}°`));
+
+    const coordsActions = el('div', { class: 'landlord-card-coords-actions' });
+
+    const copyBtn = el('button', { type: 'button', class: 'inline-button small geo-copy-button' }, 'Copy');
+    if (navigator?.clipboard?.writeText) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(preciseCoords);
+          notify({
+            message: 'Coordinates copied to clipboard.',
+            variant: 'success',
+            role: 'landlord',
+            timeout: 4000,
+          });
+        } catch (err) {
+          console.error('Failed to copy listing coordinates', err);
+          notify({
+            message: 'Unable to copy coordinates.',
+            variant: 'error',
+            role: 'landlord',
+            timeout: 5000,
+          });
+        }
+      });
+    } else {
+      copyBtn.disabled = true;
+      copyBtn.title = 'Clipboard unavailable';
+    }
+    coordsActions.append(copyBtn);
+
+    const mapButton = createOpenMapButton({
+      lat: latNum,
+      lon: lonNum,
+      className: 'inline-button small geo-map-button',
+      label: 'Open in Map',
+      onError: (err) => {
+        console.error('Failed to open map for landlord listing', err);
+        notify({
+          message: 'Unable to open maps for this location.',
+          variant: 'error',
+          role: 'landlord',
+          timeout: 5000,
+        });
+      },
+    });
+    if (mapButton) {
+      coordsActions.append(mapButton);
+    }
+
+    coordsRow.append(coordsActions);
+    details.append(coordsRow);
+  } else {
+    appendDetail('Coordinates: —');
   }
 
   if (listing.metadataURI) {

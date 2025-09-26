@@ -718,14 +718,12 @@ footer {
   flex-wrap: wrap;
 }
 
-.listing-link,
-.geo-map-link {
+.listing-link {
   color: var(--color-link);
   font-weight: 600;
 }
 
-.listing-link:hover,
-.geo-map-link:hover {
+.listing-link:hover {
   text-decoration: underline;
 }
 
@@ -1016,6 +1014,24 @@ footer {
   font-size: 0.9rem;
   margin: 0;
   color: var(--color-muted-strong);
+}
+
+.landlord-card-coords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.landlord-card-coords-label {
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+
+.landlord-card-coords-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .landlord-card-address,
@@ -1485,6 +1501,10 @@ dl.summary-breakdown dd {
   align-items: center;
   color: var(--color-muted);
   font-size: 0.85rem;
+}
+
+.geo-map-button {
+  white-space: nowrap;
 }
 
 .listing-actions {

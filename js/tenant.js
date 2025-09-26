@@ -10,6 +10,7 @@ import { actionsFor } from './ui/actions.js';
 import { createCollapsibleSection, makeCollapsible, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
 import { applyListingFilters, DEFAULT_LISTING_SORT_MODE } from './listing-filters.js';
+import { createOpenMapButton } from './map-assist.js';
 import {
   RPC_URL,
   REGISTRY_ADDRESS,
@@ -1104,11 +1105,15 @@ function renderListings(listings, options = {}) {
     if (record.geohash || (Number.isFinite(record.lat) && Number.isFinite(record.lon))) {
       const geoLine = el('div', { class: 'card-footnote listing-geo' }, []);
       let preciseCoords = null;
+      let latNum = null;
+      let lonNum = null;
       if (Number.isFinite(record.lat) && Number.isFinite(record.lon)) {
-        const latText = record.lat.toFixed(5);
-        const lonText = record.lon.toFixed(5);
+        latNum = Number(record.lat);
+        lonNum = Number(record.lon);
+        const latText = latNum.toFixed(5);
+        const lonText = lonNum.toFixed(5);
         geoLine.append(el('span', {}, `Location: ${latText}°, ${lonText}°`));
-        preciseCoords = `${record.lat.toFixed(6)},${record.lon.toFixed(6)}`;
+        preciseCoords = `${latNum.toFixed(6)},${lonNum.toFixed(6)}`;
       } else {
         geoLine.append(el('span', {}, 'Location: —'));
       }
@@ -1129,17 +1134,24 @@ function renderListings(listings, options = {}) {
           copyBtn.title = 'Clipboard unavailable';
         }
         geoLine.append(copyBtn);
-        geoLine.append(
-          el(
-            'a',
-            {
-              href: `geo:${preciseCoords}`,
-              class: 'geo-map-link',
-              title: 'Open in your preferred maps app',
-            },
-            'Open map',
-          ),
-        );
+        const mapButton = createOpenMapButton({
+          lat: latNum,
+          lon: lonNum,
+          className: 'inline-button geo-map-button',
+          label: 'Open in Map',
+          onError: (err) => {
+            console.error('Failed to open map for tenant listing', err);
+            notify({
+              message: 'Unable to open maps for this location.',
+              variant: 'error',
+              role: 'tenant',
+              timeout: 5000,
+            });
+          },
+        });
+        if (mapButton) {
+          geoLine.append(mapButton);
+        }
       }
       card.append(geoLine);
     }
