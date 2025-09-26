@@ -1825,7 +1825,6 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
     if (record.statusClass) {
       card.classList.add(`booking-status-${record.statusClass}`);
     }
-    card.append(el('div', { class: 'card-footnote' }, record.listingTitle));
     const rentFootnote = record.rentDue > 0n
       ? `Outstanding rent: ${fmt.usdc(record.rentDue)} USDC`
       : 'All rent settled.';
