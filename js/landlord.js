@@ -1228,7 +1228,20 @@ function renderLandlordListingCard(listing) {
     ? `Listing #${listingIdText}`
     : shortAddress(listing?.address || '') ||
       (Number.isFinite(listing?.order) ? `Listing #${Number(listing.order) + 1}` : 'Listing');
-  const summaryTitle = (listing?.title || '').trim() || summaryFallbackLabel || 'Listing';
+
+  const titleText = (listing?.title || '').trim();
+  const shortDescText = (listing?.shortDescription || '').trim();
+  const summaryTitleParts = [];
+  if (listingIdText) {
+    summaryTitleParts.push(`Listing #${listingIdText}`);
+  }
+  if (titleText) {
+    summaryTitleParts.push(titleText);
+  }
+  if (shortDescText) {
+    summaryTitleParts.push(shortDescText);
+  }
+  const summaryTitle = summaryTitleParts.filter(Boolean).join(' — ') || titleText || summaryFallbackLabel || 'Listing';
 
   const summaryMetaTexts = [];
   if (locationLabel) {
@@ -1285,8 +1298,6 @@ function renderLandlordListingCard(listing) {
   appendDetail(`Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`);
   if (listingIdText) {
     const extraParts = [];
-    const titleText = (listing?.title || '').trim();
-    const shortDescText = (listing?.shortDescription || '').trim();
     if (titleText) {
       extraParts.push(titleText);
     }
