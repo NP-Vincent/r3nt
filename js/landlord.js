@@ -46,7 +46,6 @@ const PERIOD_OPTIONS = {
   week: { label: 'Weekly', value: 2n },
   month: { label: 'Monthly', value: 3n },
 };
-
 const UINT64_MAX = (1n << 64n) - 1n;
 const utf8Encoder = new TextEncoder();
 let platformAbi = Array.isArray(PLATFORM_ABI) && PLATFORM_ABI.length ? PLATFORM_ABI : null;
@@ -365,6 +364,114 @@ function decodeBytes32ToString(value, precision) {
   return out;
 }
 
+function normaliseMetadataUrl(uri) {
+  if (!uri || typeof uri !== 'string') return '';
+  return uri;
+}
+
+function decodeDataUri(uri) {
+  const match = /^data:([^;,]*)(;charset=[^;,]*)?(;base64)?,([\s\S]*)$/i.exec(uri || '');
+  if (!match) return null;
+  const isBase64 = Boolean(match[3]);
+  const payload = match[4] || '';
+  try {
+    if (isBase64) {
+      const cleaned = payload.replace(/\s/g, '');
+      const atobFn =
+        typeof globalThis !== 'undefined' && typeof globalThis.atob === 'function'
+          ? (value) => globalThis.atob(value)
+          : null;
+      if (!atobFn) return null;
+      return atobFn(cleaned);
+    }
+    return decodeURIComponent(payload);
+  } catch {
+    return null;
+  }
+}
+
+const listingMetadataCache = new Map();
+
+async function fetchListingMetadataDetails(uri, fallbackTitle) {
+  const fallbackText = typeof fallbackTitle === 'string' && fallbackTitle.trim() ? fallbackTitle.trim() : '';
+  if (!uri || typeof uri !== 'string') {
+    return { title: fallbackText, description: '' };
+  }
+
+  let cacheKey = '';
+  let fetchUrl = '';
+  if (uri.startsWith('data:')) {
+    cacheKey = uri;
+  } else {
+    fetchUrl = normaliseMetadataUrl(uri);
+    cacheKey = fetchUrl || uri;
+  }
+
+  if (cacheKey) {
+    const cached = listingMetadataCache.get(cacheKey);
+    if (cached) {
+      const cachedTitle = typeof cached.title === 'string' ? cached.title : '';
+      const cachedDesc = typeof cached.description === 'string' ? cached.description : '';
+      return {
+        title: cachedTitle || fallbackText,
+        description: cachedDesc,
+      };
+    }
+  }
+
+  let raw;
+  try {
+    if (uri.startsWith('data:')) {
+      raw = decodeDataUri(uri);
+    } else {
+      const target = fetchUrl;
+      if (!target) {
+        return { title: fallbackText, description: '' };
+      }
+      const response = await fetch(target, { method: 'GET' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      raw = await response.text();
+    }
+  } catch (err) {
+    console.warn('Failed to retrieve listing metadata', uri, err);
+    return { title: fallbackText, description: '' };
+  }
+
+  if (!raw) {
+    return { title: fallbackText, description: '' };
+  }
+
+  const details = { title: '', description: '' };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.name === 'string' && parsed.name.trim()) {
+        details.title = parsed.name.trim();
+      }
+      if (typeof parsed.description === 'string' && parsed.description.trim()) {
+        details.description = parsed.description.trim();
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to parse listing metadata JSON', uri, err);
+  }
+
+  if (details.description && details.title && details.description === details.title) {
+    details.description = '';
+  }
+
+  if (cacheKey) {
+    listingMetadataCache.set(cacheKey, { ...details });
+  }
+
+  return {
+    title: details.title || fallbackText,
+    description: details.description,
+  };
+}
+
 function toIsoString(seconds) {
   const value = typeof seconds === 'bigint' ? seconds : BigInt(seconds || 0);
   if (value <= 0n) return '';
@@ -478,8 +585,8 @@ function buildMetadataUri(params) {
   const trimmed = String(metadataUrl || '').trim();
   if (trimmed) {
     const lower = trimmed.toLowerCase();
-    if (!/^https?:\/\//.test(lower) && !lower.startsWith('ipfs://') && !lower.startsWith('data:')) {
-      throw new Error('Metadata URL must start with https://, ipfs:// or data:');
+    if (!/^https?:\/\//.test(lower) && !lower.startsWith('data:')) {
+      throw new Error('Metadata URL must start with https:// or data:');
     }
     return trimmed;
   }
@@ -801,12 +908,16 @@ async function fetchListingInfo(listingAddr, orderIndex = 0) {
     }
 
     const createdAtIso = toIsoString(createdAt);
+    const metadataURI = getString(2, '');
+    const metadataDetails = await fetchListingMetadataDetails(metadataURI, shortAddress(listingAddr));
+    const title = metadataDetails?.title?.trim?.() || '';
+    const shortDescription = metadataDetails?.description?.trim?.() || '';
 
     return {
       address: listingAddr,
       baseDailyRate: getBig(0),
       depositAmount: getBig(1),
-      metadataURI: getString(2, ''),
+      metadataURI,
       minBookingNotice: getBig(3),
       maxBookingWindow: getBig(4),
       areaSqm: getBig(5),
@@ -821,6 +932,8 @@ async function fetchListingInfo(listingAddr, orderIndex = 0) {
       createdAtIso,
       createdAtLabel: createdAtIso || (createdAt > 0n ? `Unix ${createdAt.toString()}` : ''),
       order: Number.isFinite(orderIndex) ? orderIndex : 0,
+      title,
+      shortDescription,
     };
   } catch (err) {
     console.error('Failed to load listing info', listingAddr, err);
@@ -1115,7 +1228,7 @@ function renderLandlordListingCard(listing) {
     ? `Listing #${listingIdText}`
     : shortAddress(listing?.address || '') ||
       (Number.isFinite(listing?.order) ? `Listing #${Number(listing.order) + 1}` : 'Listing');
-  const summaryTitle = listing?.title || summaryFallbackLabel || 'Listing';
+  const summaryTitle = (listing?.title || '').trim() || summaryFallbackLabel || 'Listing';
 
   const summaryMetaTexts = [];
   if (locationLabel) {
@@ -1170,7 +1283,21 @@ function renderLandlordListingCard(listing) {
   const minNoticeText = fmt.duration(listing.minBookingNotice);
   const maxWindowText = listing.maxBookingWindow > 0n ? fmt.duration(listing.maxBookingWindow) : 'Unlimited';
   appendDetail(`Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`);
-  appendDetail(listingIdText ? `Listing ID: ${listingIdText}` : 'Listing ID: (not assigned)');
+  if (listingIdText) {
+    const extraParts = [];
+    const titleText = (listing?.title || '').trim();
+    const shortDescText = (listing?.shortDescription || '').trim();
+    if (titleText) {
+      extraParts.push(titleText);
+    }
+    if (shortDescText) {
+      extraParts.push(shortDescText);
+    }
+    const detailText = ['Listing ID: ' + listingIdText, ...extraParts].join(' — ');
+    appendDetail(detailText);
+  } else {
+    appendDetail('Listing ID: (not assigned)');
+  }
   const createdLabel = listing.createdAtIso || (listing.createdAt > 0n ? fmt.timestamp(listing.createdAt) : '(not recorded)');
   appendDetail(`Created: ${createdLabel}`);
 

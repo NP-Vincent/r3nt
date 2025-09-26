@@ -320,7 +320,7 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
      * @param depositAmount Security deposit denominated in USDC (6 decimals).
      * @param minBookingNotice Minimum notice required before booking start (seconds).
      * @param maxBookingWindow Maximum look-ahead window tenants can book (seconds).
-     * @param metadataURI Off-chain metadata pointer (IPFS/HTTPS).
+     * @param metadataURI Off-chain metadata pointer (HTTPS).
      * @return listing Address of the newly deployed listing clone.
      */
     function createListing(
