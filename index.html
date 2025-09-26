@@ -69,87 +69,53 @@
       </div>
     </div>
 
-    <section class="role-onboarding">
-      <h2>Start with your role</h2>
-      <div class="muted">Pick the role that matches how you use r3nt. Actions and links adjust automatically.</div>
-      <div class="role-selector" role="tablist" aria-label="Role onboarding">
-        <button type="button" class="role-tab" data-role-button="tenant" aria-selected="true">Tenant</button>
-        <button type="button" class="role-tab" data-role-button="landlord">Landlord</button>
-        <button type="button" class="role-tab" data-role-button="agent">Agent</button>
-        <button type="button" class="role-tab" data-role-button="investor">Investor</button>
-      </div>
-      <div class="role-panels">
-        <div class="role-panel active" data-role-panel="tenant" role="tabpanel">
-          <h3>Tenant onboarding</h3>
-          <p>Preview listings, secure a view pass and book with USDC.</p>
-          <ul>
-            <li>Connect your wallet inside Farcaster to unlock booking actions.</li>
-            <li>Select stay dates with the booking planner and review deposits up front.</li>
-            <li>Complete on-chain checkout — deposits stay escrowed until released.</li>
-          </ul>
-          <div class="role-actions">
-            <a class="btn primary" href="./tenant.html">Open tenant console</a>
-            <a class="btn outline" href="./index.html#how-it-works">See how it works</a>
-          </div>
-        </div>
-        <div class="role-panel" data-role-panel="landlord" role="tabpanel" hidden>
-          <h3>Landlord onboarding</h3>
-          <p>Compose a Farcaster cast, configure pricing and deploy listings from the UI.</p>
-          <ul>
-            <li>Use guided onboarding to set property basics, pricing and booking policies.</li>
-            <li>Launch your listing directly from the console — the platform handles deployment.</li>
-            <li>Monitor availability and confirm deposits with the built-in tools.</li>
-          </ul>
-          <div class="role-actions">
-            <a class="btn secondary" href="./landlord.html">Open landlord console</a>
-            <a class="btn outline" href="./landlord.html#depositTools">Manage deposit splits</a>
-          </div>
-        </div>
-        <div class="role-panel" data-role-panel="agent" role="tabpanel" hidden>
-          <h3>Agent onboarding</h3>
-          <p>Manage fundraising rounds, subletting and rent distribution for curated listings.</p>
-          <ul>
-            <li>Load your agent contract to review fundraising progress and investor metrics.</li>
-            <li>Open or close tokenisation rounds and record rent directly from the console.</li>
-            <li>Withdraw agent fees and coordinate sub-bookings without leaving the Mini App.</li>
-          </ul>
-          <div class="role-actions">
-            <a class="btn secondary" href="./agent.html">Open agent console</a>
-          </div>
-        </div>
-        <div class="role-panel" data-role-panel="investor" role="tabpanel" hidden>
-          <h3>Investor onboarding</h3>
-          <p>Track tokenised bookings, SQMU-R positions and live rent accruals.</p>
-          <ul>
-            <li>Connect your wallet to surface bookings where you hold SQMU-R.</li>
-            <li>Review fundraising caps, sold supply and rent distribution timing per booking.</li>
-            <li>Claim accumulated rent in a single click directly from the dashboard.</li>
-          </ul>
-          <div class="role-actions">
-            <a class="btn primary" href="./investor.html">Open investor dashboards</a>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="how-it-works">
-      <h2>How it works</h2>
+    <section class="role-summary">
+      <h2>Get Started</h2>
+      <div class="muted">Choose your console and review the essentials for your role.</div>
       <div class="grid">
         <div class="card">
-          <strong>For Tenants</strong>
-          <ol class="muted" style="margin:8px 0 0; padding-left:18px">
-            <li>Browse available listings and review the linked Cast for photos or details.</li>
-            <li>Book the property and pay rent and deposit in USDC.</li>
-            <li>When you vacate, deposit is released on-chain.</li>
-          </ol>
+          <strong>Tenant</strong>
+          <ul class="muted" style="margin:8px 0 12px; padding-left:18px">
+            <li>Connect your wallet inside Farcaster to unlock booking tools.</li>
+            <li>Confirm stay dates, rent and deposits before submitting.</li>
+            <li>Track escrowed deposits and releases directly on-chain.</li>
+          </ul>
+          <div class="cta-row" style="margin-top:12px">
+            <a class="btn primary" href="./tenant.html">Open Tenant Console</a>
+          </div>
         </div>
         <div class="card">
-          <strong>For Landlords</strong>
-          <ol class="muted" style="margin:8px 0 0; padding-left:18px">
-            <li>Create a listing and attach your Farcaster Cast.</li>
-            <li>Set deposit and optional daily/weekly/monthly rates.</li>
-            <li>Deposit stays in escrow on-chain; release requires both your and the platform’s signature.</li>
-          </ol>
+          <strong>Landlord</strong>
+          <ul class="muted" style="margin:8px 0 12px; padding-left:18px">
+            <li>Create listings from your Farcaster casts with guided setup.</li>
+            <li>Set pricing, deposits and availability from one dashboard.</li>
+            <li>Approve bookings and manage deposit releases with the platform.</li>
+          </ul>
+          <div class="cta-row" style="margin-top:12px">
+            <a class="btn secondary" href="./landlord.html">Open Landlord Console</a>
+          </div>
+        </div>
+        <div class="card">
+          <strong>Agent</strong>
+          <ul class="muted" style="margin:8px 0 12px; padding-left:18px">
+            <li>Load your agent contract to review fundraising and investors.</li>
+            <li>Open or close tokenisation rounds as demand shifts.</li>
+            <li>Record rent flows and withdraw agent fees without leaving the Mini App.</li>
+          </ul>
+          <div class="cta-row" style="margin-top:12px">
+            <a class="btn outline" href="./agent.html">Open Agent Console</a>
+          </div>
+        </div>
+        <div class="card">
+          <strong>Investor</strong>
+          <ul class="muted" style="margin:8px 0 12px; padding-left:18px">
+            <li>Connect to see bookings where you hold SQMU-R positions.</li>
+            <li>Monitor rent accruals and token supply in real time.</li>
+            <li>Claim accumulated rent for each booking in a single action.</li>
+          </ul>
+          <div class="cta-row" style="margin-top:12px">
+            <a class="btn outline" href="./investor.html">Open Investor Dashboards</a>
+          </div>
         </div>
       </div>
     </section>
@@ -187,42 +153,8 @@
     const backController = createBackController({ sdk, button: backButton });
     backController.update();
 
-    const setupRoleSelector = () => {
-      const buttons = Array.from(document.querySelectorAll('[data-role-button]'));
-      const panels = Array.from(document.querySelectorAll('[data-role-panel]'));
-      if (!buttons.length || !panels.length) return;
-
-      const activate = (role) => {
-        buttons.forEach((button) => {
-          const isActive = button.dataset.roleButton === role;
-          button.setAttribute('aria-selected', isActive ? 'true' : 'false');
-        });
-        panels.forEach((panel) => {
-          const isMatch = panel.dataset.rolePanel === role;
-          panel.classList.toggle('active', isMatch);
-          if (isMatch) {
-            panel.removeAttribute('hidden');
-          } else {
-            panel.setAttribute('hidden', '');
-          }
-        });
-      };
-
-      for (const button of buttons) {
-        button.addEventListener('click', () => {
-          activate(button.dataset.roleButton);
-        });
-      }
-
-      const defaultRole = (buttons.find((btn) => btn.getAttribute('aria-selected') === 'true') || buttons[0])?.dataset.roleButton;
-      if (defaultRole) {
-        activate(defaultRole);
-      }
-    };
-
     const boot = () => {
       applyVersionBadge();
-      setupRoleSelector();
     };
 
     if (document.readyState === 'loading') {
