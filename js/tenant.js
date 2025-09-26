@@ -516,6 +516,27 @@ function getListingTitle(info) {
   return 'Listing';
 }
 
+function getListingShortDescription(info) {
+  if (!info) return '';
+  const candidates = [];
+  if (typeof info.shortDescription === 'string') {
+    candidates.push(info.shortDescription);
+  }
+  if (typeof info.description === 'string') {
+    candidates.push(info.description);
+  }
+  const title = getListingTitle(info);
+  for (const candidate of candidates) {
+    const trimmed = (candidate || '').trim();
+    if (!trimmed) continue;
+    if (trimmed === title) continue;
+    if (typeof info.displayTitle === 'string' && trimmed === info.displayTitle.trim()) continue;
+    if (typeof info.address === 'string' && trimmed === info.address.trim()) continue;
+    return trimmed;
+  }
+  return '';
+}
+
 function getListingSubtitle(info) {
   if (!info) {
     return 'Select a property to preview totals.';
@@ -1071,6 +1092,7 @@ function renderListings(listings, options = {}) {
     const card = ListingCard({
       id: record.id,
       title: record.displayTitle || record.title || getListingTitle(record),
+      summary: getListingShortDescription(record),
       location: record.locationPill || getListingLocationPill(record),
       pricePerDayUSDC: record.baseDailyRate,
       areaSqm: Number.isFinite(record.areaSqm) ? record.areaSqm : undefined,
@@ -1080,13 +1102,6 @@ function renderListings(listings, options = {}) {
     });
     card.dataset.address = record.address || '';
     card.dataset.displayTitle = record.displayTitle || '';
-
-    if (record && typeof record.description === 'string') {
-      const trimmed = record.description.trim();
-      if (trimmed && trimmed !== record.displayTitle && trimmed !== record.address) {
-        card.append(el('div', { class: 'card-footnote listing-summary' }, trimmed));
-      }
-    }
 
     const minNoticeText = fmt.duration(record.minBookingNotice);
     const maxWindowText = record.maxBookingWindow > 0n ? fmt.duration(record.maxBookingWindow) : 'Unlimited';
