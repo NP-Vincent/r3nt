@@ -1503,7 +1503,8 @@ dl.summary-breakdown dd {
   font-size: 0.85rem;
 }
 
-.geo-map-button {
+.geo-map-button,
+.geo-copy-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1512,7 +1513,8 @@ dl.summary-breakdown dd {
   text-decoration: none;
 }
 
-.geo-map-button:hover {
+.geo-map-button:hover,
+.geo-copy-button:hover {
   text-decoration: none;
 }
 
