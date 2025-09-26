@@ -44,20 +44,21 @@ export function createOpenMapButton(options = {}) {
   );
 
   mapLink.addEventListener('click', (event) => {
-    const win = window.open(href, '_blank', 'noopener,noreferrer');
-    if (win) {
-      win.opener = null;
-      event.preventDefault();
-      try {
-        win.focus();
-      } catch (_) {
-        // ignore focus errors
+    try {
+      const win = window.open(href, '_blank', 'noopener,noreferrer');
+      if (win) {
+        win.opener = null;
+        event.preventDefault();
+        try {
+          win.focus();
+        } catch (_) {
+          // ignore focus errors
+        }
       }
-      return;
-    }
-
-    if (typeof onError === 'function') {
-      onError(new Error('Map window was blocked.'));
+    } catch (err) {
+      if (typeof onError === 'function') {
+        onError(err);
+      }
     }
   });
 
