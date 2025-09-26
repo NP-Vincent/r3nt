@@ -1504,7 +1504,16 @@ dl.summary-breakdown dd {
 }
 
 .geo-map-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   white-space: nowrap;
+  border: 1px solid var(--color-button-outline-border);
+  text-decoration: none;
+}
+
+.geo-map-button:hover {
+  text-decoration: none;
 }
 
 .listing-actions {
