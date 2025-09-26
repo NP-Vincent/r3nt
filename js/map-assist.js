@@ -47,8 +47,8 @@ export function createOpenMapButton(options = {}) {
     try {
       const win = window.open(href, '_blank', 'noopener,noreferrer');
       if (win) {
-        win.opener = null;
         event.preventDefault();
+        win.opener = null;
         try {
           win.focus();
         } catch (_) {
