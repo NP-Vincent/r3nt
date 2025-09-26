@@ -1837,6 +1837,49 @@ let fidBig; // bigint from QuickAuth
 let provider; // EIP-1193
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 
+async function fetchTokenBookingDetails(listingAddr, bookingId) {
+  const [bookingRaw, pendingRaw] = await Promise.all([
+    pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'bookingInfo', args: [bookingId] }),
+    pub.readContract({ address: listingAddr, abi: LISTING_ABI, functionName: 'pendingTokenisation', args: [bookingId] }),
+  ]);
+
+  const booking = {
+    tenant: bookingRaw.tenant,
+    start: bookingRaw.start,
+    end: bookingRaw.end,
+    grossRent: bookingRaw.grossRent,
+    expectedNetRent: bookingRaw.expectedNetRent,
+    rentPaid: bookingRaw.rentPaid,
+    deposit: bookingRaw.deposit,
+    status: bookingRaw.status,
+    tokenised: bookingRaw.tokenised,
+    totalSqmu: bookingRaw.totalSqmu,
+    soldSqmu: bookingRaw.soldSqmu,
+    pricePerSqmu: bookingRaw.pricePerSqmu,
+    feeBps: bookingRaw.feeBps,
+    period: bookingRaw.period,
+    proposer: bookingRaw.proposer,
+    accRentPerSqmu: bookingRaw.accRentPerSqmu,
+    landlordAccrued: bookingRaw.landlordAccrued,
+    depositReleased: bookingRaw.depositReleased,
+    depositTenantBps: bookingRaw.depositTenantBps,
+    calendarReleased: bookingRaw.calendarReleased,
+  };
+
+  const pending = pendingRaw
+    ? {
+        exists: pendingRaw.exists,
+        proposer: pendingRaw.proposer,
+        totalSqmu: pendingRaw.totalSqmu,
+        pricePerSqmu: pendingRaw.pricePerSqmu,
+        feeBps: pendingRaw.feeBps,
+        period: pendingRaw.period,
+      }
+    : { exists: false };
+
+  return { booking, pending };
+}
+
 // -------------------- Deposit split tools --------------------
 function parseBookingIdValue(raw) {
   const text = typeof raw === 'string' ? raw.trim() : String(raw ?? '').trim();
