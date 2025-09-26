@@ -74,6 +74,32 @@ function addressesEqual(a, b) {
   return normaliseAddress(a) === normaliseAddress(b);
 }
 
+function isUnknownBookingError(err) {
+  if (!err) return false;
+
+  const reason = typeof err?.reason === 'string' ? err.reason.toLowerCase() : '';
+  if (reason === 'unknown booking') {
+    return true;
+  }
+
+  const errorArgs = Array.isArray(err?.errorArgs) ? err.errorArgs : [];
+  if (errorArgs.some((value) => typeof value === 'string' && value.toLowerCase() === 'unknown booking')) {
+    return true;
+  }
+
+  const message = typeof err?.message === 'string' ? err.message.toLowerCase() : '';
+  if (message.includes('unknown booking')) {
+    return true;
+  }
+
+  const dataReason = typeof err?.data?.message === 'string' ? err.data.message.toLowerCase() : '';
+  if (dataReason.includes('unknown booking')) {
+    return true;
+  }
+
+  return false;
+}
+
 // -------------------- UI handles --------------------
 const els = {
   contextBar: document.getElementById('contextBar'),
@@ -2096,7 +2122,11 @@ function createDepositTools(listing) {
     } catch (err) {
       console.error('Unable to load deposit booking details', err);
       clearBookingDetails();
-      setStatus(err?.message || 'Unable to load booking details.', 'error');
+      if (isUnknownBookingError(err)) {
+        setStatus('Booking not found for that listing. Double-check the ID and try again.', 'warning');
+      } else {
+        setStatus(err?.message || 'Unable to load booking details.', 'error');
+      }
     } finally {
       updateButtonState();
     }
@@ -2499,7 +2529,11 @@ function createTokenTools(listing) {
     } catch (err) {
       console.error('Unable to load token booking details', err);
       clearBookingDetails();
-      setStatus(err?.message || 'Unable to load booking details.', 'error');
+      if (isUnknownBookingError(err)) {
+        setStatus('Booking not found for that listing. Double-check the ID and try again.', 'warning');
+      } else {
+        setStatus(err?.message || 'Unable to load booking details.', 'error');
+      }
     } finally {
       state.loading = false;
       updateButtonState();
