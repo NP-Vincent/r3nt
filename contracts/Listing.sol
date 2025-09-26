@@ -178,7 +178,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
     /// @notice Maximum look-ahead window tenants can book (seconds).
     uint64 public maxBookingWindow;
 
-    /// @notice Off-chain metadata pointer (IPFS/HTTPS).
+    /// @notice Off-chain metadata pointer (HTTPS).
     string public metadataURI;
 
     /// @notice Counter used to allocate sequential booking identifiers.
@@ -311,7 +311,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
      * @param depositAmount_ Security deposit denominated in USDC (6 decimals).
      * @param minBookingNotice_ Minimum notice required before booking start (seconds).
      * @param maxBookingWindow_ Maximum look-ahead window tenants can book (seconds).
-     * @param metadataURI_ Off-chain metadata pointer (IPFS/HTTPS).
+     * @param metadataURI_ Off-chain metadata pointer (HTTPS).
      */
     function initialize(
         address landlord_,

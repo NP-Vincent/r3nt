@@ -20,8 +20,6 @@ import { actionsFor } from './ui/actions.js';
 const ARBITRUM_HEX = '0xa4b1';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const USDC_SCALAR = 1_000_000n;
-const IPFS_PREFIX = 'ipfs://';
-const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
 const listingDescriptorCache = new Map();
 const PERIOD_LABELS = {
   0: 'Unspecified',
@@ -125,10 +123,6 @@ function makeBookingKey(listingAddress, bookingId) {
 
 function normaliseMetadataUrl(uri) {
   if (!uri || typeof uri !== 'string') return '';
-  if (uri.startsWith(IPFS_PREFIX)) {
-    const path = uri.slice(IPFS_PREFIX.length);
-    return `${IPFS_GATEWAY}${path.replace(/^\//, '')}`;
-  }
   return uri;
 }
 

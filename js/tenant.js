@@ -805,15 +805,9 @@ async function openCast(fid, hash32, fallbackUrl){
   }
 }
 
-const IPFS_PREFIX = 'ipfs://';
-const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
 
 function normaliseMetadataUrl(uri){
   if (!uri || typeof uri !== 'string') return '';
-  if (uri.startsWith(IPFS_PREFIX)) {
-    const path = uri.slice(IPFS_PREFIX.length);
-    return `${IPFS_GATEWAY}${path.replace(/^\//, '')}`;
-  }
   return uri;
 }
 
