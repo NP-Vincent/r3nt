@@ -52,20 +52,6 @@
         <p class="lead">
           r3nt is a lightweight interface for tenants and landlords to transact in USDC with minimal friction. Listings are posted from Farcaster Casts; bookings and payments stay on-chain.
         </p>
-        <div class="cta-row">
-          <a class="btn primary" href="./tenant.html">I’m a Tenant</a>
-          <a class="btn secondary" href="./landlord.html">I’m a Landlord</a>
-          <a class="btn outline" href="./investor.html">I’m an Investor</a>
-          <a class="btn outline" href="./agent.html">I’m an Agent</a>
-        </div>
-      </div>
-      <div class="card">
-        <strong>At a glance</strong>
-        <ul class="muted" style="margin:8px 0 0; padding-left:18px">
-          <li>Pay and settle in USDC</li>
-          <li>Listings linked to Casts</li>
-          <li>Works inside Farcaster</li>
-        </ul>
       </div>
     </div>
 
@@ -73,50 +59,70 @@
       <h2>Get Started</h2>
       <div class="muted">Choose your console and review the essentials for your role.</div>
       <div class="grid">
-        <div class="card">
-          <strong>Tenant</strong>
-          <ul class="muted" style="margin:8px 0 12px; padding-left:18px">
-            <li>Connect your wallet inside Farcaster to unlock booking tools.</li>
-            <li>Confirm stay dates, rent and deposits before submitting.</li>
-            <li>Track escrowed deposits and releases directly on-chain.</li>
-          </ul>
-          <div class="cta-row" style="margin-top:12px">
-            <a class="btn primary" href="./tenant.html">Open Tenant Console</a>
+        <details class="card role-card">
+          <summary class="card-summary">
+            <span>Tenant</span>
+            <span class="summary-indicator" aria-hidden="true"></span>
+          </summary>
+          <div class="card-content">
+            <ul class="muted">
+              <li>Connect your wallet inside Farcaster to unlock booking tools.</li>
+              <li>Confirm stay dates, rent and deposits before submitting.</li>
+              <li>Track escrowed deposits and releases directly on-chain.</li>
+            </ul>
+            <div class="cta-row">
+              <a class="btn primary" href="./tenant.html">Open Tenant Console</a>
+            </div>
           </div>
-        </div>
-        <div class="card">
-          <strong>Landlord</strong>
-          <ul class="muted" style="margin:8px 0 12px; padding-left:18px">
-            <li>Create listings from your Farcaster casts with guided setup.</li>
-            <li>Set pricing, deposits and availability from one dashboard.</li>
-            <li>Approve bookings and manage deposit releases with the platform.</li>
-          </ul>
-          <div class="cta-row" style="margin-top:12px">
-            <a class="btn secondary" href="./landlord.html">Open Landlord Console</a>
+        </details>
+        <details class="card role-card">
+          <summary class="card-summary">
+            <span>Landlord</span>
+            <span class="summary-indicator" aria-hidden="true"></span>
+          </summary>
+          <div class="card-content">
+            <ul class="muted">
+              <li>Create listings from your Farcaster casts with guided setup.</li>
+              <li>Set pricing, deposits and availability from one dashboard.</li>
+              <li>Approve bookings and manage deposit releases with the platform.</li>
+            </ul>
+            <div class="cta-row">
+              <a class="btn secondary" href="./landlord.html">Open Landlord Console</a>
+            </div>
           </div>
-        </div>
-        <div class="card">
-          <strong>Agent</strong>
-          <ul class="muted" style="margin:8px 0 12px; padding-left:18px">
-            <li>Load your agent contract to review fundraising and investors.</li>
-            <li>Open or close tokenisation rounds as demand shifts.</li>
-            <li>Record rent flows and withdraw agent fees without leaving the Mini App.</li>
-          </ul>
-          <div class="cta-row" style="margin-top:12px">
-            <a class="btn outline" href="./agent.html">Open Agent Console</a>
+        </details>
+        <details class="card role-card">
+          <summary class="card-summary">
+            <span>Agent</span>
+            <span class="summary-indicator" aria-hidden="true"></span>
+          </summary>
+          <div class="card-content">
+            <ul class="muted">
+              <li>Load your agent contract to review fundraising and investors.</li>
+              <li>Open or close tokenisation rounds as demand shifts.</li>
+              <li>Record rent flows and withdraw agent fees without leaving the Mini App.</li>
+            </ul>
+            <div class="cta-row">
+              <a class="btn outline" href="./agent.html">Open Agent Console</a>
+            </div>
           </div>
-        </div>
-        <div class="card">
-          <strong>Investor</strong>
-          <ul class="muted" style="margin:8px 0 12px; padding-left:18px">
-            <li>Connect to see bookings where you hold SQMU-R positions.</li>
-            <li>Monitor rent accruals and token supply in real time.</li>
-            <li>Claim accumulated rent for each booking in a single action.</li>
-          </ul>
-          <div class="cta-row" style="margin-top:12px">
-            <a class="btn outline" href="./investor.html">Open Investor Dashboards</a>
+        </details>
+        <details class="card role-card">
+          <summary class="card-summary">
+            <span>Investor</span>
+            <span class="summary-indicator" aria-hidden="true"></span>
+          </summary>
+          <div class="card-content">
+            <ul class="muted">
+              <li>Connect to see bookings where you hold SQMU-R positions.</li>
+              <li>Monitor rent accruals and token supply in real time.</li>
+              <li>Claim accumulated rent for each booking in a single action.</li>
+            </ul>
+            <div class="cta-row">
+              <a class="btn outline" href="./investor.html">Open Investor Dashboards</a>
+            </div>
           </div>
-        </div>
+        </details>
       </div>
     </section>
 
