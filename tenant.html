@@ -102,6 +102,22 @@
         <div class="planner-listings">
           <h3>Available listings</h3>
           <p class="muted" data-planner-empty>Select a listing to open the booking form.</p>
+          <div id="listingControls" class="listing-controls" hidden>
+            <label>
+              <span>Sort by</span>
+              <select id="listingSort">
+                <option value="created-desc">Newest → Oldest</option>
+                <option value="created-asc">Oldest → Newest</option>
+                <option value="price-asc">Base price: Low → High</option>
+                <option value="price-desc">Base price: High → Low</option>
+              </select>
+            </label>
+            <label>
+              <span>Location filter</span>
+              <input id="listingLocationFilter" placeholder="Latitude,Longitude" autocomplete="off" spellcheck="false" />
+            </label>
+            <button type="button" id="listingLocationClear" class="inline-button">Clear</button>
+          </div>
           <div id="listings"></div>
         </div>
       </div>

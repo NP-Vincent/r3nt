@@ -2,6 +2,12 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
+import {
+  applyListingFilters,
+  DEFAULT_LISTING_SORT_MODE,
+  LISTING_LOCATION_FILTER_PRECISION,
+  parseLatLonStrict as parseLatLon,
+} from './listing-filters.js';
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { BookingCard, TokenisationCard } from './ui/cards.js';
@@ -25,9 +31,8 @@ const USDC_DECIMALS = 6;
 const USDC_SCALAR = 1_000_000n;
 const GEOHASH_PRECISION = 7;
 const MANUAL_COORDS_HINT = 'Right-click → “What’s here?” in Google Maps to copy coordinates.';
-const LOCATION_FILTER_PRECISION = 5;
-const LAT_LON_FILTER_PATTERN = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
-const DEFAULT_SORT_MODE = 'created-desc';
+const LOCATION_FILTER_PRECISION = LISTING_LOCATION_FILTER_PRECISION;
+const DEFAULT_SORT_MODE = DEFAULT_LISTING_SORT_MODE;
 const BOOKING_STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
 const BOOKING_STATUS_CLASS_MAP = {
   1: 'active',
@@ -395,13 +400,6 @@ if (document.readyState === 'loading') {
 // helpers
 function utf8BytesLen(str) {
   return new TextEncoder().encode(str).length;
-}
-function parseLatLon(latStr, lonStr) {
-  const lat = Number(latStr);
-  const lon = Number(lonStr);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('Latitude/Longitude must be numbers.');
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) throw new Error('Latitude/Longitude out of range.');
-  return { lat, lon };
 }
 function parseDec6(s) {
   const v = String(s ?? '').trim();
@@ -1377,104 +1375,10 @@ function toBigIntOrZero(value) {
   }
 }
 
-function compareBigIntAsc(a, b) {
-  const left = toBigIntOrZero(a);
-  const right = toBigIntOrZero(b);
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
-}
-
-function compareBigIntDesc(a, b) {
-  return -compareBigIntAsc(a, b);
-}
-
 function toNumberOr(value, fallback = 0) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function compareNumber(a, b) {
-  const left = toNumberOr(a);
-  const right = toNumberOr(b);
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
-}
-
-function compareAddress(a, b) {
-  const left = typeof a === 'string' ? a.toLowerCase() : '';
-  const right = typeof b === 'string' ? b.toLowerCase() : '';
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
-}
-
-function parseLocationFilter(rawValue) {
-  const raw = typeof rawValue === 'string' ? rawValue.trim() : '';
-  if (!raw) {
-    return { typed: false, applied: false, invalid: false, prefix: '', derivedFrom: null };
-  }
-  const latLonMatch = raw.match(LAT_LON_FILTER_PATTERN);
-  if (latLonMatch) {
-    try {
-      const { lat, lon } = parseLatLon(latLonMatch[1], latLonMatch[3]);
-      const geohash = latLonToGeohash(lat, lon, GEOHASH_PRECISION);
-      const prefix = geohash.slice(0, Math.min(LOCATION_FILTER_PRECISION, geohash.length)).toLowerCase();
-      return { typed: true, applied: true, invalid: false, prefix, derivedFrom: 'latlon' };
-    } catch (err) {
-      console.warn('Invalid latitude/longitude filter input', raw, err);
-      return { typed: true, applied: false, invalid: true, prefix: '', derivedFrom: 'latlon' };
-    }
-  }
-  return { typed: true, applied: false, invalid: true, prefix: '', derivedFrom: 'latlon' };
-}
-
-function sortListings(listings) {
-  const arr = Array.isArray(listings) ? [...listings] : [];
-  arr.sort((a, b) => {
-    switch (listingSortMode) {
-      case 'created-asc':
-        return (
-          compareBigIntAsc(a?.createdAt, b?.createdAt) ||
-          compareNumber(a?.order, b?.order) ||
-          compareAddress(a?.address, b?.address)
-        );
-      case 'price-asc':
-        return (
-          compareBigIntAsc(a?.baseDailyRate, b?.baseDailyRate) ||
-          compareBigIntDesc(a?.createdAt, b?.createdAt) ||
-          compareNumber(a?.order, b?.order)
-        );
-      case 'price-desc':
-        return (
-          compareBigIntDesc(a?.baseDailyRate, b?.baseDailyRate) ||
-          compareBigIntDesc(a?.createdAt, b?.createdAt) ||
-          compareNumber(a?.order, b?.order)
-        );
-      case 'created-desc':
-      default:
-        return (
-          compareBigIntDesc(a?.createdAt, b?.createdAt) ||
-          compareNumber(a?.order, b?.order) ||
-          compareAddress(a?.address, b?.address)
-        );
-    }
-  });
-  return arr;
-}
-
-function applyListingFilters(records) {
-  const list = Array.isArray(records) ? records : [];
-  const filterInfo = parseLocationFilter(listingLocationFilterValue);
-  let filtered = list;
-  if (filterInfo.applied && filterInfo.prefix) {
-    const prefix = filterInfo.prefix;
-    filtered = list.filter((entry) => {
-      const geohash = typeof entry?.geohash === 'string' ? entry.geohash.toLowerCase() : '';
-      return geohash.startsWith(prefix);
-    });
-  }
-  const sorted = sortListings(filtered);
-  return { entries: sorted, total: list.length, filterInfo };
 }
 
 function updateListingControlsVisibility(visible) {
@@ -1486,7 +1390,13 @@ function renderLandlordListingView() {
   const container = els.landlordListings;
   if (!container) return;
 
-  const { entries, total, filterInfo } = applyListingFilters(landlordListingRecords);
+  const { entries, total, filterInfo } = applyListingFilters(landlordListingRecords, {
+    sortMode: listingSortMode,
+    locationFilterValue: listingLocationFilterValue,
+    geohashPrecision: GEOHASH_PRECISION,
+    locationPrecision: LOCATION_FILTER_PRECISION,
+    parseLatLon,
+  });
 
   updateListingControlsVisibility(total > 0);
 
