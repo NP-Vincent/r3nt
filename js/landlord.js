@@ -1297,17 +1297,15 @@ function renderLandlordListingCard(listing) {
   const maxWindowText = listing.maxBookingWindow > 0n ? fmt.duration(listing.maxBookingWindow) : 'Unlimited';
   appendDetail(`Min notice: ${minNoticeText} · Booking window: ${maxWindowText}`);
   if (listingIdText) {
-    const extraParts = [];
-    if (titleText) {
-      extraParts.push(titleText);
-    }
-    if (shortDescText) {
-      extraParts.push(shortDescText);
-    }
-    const detailText = ['Listing ID: ' + listingIdText, ...extraParts].join(' — ');
-    appendDetail(detailText);
+    appendDetail(`Listing ID: ${listingIdText}`);
   } else {
     appendDetail('Listing ID: (not assigned)');
+  }
+  if (titleText) {
+    appendDetail(`Title: ${titleText}`);
+  }
+  if (shortDescText) {
+    appendDetail(`Short description: ${shortDescText}`);
   }
   const createdLabel = listing.createdAtIso || (listing.createdAt > 0n ? fmt.timestamp(listing.createdAt) : '(not recorded)');
   appendDetail(`Created: ${createdLabel}`);
