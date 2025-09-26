@@ -9,6 +9,7 @@ import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
 import { createCollapsibleSection, makeCollapsible, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
+import { applyListingFilters, DEFAULT_LISTING_SORT_MODE } from './listing-filters.js';
 import {
   RPC_URL,
   REGISTRY_ADDRESS,
@@ -28,6 +29,10 @@ const els = {
   addr: document.getElementById('address'),
   status: document.getElementById('status'),
   listings: document.getElementById('listings'),
+  listingControls: document.getElementById('listingControls'),
+  listingSort: document.getElementById('listingSort'),
+  listingLocationFilter: document.getElementById('listingLocationFilter'),
+  listingLocationClear: document.getElementById('listingLocationClear'),
   planner: {
     card: document.querySelector('[data-planner-card]'),
     form: document.querySelector('[data-planner-form]'),
@@ -84,6 +89,9 @@ let connectedAccount = null;
 let bookingsLoading = null;
 let lastBookingsAccount = '';
 let bookingsRendered = false;
+let listingSortMode = DEFAULT_LISTING_SORT_MODE;
+let listingLocationFilterValue = '';
+let tenantListingRecords = [];
 
 const listingInfoCache = new Map();
 const bookingRecords = new Map();
@@ -132,6 +140,33 @@ if (els.period) {
 
 updateSummary();
 setPlannerFormVisible(false);
+
+if (els.listingSort) {
+  els.listingSort.value = listingSortMode;
+  els.listingSort.addEventListener('change', () => {
+    listingSortMode = els.listingSort.value || DEFAULT_LISTING_SORT_MODE;
+    renderTenantListingView();
+  });
+}
+
+if (els.listingLocationFilter) {
+  els.listingLocationFilter.addEventListener('input', () => {
+    listingLocationFilterValue = els.listingLocationFilter.value || '';
+    renderTenantListingView();
+  });
+}
+
+if (els.listingLocationClear) {
+  els.listingLocationClear.disabled = true;
+  els.listingLocationClear.addEventListener('click', () => {
+    listingLocationFilterValue = '';
+    if (els.listingLocationFilter) {
+      els.listingLocationFilter.value = '';
+      els.listingLocationFilter.focus();
+    }
+    renderTenantListingView();
+  });
+}
 
 const setVersionBadge = () => {
   const badge = document.querySelector('[data-version]');
@@ -939,21 +974,89 @@ function buildListingRecord(info) {
   };
 }
 
-function renderListings(listings) {
+function updateListingControlsVisibility(visible) {
+  if (!els.listingControls) return;
+  els.listingControls.hidden = !visible;
+}
+
+function setTenantListingRecords(records) {
+  const normalized = [];
+  if (Array.isArray(records)) {
+    for (let i = 0; i < records.length; i++) {
+      const entry = records[i];
+      if (!entry) continue;
+      const copy = { ...entry };
+      if (!Number.isFinite(copy.order)) {
+        copy.order = i;
+      }
+      if (typeof copy.geohash === 'string') {
+        copy.geohash = copy.geohash.toLowerCase();
+      }
+      normalized.push(copy);
+    }
+  }
+  tenantListingRecords = normalized;
+}
+
+function renderListings(listings, options = {}) {
   const container = document.getElementById('listings');
   if (!container) return;
+
+  const total = Number.isFinite(options.total)
+    ? Number(options.total)
+    : Array.isArray(listings)
+    ? listings.length
+    : 0;
+  const filterInfo = options.filterInfo || { typed: false, applied: false, invalid: false, prefix: '' };
+
   container.innerHTML = '';
   const plannerEmpty = els.planner?.empty;
-  if (plannerEmpty) {
-    if (!plannerEmpty.dataset.defaultText) {
-      plannerEmpty.dataset.defaultText = plannerEmpty.textContent || '';
+  if (plannerEmpty && !plannerEmpty.dataset.defaultText) {
+    plannerEmpty.dataset.defaultText = plannerEmpty.textContent || '';
+  }
+
+  if (!Array.isArray(listings) || listings.length === 0) {
+    container.classList.add('muted');
+    let emptyMessage = 'No active listings.';
+    if (filterInfo.invalid && filterInfo.typed) {
+      emptyMessage = 'Location filter not recognised — showing all listings.';
+    } else if (filterInfo.applied && filterInfo.prefix) {
+      emptyMessage = 'No listings match the current filters.';
+    } else if (total > 0) {
+      emptyMessage = 'No listings to display.';
     }
-    if (!listings || listings.length === 0) {
-      plannerEmpty.textContent = 'No listings available right now.';
+    container.textContent = emptyMessage;
+
+    if (plannerEmpty) {
+      if (filterInfo.invalid && filterInfo.typed) {
+        plannerEmpty.textContent = 'Location filter not recognised — showing all listings.';
+      } else if (filterInfo.applied && filterInfo.prefix) {
+        plannerEmpty.textContent = 'Adjust your filters to see listings.';
+      } else if (total === 0) {
+        plannerEmpty.textContent = 'No active listings.';
+      } else {
+        plannerEmpty.textContent = plannerEmpty.dataset.defaultText || 'Select a listing to open the booking form.';
+      }
+    }
+    return;
+  }
+
+  container.classList.remove('muted');
+
+  if (plannerEmpty) {
+    if (filterInfo.applied && filterInfo.prefix) {
+      if (total === listings.length) {
+        plannerEmpty.textContent = `Showing all ${total} listing${total === 1 ? '' : 's'} (filters applied).`;
+      } else {
+        plannerEmpty.textContent = `Showing ${listings.length} of ${total} listing${total === 1 ? '' : 's'} after filters.`;
+      }
+    } else if (filterInfo.invalid && filterInfo.typed) {
+      plannerEmpty.textContent = 'Location filter not recognised — showing all listings.';
     } else {
       plannerEmpty.textContent = plannerEmpty.dataset.defaultText || 'Select a listing to open the booking form.';
     }
   }
+
   listings.forEach((L) => {
     const record = listingRecords.get(L.id) || L;
     const listingActions = actionsFor({
@@ -1061,6 +1164,41 @@ function renderListings(listings) {
 
     container.append(card);
   });
+}
+
+function renderTenantListingView() {
+  const { entries, total, filterInfo } = applyListingFilters(tenantListingRecords, {
+    sortMode: listingSortMode,
+    locationFilterValue: listingLocationFilterValue,
+  });
+
+  updateListingControlsVisibility(total > 0);
+
+  if (els.listingSort && els.listingSort.value !== listingSortMode) {
+    els.listingSort.value = listingSortMode;
+  }
+
+  if (els.listingLocationClear) {
+    const hasFilterText = typeof listingLocationFilterValue === 'string' && listingLocationFilterValue.trim().length > 0;
+    els.listingLocationClear.disabled = !hasFilterText;
+  }
+
+  renderListings(entries, { total, filterInfo });
+
+  if (selectedListing) {
+    const selectedKey = selectedListing.id || normaliseAddress(selectedListing.address);
+    if (selectedKey) {
+      const stillVisible = entries.some((entry) => {
+        if (!entry) return false;
+        if (entry.id && entry.id === selectedKey) return true;
+        const addr = normaliseAddress(entry.address);
+        return addr === selectedKey;
+      });
+      if (!stillVisible) {
+        clearSelection();
+      }
+    }
+  }
 }
 
 function buildBookingRecord(meta, data, pending, listingInfo) {
@@ -1874,6 +2012,8 @@ async function loadListings(){
   els.listings.textContent = 'Loading listings…';
   clearSelection();
   listingRecords.clear();
+  setTenantListingRecords([]);
+  updateListingControlsVisibility(false);
   let addresses;
   try {
     const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allListings' });
@@ -1881,19 +2021,21 @@ async function loadListings(){
   } catch (err) {
     console.error('Failed to load listing addresses', err);
     els.listings.textContent = 'Unable to load listings.';
+    updateListingControlsVisibility(false);
     notify({ message: 'Unable to load listings.', variant: 'error', role: 'tenant', timeout: 6000 });
     return;
   }
   const cleaned = addresses.filter((addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr) && !/^0x0+$/.test(addr));
   if (!cleaned.length) {
-    els.listings.textContent = 'No active listings.';
+    setTenantListingRecords([]);
+    renderTenantListingView();
     return;
   }
   const infos = await Promise.all(cleaned.map((addr) => fetchListingInfo(addr)));
   const valid = infos.filter(Boolean);
   if (!valid.length) {
-    els.listings.innerHTML = '';
-    els.listings.textContent = 'No active listings.';
+    setTenantListingRecords([]);
+    renderTenantListingView();
     notify({ message: 'No active listings right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
     return;
   }
@@ -1906,7 +2048,8 @@ async function loadListings(){
     }
     return record;
   });
-  renderListings(entries);
+  setTenantListingRecords(entries);
+  renderTenantListingView();
   notify({
     message: `Loaded ${entries.length} listing${entries.length === 1 ? '' : 's'}.`,
     variant: 'success',
