@@ -1,26 +1,5 @@
 // map-assist.js
-// Helper utilities to open native mapping apps from within the Mini App.
-// Based on recommended platform-specific behaviour for iOS, Android and web.
-
-const DEFAULT_FALLBACK_COORDS = Object.freeze({ lat: 25.1972, lon: 55.2744 });
-
-const MAP_PROVIDERS = Object.freeze({
-  apple: "apple",
-  google: "google",
-});
-
-/**
- * Detect the user's mobile platform from the provided user agent string.
- * @param {string} [userAgent]
- * @returns {"ios"|"android"|"other"}
- */
-export function detectPlatform(userAgent = (typeof navigator !== "undefined" ? navigator.userAgent : "")) {
-  if (typeof userAgent !== "string") return "other";
-  if (/iPad|iPhone|iPod/i.test(userAgent)) return "ios";
-  if (/Android/i.test(userAgent)) return "android";
-  return "other";
-}
-
+// Helper utilities to open Google Maps links from within the Mini App.
 function normaliseCoords(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -31,12 +10,6 @@ function normaliseCoords(value) {
     return null;
   }
   return { lat, lon };
-}
-
-function buildAppleMapsUrl(lat, lon, label) {
-  const q = `${lat},${lon}`;
-  const encodedLabel = label ? encodeURIComponent(label) : encodeURIComponent(q);
-  return `https://maps.apple.com/?ll=${encodeURIComponent(q)}&q=${encodedLabel}`;
 }
 
 function buildGoogleMapsUrl(lat, lon, label) {
@@ -61,30 +34,11 @@ function openUrl(url, { openInNewTab = true } = {}) {
   window.location.assign(url);
 }
 
-function chooseProvider(preferred) {
-  const defaultPreference = preferred ?? (detectPlatform() === "ios" ? MAP_PROVIDERS.apple : MAP_PROVIDERS.google);
-
-  if (typeof window === "undefined" || typeof window.confirm !== "function") {
-    return defaultPreference;
-  }
-
-  if (defaultPreference === MAP_PROVIDERS.apple) {
-    const useApple = window.confirm("Open location in Apple Maps? Press Cancel for Google Maps.");
-    return useApple ? MAP_PROVIDERS.apple : MAP_PROVIDERS.google;
-  }
-
-  const useGoogle = window.confirm("Open location in Google Maps? Press Cancel for Apple Maps.");
-  return useGoogle ? MAP_PROVIDERS.google : MAP_PROVIDERS.apple;
-}
-
 /**
- * Attempt to open the mapping application for the provided coordinates.
- * Presents the user with a choice of Apple Maps or Google Maps links.
+ * Attempt to open Google Maps for the provided coordinates.
  * @param {number} lat
  * @param {number} lon
  * @param {{
- *   provider?: "apple"|"google",
- *   preferredProvider?: "apple"|"google",
  *   label?: string,
  *   openInNewTab?: boolean,
  * }} [options]
@@ -93,18 +47,8 @@ export function openMapsAt(lat, lon, options = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     throw new Error("Latitude and longitude must be finite numbers.");
   }
-  const { provider, preferredProvider, label, openInNewTab = true } = options;
-
-  const requestedProvider = provider ?? chooseProvider(preferredProvider);
-  const mapUrls = {
-    [MAP_PROVIDERS.apple]: buildAppleMapsUrl(lat, lon, label),
-    [MAP_PROVIDERS.google]: buildGoogleMapsUrl(lat, lon, label),
-  };
-
-  const selectedProvider = Object.values(MAP_PROVIDERS).includes(requestedProvider)
-    ? requestedProvider
-    : chooseProvider(preferredProvider);
-  const url = mapUrls[selectedProvider];
+  const { label, openInNewTab = true } = options;
+  const url = buildGoogleMapsUrl(lat, lon, label);
   openUrl(url, { openInNewTab });
 }
 
@@ -114,11 +58,6 @@ export function openMapsAt(lat, lon, options = {}) {
  * @param {{
  *   coords?: { lat: number, lon: number } | null,
  *   resolveCoords?: () => ({ lat: number, lon: number } | null | undefined),
- *   fallbackCoords?: { lat: number, lon: number },
- *   highAccuracy?: boolean,
- *   timeoutMs?: number,
- *   provider?: "apple"|"google",
- *   preferredProvider?: "apple"|"google",
  *   label?: string,
  *   openInNewTab?: boolean,
  *   onError?: (err: unknown) => void,
@@ -132,20 +71,13 @@ export function attachNavigateHandler(target, options = {}) {
   const {
     coords,
     resolveCoords,
-    fallbackCoords = DEFAULT_FALLBACK_COORDS,
-    highAccuracy = true,
-    timeoutMs = 8000,
-    provider,
-    preferredProvider,
     label,
     openInNewTab,
     onError,
   } = options;
 
   const invoke = (lat, lon) =>
-    openMapsAt(lat, lon, { provider, preferredProvider, label, openInNewTab });
-
-  const fallback = normaliseCoords(fallbackCoords) || DEFAULT_FALLBACK_COORDS;
+    openMapsAt(lat, lon, { label, openInNewTab });
 
   const normaliseDirectCoords = () => {
     if (typeof resolveCoords === "function") {
@@ -204,26 +136,7 @@ export function attachNavigateHandler(target, options = {}) {
       return;
     }
 
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      safeInvoke(fallback.lat, fallback.lon);
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords || {};
-        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-          safeInvoke(Number(latitude), Number(longitude));
-        } else {
-          safeInvoke(fallback.lat, fallback.lon);
-        }
-      },
-      (err) => {
-        handleError(err);
-        safeInvoke(fallback.lat, fallback.lon);
-      },
-      { enableHighAccuracy: highAccuracy, timeout: timeoutMs }
-    );
+    handleError(new Error("Coordinates unavailable for map navigation."));
   };
 
   target.addEventListener("click", handleClick);
@@ -236,8 +149,6 @@ export function createOpenMapButton({
   label = "Open in Map",
   className = "inline-button",
   disabledTitle = "Coordinates unavailable",
-  provider,
-  preferredProvider,
   mapLabel,
   openInNewTab,
   onError,
@@ -257,8 +168,6 @@ export function createOpenMapButton({
     button.dataset.lat = String(coords.lat);
     button.dataset.lon = String(coords.lon);
     attachNavigateHandler(button, {
-      provider,
-      preferredProvider,
       label: mapLabel,
       openInNewTab,
       onError,
@@ -273,4 +182,3 @@ export function createOpenMapButton({
   return button;
 }
 
-export { DEFAULT_FALLBACK_COORDS };
