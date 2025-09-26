@@ -380,6 +380,32 @@ function interpretError(err) {
   return { message: baseMessage, severity: 'error' };
 }
 
+function isUnknownBookingError(err) {
+  if (!err) return false;
+
+  const reason = typeof err?.reason === 'string' ? err.reason.toLowerCase() : '';
+  if (reason === 'unknown booking') {
+    return true;
+  }
+
+  const errorArgs = Array.isArray(err?.errorArgs) ? err.errorArgs : [];
+  if (errorArgs.some((value) => typeof value === 'string' && value.toLowerCase() === 'unknown booking')) {
+    return true;
+  }
+
+  const message = typeof err?.message === 'string' ? err.message.toLowerCase() : '';
+  if (message.includes('unknown booking')) {
+    return true;
+  }
+
+  const dataReason = typeof err?.data?.message === 'string' ? err.data.message.toLowerCase() : '';
+  if (dataReason.includes('unknown booking')) {
+    return true;
+  }
+
+  return false;
+}
+
 function formatUsdc(value) {
   const big = typeof value === 'bigint' ? value : BigInt(BigNumber.from(value || 0).toString());
   const negative = big < 0n;
@@ -1349,8 +1375,12 @@ async function loadDepositDetails(options = {}) {
     currentDepositContext = null;
     renderDepositInfo(null);
     updateDepositControlsEnabled();
-    const { message, severity } = interpretError(err);
-    setDepositStatus(`Failed to load deposit details: ${message}`, severity);
+    if (isUnknownBookingError(err)) {
+      setDepositStatus('Booking not found for that listing. Double-check the IDs and try again.', 'warning');
+    } else {
+      const { message, severity } = interpretError(err);
+      setDepositStatus(`Failed to load deposit details: ${message}`, severity);
+    }
     return false;
   }
 }
