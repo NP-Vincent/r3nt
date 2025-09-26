@@ -12,22 +12,38 @@ const periodLabel = (value) => {
   return typeof value === 'string' ? value : String(value);
 };
 
-export function ListingCard({ id, title, location, pricePerDayUSDC, areaSqm, depositUSDC, status, actions = [] }) {
+export function ListingCard({
+  id,
+  title,
+  summary,
+  location,
+  pricePerDayUSDC,
+  areaSqm,
+  depositUSDC,
+  status,
+  actions = [],
+}) {
   const visibleActions = actions.filter((a) => a?.visible !== false);
   const actionButtons = visibleActions.map((a) => el('button', { class: 'inline-button', onClick: a.onClick }, a.label));
+  const summaryText = typeof summary === 'string' ? summary.trim() : '';
 
-  const children = [
-    el('div', { class: 'card-header' }, [
-      el('strong', {}, title || `Listing #${id}`),
-      el('div', { class: 'card-meta' }, [
-        Pill(location || '—'),
-        pricePerDayUSDC != null ? Pill(`Daily ${fmt.usdc(pricePerDayUSDC)} USDC`) : null,
-        areaSqm != null ? Pill(fmt.sqm(areaSqm)) : null,
-        depositUSDC != null ? Pill(`Deposit ${fmt.usdc(depositUSDC)} USDC`) : null,
-        status ? Pill(status) : null,
-      ].filter(Boolean)),
-    ]),
-  ];
+  const headerChildren = [el('strong', {}, title || `Listing #${id}`)];
+  if (summaryText) {
+    headerChildren.push(el('div', { class: 'listing-summary' }, summaryText));
+  }
+
+  const metaPills = [
+    Pill(location || '—'),
+    pricePerDayUSDC != null ? Pill(`Daily ${fmt.usdc(pricePerDayUSDC)} USDC`) : null,
+    areaSqm != null ? Pill(fmt.sqm(areaSqm)) : null,
+    depositUSDC != null ? Pill(`Deposit ${fmt.usdc(depositUSDC)} USDC`) : null,
+    status ? Pill(status) : null,
+  ].filter(Boolean);
+  if (metaPills.length > 0) {
+    headerChildren.push(el('div', { class: 'card-meta' }, metaPills));
+  }
+
+  const children = [el('div', { class: 'card-header' }, headerChildren)];
 
   if (actionButtons.length > 0) {
     children.push(el('div', { class: 'card-actions' }, actionButtons));
