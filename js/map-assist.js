@@ -44,9 +44,10 @@ export function createOpenMapButton(options = {}) {
   );
 
   mapLink.addEventListener('click', (event) => {
-    event.preventDefault();
-    const win = window.open(href, '_blank', 'noopener');
+    const win = window.open(href, '_blank', 'noopener,noreferrer');
     if (win) {
+      win.opener = null;
+      event.preventDefault();
       try {
         win.focus();
       } catch (_) {
