@@ -1251,6 +1251,10 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
   const expectedNetRent = toBigInt(data.expectedNetRent, 0n);
   const depositReleased = Boolean(data.depositReleased);
   const tokenised = Boolean(data.tokenised);
+  const hasApprovedTokenisation =
+    tokenised ||
+    soldSqmu > 0n ||
+    (totalSqmu > 0n && pricePerSqmu > 0n);
   const pendingInfoRaw = pending ? normaliseTokenisationView(pending) : null;
   const pendingExists = Boolean(pendingInfoRaw?.exists);
   const pendingTotalSqmu = toBigInt(pendingInfoRaw?.totalSqmu, 0n);
@@ -1271,6 +1275,8 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
   let cancelDisabledReason = '';
   if (!isActive) {
     cancelDisabledReason = 'Only active bookings can be cancelled.';
+  } else if (hasApprovedTokenisation) {
+    cancelDisabledReason = 'Tokenised bookings cannot be cancelled while SQMU-R fundraising is live.';
   } else if (!isUpcoming) {
     cancelDisabledReason = 'Cancellation is unavailable once the stay has started.';
   } else if (depositReleased) {
