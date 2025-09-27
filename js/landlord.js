@@ -79,6 +79,31 @@ function addressesEqual(a, b) {
   return normaliseAddress(a) === normaliseAddress(b);
 }
 
+async function assertListingOwnership(listingAddress, account) {
+  if (!listingAddress) {
+    throw new Error('Listing address is required to verify ownership.');
+  }
+  if (!account) {
+    throw new Error('Connect your wallet to continue.');
+  }
+
+  let landlord;
+  try {
+    landlord = await pub.readContract({
+      address: listingAddress,
+      abi: LISTING_ABI,
+      functionName: 'landlord',
+    });
+  } catch (err) {
+    console.error('Failed to verify listing ownership', err);
+    throw new Error('Unable to verify listing ownership. Please try again.');
+  }
+
+  if (!addressesEqual(landlord, account)) {
+    throw new Error('Connected wallet does not match the listing landlord.');
+  }
+}
+
 function isUnknownBookingError(err) {
   if (!err) return false;
 
