@@ -1324,31 +1324,39 @@ async function investInSale(entry, amountValue, form) {
     );
 
     let walletSendUnsupported = false;
+    let walletSendUnsupportedReason = null;
     let batchedSuccess = false;
     try {
       traceInvestmentStep('wallet-send:start', {
         callCount: calls.length,
         includesApproval: needsApproval,
       });
-      const { unsupported } = await requestWalletSendCalls(p, {
+      const { unsupported, reason: sendCallsReason } = await requestWalletSendCalls(p, {
         calls,
         from,
         chainId: ARBITRUM_HEX,
       });
       batchedSuccess = !unsupported;
       walletSendUnsupported = unsupported;
+      walletSendUnsupportedReason = sendCallsReason || null;
       traceInvestmentStep('wallet-send:complete', {
         unsupported,
         batchedSuccess,
+        reason: sendCallsReason || undefined,
       });
     } catch (err) {
       traceInvestmentStep('error', { stage: 'wallet-send', error: err });
-      if (isUserRejectedRequestError(err)) {
+      if (err && typeof err === 'object' && err.unsupported) {
+        walletSendUnsupported = true;
+        walletSendUnsupportedReason = err.reason || err.unsupportedReason || null;
+        batchedSuccess = false;
+      } else if (isUserRejectedRequestError(err)) {
         setStatus('Investment cancelled by user.');
         notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
         return;
+      } else {
+        throw err;
       }
-      throw err;
     }
 
     if (!batchedSuccess && walletSendUnsupported) {
@@ -1356,7 +1364,13 @@ async function investInSale(entry, amountValue, form) {
         traceInvestmentStep('fallback:sequential:start', {
           needsApproval,
           formattedCost,
+          reason: walletSendUnsupportedReason || undefined,
         });
+        const fallbackStatus = needsApproval
+          ? 'Wallet does not support batched approval + invest. Retrying sequentially…'
+          : 'Wallet does not support batched invest calls. Retrying sequentially…';
+        setStatus(fallbackStatus);
+        notify({ message: fallbackStatus, variant: 'info', role: 'investor', timeout: 5000 });
         if (needsApproval && approveData) {
           setStatus(`Approve USDC (${formattedCost} USDC).`);
           await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
@@ -1376,7 +1390,12 @@ async function investInSale(entry, amountValue, form) {
       }
     }
 
-    traceInvestmentStep('post-submit:notify', { formattedCost, batchedSuccess, walletSendUnsupported });
+    traceInvestmentStep('post-submit:notify', {
+      formattedCost,
+      batchedSuccess,
+      walletSendUnsupported,
+      walletSendUnsupportedReason: walletSendUnsupportedReason || undefined,
+    });
     setStatus(`Investment submitted (${formattedCost} USDC).`);
     notify({
       message: `Investment submitted (${formattedCost} USDC).`,

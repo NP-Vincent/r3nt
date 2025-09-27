@@ -196,6 +196,101 @@ const ERROR_NESTED_KEYS = [
   'value',
 ];
 
+function hasNonEmptyObject(obj) {
+  if (obj == null || typeof obj !== 'object') {
+    return false;
+  }
+  if (Array.isArray(obj)) {
+    return obj.some((entry) => entry != null);
+  }
+  return Object.keys(obj).length > 0;
+}
+
+function isWalletSendCallsPromptlessRejection(error) {
+  if (error == null) {
+    return false;
+  }
+
+  const visited = new Set();
+  const queue = [error];
+  let sawRejectionCode = false;
+  let sawData = false;
+  let sawTxResults = false;
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null || typeof current !== 'object') {
+      continue;
+    }
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+
+    const code = normalizeCode(current.code ?? current.status ?? current.errorCode);
+    if (code) {
+      if (USER_REJECTION_STRING_CODES.has(code)) {
+        sawRejectionCode = sawRejectionCode || code === '4001';
+      } else {
+        const numeric = Number(code);
+        if (Number.isFinite(numeric) && USER_REJECTION_NUMERIC_CODES.has(numeric)) {
+          sawRejectionCode = sawRejectionCode || numeric === 4001;
+        }
+      }
+    }
+
+    if ('txResults' in current) {
+      const txResults = current.txResults;
+      if (Array.isArray(txResults)) {
+        if (txResults.some((entry) => entry != null)) {
+          sawTxResults = true;
+        }
+        for (const entry of txResults) {
+          if (entry != null) queue.push(entry);
+        }
+      } else if (txResults && typeof txResults === 'object') {
+        if (hasNonEmptyObject(txResults)) {
+          sawTxResults = true;
+        }
+        queue.push(txResults);
+      } else if (txResults != null) {
+        sawTxResults = true;
+      }
+    }
+
+    if ('data' in current) {
+      const dataValue = current.data;
+      if (Array.isArray(dataValue)) {
+        if (dataValue.some((entry) => entry != null)) {
+          sawData = true;
+        }
+        for (const entry of dataValue) {
+          if (entry != null) queue.push(entry);
+        }
+      } else if (dataValue && typeof dataValue === 'object') {
+        if (hasNonEmptyObject(dataValue)) {
+          sawData = true;
+        }
+        queue.push(dataValue);
+      } else if (dataValue != null) {
+        sawData = true;
+      }
+    }
+
+    for (const key of ERROR_NESTED_KEYS) {
+      if (key === 'data') continue;
+      if (!(key in current)) continue;
+      const nested = current[key];
+      if (nested == null) continue;
+      if (typeof nested === 'object') {
+        queue.push(nested);
+      }
+    }
+  }
+
+  return sawRejectionCode && !sawData && !sawTxResults;
+}
+
 function normalizeCode(value) {
   if (value == null) return '';
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -423,11 +518,14 @@ export async function requestWalletSendCalls(provider, options = {}) {
       const result = await provider.request({ method: 'wallet_sendCalls', params });
       return { result, unsupported: false };
     } catch (error) {
+      if (isWalletSendCallsPromptlessRejection(error)) {
+        return { result: undefined, unsupported: true, error, reason: 'promptless-user-rejection' };
+      }
       if (isUserRejectedRequestError(error)) {
         throw error;
       }
       if (isMethodNotFoundError(error)) {
-        return { result: undefined, unsupported: true, error };
+        return { result: undefined, unsupported: true, error, reason: 'method-not-found' };
       }
       if (i === attempts.length - 1) {
         throw error;
