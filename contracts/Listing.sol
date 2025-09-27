@@ -617,6 +617,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         require(tenantBps <= BPS_DENOMINATOR, "bps too high");
         Booking storage booking = _bookings[bookingId];
         require(booking.status == Status.ACTIVE || booking.status == Status.COMPLETED, "invalid status");
+        require(!booking.tokenised, "tokenised");
+        require(booking.soldSqmu == 0, "sqmu sold");
         require(!_depositReleased[bookingId], "deposit handled");
 
         _depositSplitProposals[bookingId] = DepositSplitProposal({exists: true, tenantBps: tenantBps, proposer: msg.sender});
@@ -643,6 +645,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         }
         Booking storage booking = _bookings[bookingId];
         require(booking.status == Status.ACTIVE || booking.status == Status.COMPLETED, "invalid status");
+        require(!booking.tokenised, "tokenised");
+        require(booking.soldSqmu == 0, "sqmu sold");
         require(!_depositReleased[bookingId], "deposit handled");
 
         DepositSplitProposal storage proposal = _depositSplitProposals[bookingId];
