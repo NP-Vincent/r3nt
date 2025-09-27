@@ -102,6 +102,48 @@ function toBigInt(value, fallback = 0n) {
   }
 }
 
+function isDevConsoleOpen(settings) {
+  if (settings && typeof settings.devConsoleOpen === 'boolean') {
+    return Boolean(settings.devConsoleOpen);
+  }
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  try {
+    const widthDiff = Math.abs(window.outerWidth - window.innerWidth);
+    const heightDiff = Math.abs(window.outerHeight - window.innerHeight);
+    return widthDiff > 160 || heightDiff > 160;
+  } catch {
+    return false;
+  }
+}
+
+if (typeof window !== 'undefined' && typeof window.__R3NT_TRACE_LOG__ !== 'function') {
+  window.__R3NT_TRACE_LOG__ = () => {};
+}
+
+function traceInvestmentStep(step, details) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const settings = window.__R3NT_DEV_SETTINGS__ || {};
+  const enabled = settings.traceInvest ?? isDevConsoleOpen(settings);
+  if (!enabled) {
+    return;
+  }
+  if (details !== undefined) {
+    console.info('[invest][%s]', step, details);
+  } else {
+    console.info('[invest][%s]', step);
+  }
+  const tracer = window.__R3NT_TRACE_LOG__;
+  if (typeof tracer === 'function') {
+    try {
+      tracer('investInSale', { step, details, timestamp: Date.now() });
+    } catch {}
+  }
+}
+
 function makeBookingKey(listingAddress, bookingId) {
   const addr = typeof listingAddress === 'string' ? listingAddress.toLowerCase() : '';
   let idPart = '';
@@ -1101,21 +1143,32 @@ async function fetchPlatformListings() {
 }
 
 async function investInSale(entry, amountValue, form) {
+  traceInvestmentStep('start', { amountValue });
   try {
+    traceInvestmentStep('normalize-entry:start', { entry });
     const sale = createSelectionFromEntry(entry);
     if (!sale) {
+      traceInvestmentStep('normalize-entry:missing', { entry });
       setStatus('Selected sale is no longer available.');
       notify({ message: 'Selected sale is no longer available.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
     }
+    traceInvestmentStep('normalize-entry:success', {
+      bookingId: sale.bookingId,
+      listingAddress: sale.listingAddress,
+      remainingSqmu: sale.remainingSqmu?.toString?.() ?? String(sale.remainingSqmu ?? '')
+    });
 
+    traceInvestmentStep('parse-amount:start', { amountValue });
     const raw = typeof amountValue === 'string' ? amountValue.trim() : String(amountValue ?? '').trim();
     if (!raw) {
+      traceInvestmentStep('parse-amount:missing');
       setStatus('Enter the SQMU amount you wish to purchase.');
       notify({ message: 'Enter the SQMU amount you wish to purchase.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
     }
     if (!/^\d+$/.test(raw)) {
+      traceInvestmentStep('parse-amount:invalid', { raw });
       setStatus('Enter a whole number of SQMU.');
       notify({ message: 'Enter a whole number of SQMU.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
@@ -1123,36 +1176,57 @@ async function investInSale(entry, amountValue, form) {
 
     const amount = BigInt(raw);
     if (amount <= 0n) {
+      traceInvestmentStep('parse-amount:too-small', { amount: amount.toString() });
       setStatus('Enter at least 1 SQMU.');
       notify({ message: 'Enter at least 1 SQMU.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
     }
     if (sale.remainingSqmu <= 0n || amount > sale.remainingSqmu) {
+      traceInvestmentStep('parse-amount:oversubscribed', {
+        amount: amount.toString(),
+        remainingSqmu: sale.remainingSqmu?.toString?.() ?? String(sale.remainingSqmu ?? '')
+      });
       setStatus('This sale is fully subscribed.');
       notify({ message: 'This sale is fully subscribed.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
     }
+    traceInvestmentStep('parse-amount:success', { amount: amount.toString() });
 
     if (!state.account) {
+      traceInvestmentStep('provider:missing-account');
       setStatus('Connect your wallet before investing.');
       notify({ message: 'Connect your wallet before investing.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
     }
 
+    traceInvestmentStep('provider:start');
     const p = provider || (provider = await sdk.wallet.getEthereumProvider());
     const [from] = (await p.request({ method: 'eth_accounts' })) || [];
     if (!from) throw new Error('No wallet account connected.');
+    traceInvestmentStep('provider:success', { account: shortAddress(from) });
+    traceInvestmentStep('arbitrum:check:start');
     await ensureArbitrum(p);
+    traceInvestmentStep('arbitrum:check:success');
 
     const bookingId = sale.bookingIdRaw ?? BigInt(sale.bookingId || 0);
+    traceInvestmentStep('cost:compute:start', {
+      pricePerSqmu: sale.pricePerSqmu?.toString?.() ?? String(sale.pricePerSqmu ?? ''),
+      amount: amount.toString()
+    });
     const totalCost = sale.pricePerSqmu * amount;
     if (totalCost <= 0n) {
+      traceInvestmentStep('cost:compute:invalid', { totalCost: totalCost.toString() });
       setStatus('Investment amount must be greater than 0 USDC.');
       notify({ message: 'Investment amount must be greater than 0 USDC.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
     }
     const formattedCost = formatUsdc(totalCost);
+    traceInvestmentStep('cost:compute:success', { totalCost: totalCost.toString(), formattedCost });
 
+    traceInvestmentStep('assemble:invest-call', {
+      bookingId: bookingId?.toString?.() ?? String(bookingId ?? ''),
+      amount: amount.toString(),
+    });
     const investData = encodeFunctionData({
       abi: LISTING_ABI,
       functionName: 'invest',
@@ -1162,6 +1236,7 @@ async function investInSale(entry, amountValue, form) {
 
     let allowance = 0n;
     try {
+      traceInvestmentStep('allowance:read:start', { owner: shortAddress(from), spender: shortAddress(sale.listingAddress) });
       const allowanceRaw = await pub.readContract({
         address: USDC_ADDRESS,
         abi: erc20Abi,
@@ -1170,11 +1245,16 @@ async function investInSale(entry, amountValue, form) {
       });
       allowance = toBigInt(allowanceRaw, 0n);
     } catch (err) {
+      traceInvestmentStep('error', { stage: 'allowance:read', error: err });
       console.warn('Failed to read USDC allowance before investing', err);
       allowance = 0n;
     }
 
     const needsApproval = allowance < totalCost;
+    traceInvestmentStep('allowance:read:complete', {
+      allowance: allowance.toString(),
+      needsApproval,
+    });
     let approveData;
     const calls = [];
     if (needsApproval) {
@@ -1186,6 +1266,10 @@ async function investInSale(entry, amountValue, form) {
       calls.push({ to: USDC_ADDRESS, data: approveData });
     }
     calls.push(investCall);
+    traceInvestmentStep('assemble:calls:complete', {
+      calls: calls.length,
+      includesApproval: needsApproval,
+    });
 
     const submitBtn = form?.querySelector('button[type="submit"]');
     if (submitBtn) submitBtn.disabled = true;
@@ -1198,6 +1282,10 @@ async function investInSale(entry, amountValue, form) {
     let walletSendUnsupported = false;
     let batchedSuccess = false;
     try {
+      traceInvestmentStep('wallet-send:start', {
+        callCount: calls.length,
+        includesApproval: needsApproval,
+      });
       const { unsupported } = await requestWalletSendCalls(p, {
         calls,
         from,
@@ -1205,7 +1293,12 @@ async function investInSale(entry, amountValue, form) {
       });
       batchedSuccess = !unsupported;
       walletSendUnsupported = unsupported;
+      traceInvestmentStep('wallet-send:complete', {
+        unsupported,
+        batchedSuccess,
+      });
     } catch (err) {
+      traceInvestmentStep('error', { stage: 'wallet-send', error: err });
       if (isUserRejectedRequestError(err)) {
         setStatus('Investment cancelled by user.');
         notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
@@ -1216,6 +1309,10 @@ async function investInSale(entry, amountValue, form) {
 
     if (!batchedSuccess && walletSendUnsupported) {
       try {
+        traceInvestmentStep('fallback:sequential:start', {
+          needsApproval,
+          formattedCost,
+        });
         if (needsApproval && approveData) {
           setStatus(`Approve USDC (${formattedCost} USDC).`);
           await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
@@ -1223,7 +1320,9 @@ async function investInSale(entry, amountValue, form) {
         setStatus(`Confirm investment (${formattedCost} USDC).`);
         await p.request({ method: 'eth_sendTransaction', params: [{ from, to: sale.listingAddress, data: investData }] });
         batchedSuccess = true;
+        traceInvestmentStep('fallback:sequential:success', { batchedSuccess });
       } catch (err) {
+        traceInvestmentStep('error', { stage: 'fallback:sequential', error: err });
         if (isUserRejectedRequestError(err)) {
           setStatus('Investment cancelled by user.');
           notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
@@ -1233,6 +1332,7 @@ async function investInSale(entry, amountValue, form) {
       }
     }
 
+    traceInvestmentStep('post-submit:notify', { formattedCost, batchedSuccess, walletSendUnsupported });
     setStatus(`Investment submitted (${formattedCost} USDC).`);
     notify({
       message: `Investment submitted (${formattedCost} USDC).`,
@@ -1245,8 +1345,11 @@ async function investInSale(entry, amountValue, form) {
       const input = form.querySelector('input[name="amount"]');
       if (input) input.value = '';
     }
+    traceInvestmentStep('post-submit:refresh:start', { account: shortAddress(state.account) });
     await loadInvestorData(state.account);
+    traceInvestmentStep('post-submit:refresh:complete');
   } catch (err) {
+    traceInvestmentStep('error', { stage: 'investInSale', error: err });
     console.error('Investment failed', err);
     if (isUserRejectedRequestError(err)) {
       setStatus('Investment cancelled by user.');
