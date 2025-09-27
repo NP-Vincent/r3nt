@@ -47,37 +47,19 @@ export function createOpenMapButton(options = {}) {
   mapLink.addEventListener('click', async (event) => {
     event.preventDefault();
 
-    if (sdk?.actions?.openUrl) {
-      try {
-        await sdk.actions.openUrl(href);
-        return;
-      } catch (err) {
-        if (typeof onError === 'function') {
-          onError(err);
-        }
-        // fall through to window.open fallback
+    if (!sdk?.actions?.openUrl) {
+      if (typeof onError === 'function') {
+        onError(new Error('Mini app SDK openUrl action is unavailable'));
       }
+      return;
     }
 
-    let win;
     try {
-      win = window.open(href, '_blank', 'noopener,noreferrer');
+      await sdk.actions.openUrl(href);
     } catch (err) {
       if (typeof onError === 'function') {
         onError(err);
       }
-      return;
-    }
-
-    if (!win) {
-      return;
-    }
-
-    win.opener = null;
-    try {
-      win.focus();
-    } catch (_) {
-      // ignore focus errors
     }
   });
 
