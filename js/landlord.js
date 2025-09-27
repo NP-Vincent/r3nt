@@ -8,7 +8,7 @@ import {
   LISTING_LOCATION_FILTER_PRECISION,
   parseLatLonStrict as parseLatLon,
 } from './listing-filters.js';
-import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
+import { requestWalletSendCalls, isUserRejectedRequestError, extractErrorMessage } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { BookingCard, TokenisationCard } from './ui/cards.js';
 import { createCollapsibleSection, mountCollapsibles } from './ui/accordion.js';
@@ -117,7 +117,7 @@ function isUnknownBookingError(err) {
     return true;
   }
 
-  const message = typeof err?.message === 'string' ? err.message.toLowerCase() : '';
+  const message = extractErrorMessage(err, '').toLowerCase();
   if (message.includes('unknown booking')) {
     return true;
   }
@@ -1238,7 +1238,8 @@ async function openTokenToolsForBooking(listing, bookingId, options = {}) {
     await controller.token.openForBooking(bookingId, { focus });
   } catch (err) {
     console.error('Failed to open token tools via quick action', err);
-    notify({ message: err?.message || 'Unable to load booking details.', variant: 'error', role: 'landlord', timeout: 6000 });
+    const message = extractErrorMessage(err, 'Unable to load booking details.');
+    notify({ message, variant: 'error', role: 'landlord', timeout: 6000 });
   }
 }
 
@@ -1461,13 +1462,9 @@ function renderLandlordListingCard(listing) {
         }
       } catch (err) {
         console.error('Failed to load bookings for listing', listing?.address, err);
-        bookingsStatus.textContent = err?.message || 'Unable to load bookings.';
-        notify({
-          message: 'Unable to load bookings for this listing.',
-          variant: 'error',
-          role: 'landlord',
-          timeout: 6000,
-        });
+        const message = extractErrorMessage(err, 'Unable to load bookings.');
+        bookingsStatus.textContent = message;
+        notify({ message, variant: 'error', role: 'landlord', timeout: 6000 });
       } finally {
         bookingsLoading = null;
         bookingsRefresh.disabled = false;
@@ -1531,8 +1528,9 @@ function renderLandlordListingCard(listing) {
         }
       } catch (err) {
         result.className = 'availability-result error';
-        result.textContent = err?.message || 'Error';
-        info(`Error: ${err?.message || err}`);
+        const message = extractErrorMessage(err, 'Error');
+        result.textContent = message;
+        info(`Error: ${message}`);
       }
     });
 
@@ -1920,9 +1918,10 @@ async function loadLandlordListings(landlordAddr, options = {}) {
       }
     } catch (err) {
       console.error('Failed to load Platform ABI for listings', err);
-      setMessage('Unable to load listings.');
-      info(err?.message ? `Error: ${err.message}` : 'Failed to load listings.');
-      notify({ message: 'Unable to load listings.', variant: 'error', role: 'landlord', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Unable to load listings.');
+      setMessage(message);
+      info(`Error: ${message}`);
+      notify({ message, variant: 'error', role: 'landlord', timeout: 6000 });
       throw err;
     }
 
@@ -1936,9 +1935,10 @@ async function loadLandlordListings(landlordAddr, options = {}) {
       addresses = Array.isArray(result) ? result : [];
     } catch (err) {
       console.error('Failed to load listing addresses', err);
-      setMessage('Unable to load listings.');
-      info(err?.message ? `Error: ${err.message}` : 'Unable to load listings.');
-      notify({ message: 'Unable to load listings.', variant: 'error', role: 'landlord', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Unable to load listings.');
+      setMessage(message);
+      info(`Error: ${message}`);
+      notify({ message, variant: 'error', role: 'landlord', timeout: 6000 });
       throw err;
     }
 
@@ -2233,7 +2233,7 @@ function createDepositTools(listing) {
     try {
       bookingId = parseBookingIdValue(bookingInput.value);
     } catch (err) {
-      setStatus(err?.message || 'Enter a valid booking ID.', 'error');
+      setStatus(extractErrorMessage(err, 'Enter a valid booking ID.'), 'error');
       return;
     }
     setStatus('Loading booking details…');
@@ -2254,7 +2254,7 @@ function createDepositTools(listing) {
       if (isUnknownBookingError(err)) {
         setStatus('Booking not found for that listing. Double-check the ID and try again.', 'warning');
       } else {
-        setStatus(err?.message || 'Unable to load booking details.', 'error');
+        setStatus(extractErrorMessage(err, 'Unable to load booking details.'), 'error');
       }
     } finally {
       updateButtonState();
@@ -2278,7 +2278,7 @@ function createDepositTools(listing) {
     try {
       tenantBps = parseTenantBpsValue(tenantInput.value);
     } catch (err) {
-      setStatus(err?.message || 'Enter the tenant share in basis points.', 'error');
+      setStatus(extractErrorMessage(err, 'Enter the tenant share in basis points.'), 'error');
       return;
     }
     let from;
@@ -2295,13 +2295,13 @@ function createDepositTools(listing) {
     try {
       await ensureArbitrum(provider);
     } catch (err) {
-      setStatus(err?.message || 'Switch to Arbitrum to continue.', 'error');
+      setStatus(extractErrorMessage(err, 'Switch to Arbitrum to continue.'), 'error');
       return;
     }
     try {
       await assertListingOwnership(listing.address, from);
     } catch (err) {
-      setStatus(err?.message || 'Connected wallet is not the landlord for this listing.', 'error');
+      setStatus(extractErrorMessage(err, 'Connected wallet is not the landlord for this listing.'), 'error');
       return;
     }
     const args = [state.currentBookingId, BigInt(tenantBps)];
@@ -2340,7 +2340,7 @@ function createDepositTools(listing) {
     } catch (err) {
       console.error('Deposit split proposal failed', err);
       const variant = isUserRejectedRequestError(err) ? 'warning' : 'error';
-      setStatus(err?.message || 'Failed to propose split.', variant);
+      setStatus(extractErrorMessage(err, 'Failed to propose split.'), variant);
     } finally {
       updateButtonState();
     }
@@ -2632,7 +2632,7 @@ function createTokenTools(listing) {
     try {
       bookingId = parseBookingIdValue(bookingInput.value);
     } catch (err) {
-      setStatus(err?.message || 'Enter a valid booking ID.', 'error');
+      setStatus(extractErrorMessage(err, 'Enter a valid booking ID.'), 'error');
       return;
     }
     setStatus('Loading booking details…');
@@ -2661,7 +2661,7 @@ function createTokenTools(listing) {
       if (isUnknownBookingError(err)) {
         setStatus('Booking not found for that listing. Double-check the ID and try again.', 'warning');
       } else {
-        setStatus(err?.message || 'Unable to load booking details.', 'error');
+        setStatus(extractErrorMessage(err, 'Unable to load booking details.'), 'error');
       }
     } finally {
       state.loading = false;
@@ -2697,7 +2697,7 @@ function createTokenTools(listing) {
       feeBps = parseTokenFeeBpsValue(values.fee);
       periodInfo = parseTokenPeriodOptionValue(values.period);
     } catch (err) {
-      setStatus(err?.message || 'Check your proposal inputs.', 'error');
+      setStatus(extractErrorMessage(err, 'Check your proposal inputs.'), 'error');
       return;
     }
     let from;
@@ -2714,13 +2714,13 @@ function createTokenTools(listing) {
     try {
       await ensureArbitrum(provider);
     } catch (err) {
-      setStatus(err?.message || 'Switch to Arbitrum to continue.', 'error');
+      setStatus(extractErrorMessage(err, 'Switch to Arbitrum to continue.'), 'error');
       return;
     }
     try {
       await assertListingOwnership(listing.address, from);
     } catch (err) {
-      setStatus(err?.message || 'Connected wallet is not the landlord for this listing.', 'error');
+      setStatus(extractErrorMessage(err, 'Connected wallet is not the landlord for this listing.'), 'error');
       return;
     }
     const args = [state.currentBookingId, totalSqmu, pricePerSqmu, BigInt(feeBps), periodInfo.value];
@@ -2733,7 +2733,7 @@ function createTokenTools(listing) {
         account: from,
       });
     } catch (err) {
-      const detail = err?.shortMessage || err?.message || 'Tokenisation proposal simulation failed.';
+      const detail = extractErrorMessage(err, 'Tokenisation proposal simulation failed.');
       setStatus(detail, 'error');
       return;
     }
@@ -2779,7 +2779,7 @@ function createTokenTools(listing) {
     } catch (err) {
       console.error('Tokenisation proposal failed', err);
       const variant = isUserRejectedRequestError(err) ? 'warning' : 'error';
-      setStatus(err?.message || 'Tokenisation proposal failed.', variant);
+      setStatus(extractErrorMessage(err, 'Tokenisation proposal failed.'), variant);
     } finally {
       state.loading = false;
       updateButtonState();

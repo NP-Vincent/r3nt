@@ -2,7 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, parseUnits } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
-import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
+import { requestWalletSendCalls, isUserRejectedRequestError, extractErrorMessage } from './wallet.js';
 import {
   RPC_URL,
   LISTING_ABI,
@@ -610,8 +610,9 @@ async function loadAgentData(address) {
   } catch (err) {
     console.error('Failed to load agent data', err);
     state.data = null;
-    setStatus(err?.message || 'Unable to load agent data.');
-    notify({ message: err?.message || 'Unable to load agent data.', variant: 'error', role: 'agent', timeout: 6000 });
+    const message = extractErrorMessage(err, 'Unable to load agent data.');
+    setStatus(message);
+    notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
     toggleSection(els.overviewCard, false);
     toggleSection(els.fundraisingCard, false);
     toggleSection(els.rentCard, false);
@@ -671,7 +672,7 @@ async function sendAgentTransaction(functionName, args, messages = {}, button) {
       notify({ message, variant: 'warning', role: 'agent', timeout: 5000 });
       return;
     }
-    const message = err?.message || 'Transaction failed.';
+    const message = extractErrorMessage(err, 'Transaction failed.');
     setStatus(message);
     notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
   } finally {
@@ -697,8 +698,9 @@ if (els.loadAgent) {
       await loadAgentData(address);
     } catch (err) {
       console.error('Failed to load agent', err);
-      setStatus(err?.message || 'Unable to load agent.');
-      notify({ message: err?.message || 'Unable to load agent.', variant: 'error', role: 'agent', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Unable to load agent.');
+      setStatus(message);
+      notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
     }
   });
 }
@@ -728,8 +730,9 @@ if (els.connect) {
     } catch (err) {
       console.error('Wallet connection failed', err);
       updateConnectedAccount(null);
-      setStatus(err?.message || 'Wallet connection failed.');
-      notify({ message: err?.message || 'Wallet connection failed.', variant: 'error', role: 'agent', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Wallet connection failed.');
+      setStatus(message);
+      notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
     }
   });
 }
@@ -751,8 +754,9 @@ if (els.fundraisingForm) {
       }
     } catch (err) {
       console.error('Fundraising input error', err);
-      setStatus(err?.message || 'Invalid fundraising parameters.');
-      notify({ message: err?.message || 'Invalid fundraising parameters.', variant: 'error', role: 'agent', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Invalid fundraising parameters.');
+      setStatus(message);
+      notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
       return;
     }
     const button = els.fundraisingForm.querySelector('button[type="submit"]');
@@ -785,8 +789,9 @@ if (els.collectRentForm) {
       amount = parseUsdcInput(els.rentAmount?.value, 'Gross amount');
     } catch (err) {
       console.error('Collect rent input error', err);
-      setStatus(err?.message || 'Invalid rent details.');
-      notify({ message: err?.message || 'Invalid rent details.', variant: 'error', role: 'agent', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Invalid rent details.');
+      setStatus(message);
+      notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
       return;
     }
     const button = els.collectRentForm.querySelector('button[type="submit"]');
@@ -808,8 +813,9 @@ if (els.withdrawFeesForm) {
       recipient = normaliseAddress(els.withdrawRecipient?.value, { optional: true });
     } catch (err) {
       console.error('Withdraw fees input error', err);
-      setStatus(err?.message || 'Invalid recipient address.');
-      notify({ message: err?.message || 'Invalid recipient address.', variant: 'error', role: 'agent', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Invalid recipient address.');
+      setStatus(message);
+      notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
       return;
     }
     const button = els.withdrawFeesForm.querySelector('button[type="submit"]');
@@ -839,8 +845,9 @@ if (els.subBookingForm) {
       rent = parseUsdcInput(els.subRent?.value, 'Expected rent');
     } catch (err) {
       console.error('Create sub-booking input error', err);
-      setStatus(err?.message || 'Invalid sub-booking details.');
-      notify({ message: err?.message || 'Invalid sub-booking details.', variant: 'error', role: 'agent', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Invalid sub-booking details.');
+      setStatus(message);
+      notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
       return;
     }
     const button = els.subBookingForm.querySelector('button[type="submit"]');
@@ -868,8 +875,9 @@ if (els.collectSubRentForm) {
       markComplete = (els.collectSubComplete?.value ?? 'true') === 'true';
     } catch (err) {
       console.error('Collect sublet rent input error', err);
-      setStatus(err?.message || 'Invalid sublet rent details.');
-      notify({ message: err?.message || 'Invalid sublet rent details.', variant: 'error', role: 'agent', timeout: 6000 });
+      const message = extractErrorMessage(err, 'Invalid sublet rent details.');
+      setStatus(message);
+      notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
       return;
     }
     const button = els.collectSubRentForm.querySelector('button[type="submit"]');

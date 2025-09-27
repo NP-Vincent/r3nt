@@ -2,7 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './tools.js';
-import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
+import { requestWalletSendCalls, isUserRejectedRequestError, extractErrorMessage } from './wallet.js';
 import { notify, mountNotificationCenter } from './notifications.js';
 import createBackController from './back-navigation.js';
 import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
@@ -279,20 +279,6 @@ function decodeBytes32ToString(value, precision) {
 
 
 
-
-function extractErrorMessage(error) {
-  let current = error;
-  const seen = new Set();
-  while (current && typeof current === 'object' && !seen.has(current)) {
-    seen.add(current);
-    const short = typeof current.shortMessage === 'string' ? current.shortMessage.trim() : '';
-    if (short) return short;
-    const message = typeof current.message === 'string' ? current.message.trim() : '';
-    if (message) return message;
-    current = current.cause;
-  }
-  return '';
-}
 
 function normaliseAddress(value) {
   return typeof value === 'string' ? value.toLowerCase() : '';
@@ -1516,7 +1502,7 @@ async function submitTokenisationProposalForTenant(record, { amount, totalSqmu, 
         account: from,
       });
     } catch (err) {
-      const detail = extractErrorMessage(err) || 'Tokenisation proposal not available right now.';
+      const detail = extractErrorMessage(err, 'Tokenisation proposal not available right now.');
       notify({ message: `Unable to submit tokenisation proposal: ${detail}`, variant: 'error', role: 'tenant', timeout: 6500 });
       return false;
     }
@@ -1564,7 +1550,7 @@ async function submitTokenisationProposalForTenant(record, { amount, totalSqmu, 
   } catch (err) {
     console.error('Tokenisation proposal failed', err);
     if (!isUserRejectedRequestError(err)) {
-      const message = extractErrorMessage(err) || err?.message || 'Tokenisation proposal failed.';
+      const message = extractErrorMessage(err, 'Tokenisation proposal failed.');
       els.status.textContent = `Tokenisation proposal failed: ${message}`;
       notify({ message: `Tokenisation proposal failed: ${message}`, variant: 'error', role: 'tenant', timeout: 6500 });
     }
@@ -1664,7 +1650,7 @@ async function cancelBookingForTenant(recordKeyOrRecord, button) {
       });
     } catch (err) {
       console.error('Cancellation simulation failed', err);
-      const detail = extractErrorMessage(err) || 'Cancellation not available right now.';
+      const detail = extractErrorMessage(err, 'Cancellation not available right now.');
       const message = detail.toLowerCase().includes('not authorised')
         ? 'Cancellation currently requires landlord or platform approval.'
         : detail;
@@ -1727,7 +1713,7 @@ async function cancelBookingForTenant(recordKeyOrRecord, button) {
       els.status.textContent = 'Cancellation cancelled by user.';
       notify({ message: 'Cancellation request cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
     } else {
-      const message = extractErrorMessage(err) || err?.message || err;
+      const message = extractErrorMessage(err, 'Unknown error');
       els.status.textContent = `Cancellation failed: ${message}`;
       notify({
         message: message ? `Cancellation failed: ${message}` : 'Cancellation failed.',
@@ -2487,7 +2473,8 @@ els.buy.onclick = async () => {
       els.status.textContent = 'Purchase cancelled by user.';
       return;
     }
-    els.status.textContent = `Error: ${err?.message || err}`;
+    const message = extractErrorMessage(err, 'Unknown error');
+    els.status.textContent = `Error: ${message}`;
   }
 };
 
@@ -2627,7 +2614,7 @@ async function payRent(record, options = {}) {
       els.status.textContent = 'Rent payment cancelled by user.';
       notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
     } else {
-      const message = extractErrorMessage(err) || err?.message || 'Rent payment failed.';
+      const message = extractErrorMessage(err, 'Rent payment failed.');
       els.status.textContent = `Rent payment failed: ${message}`;
       notify({ message: `Rent payment failed: ${message}`, variant: 'error', role: 'tenant', timeout: 6500 });
     }
