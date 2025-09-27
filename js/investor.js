@@ -873,6 +873,28 @@ function renderTokenisation(entries) {
     card.classList.add('tokenisation-invest-card');
     card.dataset.listingAddress = entry.listingAddress;
 
+    const sqmuInput = card.querySelector('input[name="amount"]');
+    const totalDisplay = card.querySelector('[data-role="total-usdc"]');
+    const price = sale.pricePerSqmu;
+    if (sqmuInput && totalDisplay && typeof price === 'bigint') {
+      const updateTotal = () => {
+        const raw = sqmuInput.value != null ? sqmuInput.value.trim() : '';
+        if (!raw) {
+          totalDisplay.textContent = '0 USDC';
+          return;
+        }
+        try {
+          const amount = BigInt(raw);
+          const total = amount * price;
+          totalDisplay.textContent = `${formatUsdc(total)} USDC`;
+        } catch {
+          totalDisplay.textContent = '0 USDC';
+        }
+      };
+      sqmuInput.addEventListener('input', updateTotal, { once: false });
+      updateTotal();
+    }
+
     const propertyTitle = (entry.propertyTitle || '').trim() || shortAddress(entry.listingAddress);
     const header = document.createElement('div');
     header.className = 'data-card-header';

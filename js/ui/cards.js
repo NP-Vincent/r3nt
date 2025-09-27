@@ -94,6 +94,17 @@ export function BookingCard({
 }
 
 export function TokenisationCard({ bookingId, totalSqmu, soldSqmu, pricePerSqmu, feeBps, period, mode = 'invest', onSubmit }) {
+  const amountInput = el('input', { name: 'amount', type: 'number', step: '1', min: '1', required: true });
+  const amountLabelChildren = [
+    el('span', {}, mode === 'propose' ? 'Total SQMU' : 'Amount (SQMU)'),
+    amountInput,
+  ];
+  if (mode === 'invest') {
+    amountLabelChildren.push(
+      el('div', { class: 'muted total-usdc', dataset: { role: 'total-usdc' } }, '0 USDC'),
+    );
+  }
+
   const form = el('form', { class: 'token-proposal-card card' }, [
     el('h3', {}, mode === 'propose' ? 'Propose tokenisation' : 'Invest in SQMU-R'),
     el('div', { class: 'card-meta' }, [
@@ -104,10 +115,7 @@ export function TokenisationCard({ bookingId, totalSqmu, soldSqmu, pricePerSqmu,
       feeBps != null ? Pill(fmt.bps(feeBps)) : null,
       period ? Pill(periodLabel(period)) : null,
     ].filter(Boolean)),
-    el('label', {}, [
-      el('span', {}, mode === 'propose' ? 'Total SQMU' : 'Amount (SQMU)'),
-      el('input', { name: 'amount', type: 'number', step: '1', min: '1', required: true }),
-    ]),
+    el('label', {}, amountLabelChildren),
     mode === 'propose'
       ? el('label', {}, [
           el('span', {}, 'Price per SQMU (USDC)'),
