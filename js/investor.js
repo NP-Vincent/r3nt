@@ -1338,7 +1338,7 @@ async function investInSale(entry, amountValue, form) {
       allowance = 0n;
     }
 
-    const needsApproval = allowance < totalCost;
+    let needsApproval = allowance < totalCost;
     traceInvestmentStep('allowance:read:complete', {
       allowance: allowance.toString(),
       needsApproval,
@@ -1353,10 +1353,14 @@ async function investInSale(entry, amountValue, form) {
       });
       calls.push({ to: USDC_ADDRESS, data: approveData });
     }
+    const investCallIndex = calls.length;
     calls.push(investCall);
+    const approvalCallIndex = needsApproval ? 0 : null;
     traceInvestmentStep('assemble:calls:complete', {
       calls: calls.length,
       includesApproval: needsApproval,
+      approvalCallIndex: approvalCallIndex ?? undefined,
+      investCallIndex,
     });
 
     const submitBtn = form?.querySelector('button[type="submit"]');
@@ -1423,6 +1427,36 @@ async function investInSale(entry, amountValue, form) {
       for (const index of extractSuccessfulIndexes(partialExecution)) {
         executedIndexes.add(index);
       }
+      const previousNeedsApproval = needsApproval;
+      try {
+        traceInvestmentStep('allowance:recheck:start', {
+          previousNeedsApproval,
+          executedIndexes: Array.from(executedIndexes),
+        });
+        const refreshedAllowanceRaw = await pub.readContract({
+          address: USDC_ADDRESS,
+          abi: erc20Abi,
+          functionName: 'allowance',
+          args: [from, sale.listingAddress],
+        });
+        const refreshedAllowance = toBigInt(refreshedAllowanceRaw, allowance);
+        allowance = refreshedAllowance;
+        const refreshedNeedsApproval = refreshedAllowance < totalCost;
+        traceInvestmentStep('allowance:recheck:complete', {
+          refreshedAllowance: refreshedAllowance.toString(),
+          refreshedNeedsApproval,
+        });
+        if (previousNeedsApproval && !refreshedNeedsApproval) {
+          traceInvestmentStep('allowance:recheck:skip-approval', {
+            reason: 'allowance-updated',
+            previousNeedsApproval,
+            refreshedNeedsApproval,
+          });
+        }
+        needsApproval = refreshedNeedsApproval;
+      } catch (err) {
+        traceInvestmentStep('error', { stage: 'allowance:recheck', error: err });
+      }
       try {
         traceInvestmentStep('fallback:sequential:start', {
           needsApproval,
@@ -1438,8 +1472,8 @@ async function investInSale(entry, amountValue, form) {
         setStatus(fallbackStatus);
         notify({ message: fallbackStatus, variant: 'info', role: 'investor', timeout: 5000 });
         const replayed = [];
-        const approvalIndex = needsApproval ? 0 : null;
-        const investIndex = needsApproval ? 1 : 0;
+        const approvalIndex = approvalCallIndex;
+        const investIndex = investCallIndex;
         if (needsApproval && approveData && approvalIndex !== null && !executedIndexes.has(approvalIndex)) {
           traceInvestmentStep('fallback:sequential:approval', { action: 'send' });
           setStatus(`Approve USDC (${formattedCost} USDC).`);
