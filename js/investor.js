@@ -27,6 +27,9 @@ const PERIOD_LABELS = {
   2: 'Weekly',
   3: 'Monthly',
 };
+const BOOKING_STATUS = {
+  ACTIVE: 1,
+};
 
 const els = {
   connect: document.getElementById('connect'),
@@ -900,6 +903,10 @@ function renderTokenisation(entries) {
       continue;
     }
 
+    const isActive = normaliseStatusValue(entry.status) === BOOKING_STATUS.ACTIVE;
+    const statusLabel = formatBookingStatus(entry.status);
+    const statusClass = getBookingStatusClass(entry.status);
+
     const priceDisplay = Number(sale.pricePerSqmu ?? 0n) / Number(USDC_SCALAR);
     const card = TokenisationCard({
       bookingId: entry.bookingId,
@@ -909,7 +916,19 @@ function renderTokenisation(entries) {
       feeBps: sale.feeBps,
       period: sale.periodLabel,
       mode: 'invest',
-      onSubmit: ({ amount }) => investInSale(entry, amount, card),
+      onSubmit: ({ amount }) => {
+        if (!isActive) {
+          setStatus('Investments are disabled for inactive bookings.');
+          notify({
+            message: 'This booking is not active. Investments are disabled.',
+            variant: 'warning',
+            role: 'investor',
+            timeout: 5000,
+          });
+          return;
+        }
+        return investInSale(entry, amount, card);
+      },
     });
 
     card.classList.add('tokenisation-invest-card');
@@ -945,6 +964,15 @@ function renderTokenisation(entries) {
     title.textContent = propertyTitle;
     header.appendChild(title);
     header.appendChild(createBookingBadge(entry.bookingId));
+    if (!isActive) {
+      const statusBadge = document.createElement('span');
+      statusBadge.className = 'booking-status-badge';
+      if (statusClass) {
+        statusBadge.classList.add(`booking-status-${statusClass}`);
+      }
+      statusBadge.textContent = statusLabel;
+      header.appendChild(statusBadge);
+    }
     card.insertBefore(header, card.firstChild);
 
     const descriptionText = (() => {
@@ -978,7 +1006,21 @@ function renderTokenisation(entries) {
 
     const submitBtn = card.querySelector('button[type="submit"]');
     const amountInput = card.querySelector('input[name="amount"]');
-    if (remaining <= 0n) {
+    if (!isActive) {
+      if (submitBtn) {
+        submitBtn.textContent = statusLabel;
+        submitBtn.disabled = true;
+        submitBtn.classList.add('secondary');
+      }
+      if (amountInput) {
+        amountInput.disabled = true;
+        amountInput.value = '';
+      }
+      const inactiveNotice = document.createElement('div');
+      inactiveNotice.className = 'muted';
+      inactiveNotice.textContent = `${statusLabel} — investments are disabled.`;
+      card.appendChild(inactiveNotice);
+    } else if (remaining <= 0n) {
       if (submitBtn) {
         submitBtn.textContent = 'Sold out';
         submitBtn.disabled = true;
@@ -1052,6 +1094,7 @@ function renderDashboards(results) {
   const holdings = results.filter((entry) => entry.balance > 0n);
   const tokenised = results.filter((entry) => {
     if (!entry.tokenised) return false;
+    if (normaliseStatusValue(entry.status) !== BOOKING_STATUS.ACTIVE) return false;
     const total = typeof entry.totalSqmu === 'bigint' ? entry.totalSqmu : BigInt(entry.totalSqmu || 0);
     const sold = typeof entry.soldSqmu === 'bigint' ? entry.soldSqmu : BigInt(entry.soldSqmu || 0);
     return total <= 0n || sold < total;
