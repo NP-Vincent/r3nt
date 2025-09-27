@@ -44,17 +44,23 @@ export function createOpenMapButton(options = {}) {
   );
 
   mapLink.addEventListener('click', (event) => {
+    event.preventDefault();
+
     try {
       const win = window.open(href, '_blank', 'noopener,noreferrer');
       if (win) {
-        event.preventDefault();
         win.opener = null;
         try {
           win.focus();
         } catch (_) {
           // ignore focus errors
         }
+        return;
       }
+
+      // Popup blockers may prevent window.open from succeeding; fall back to
+      // navigating in the current tab so the user still reaches the map.
+      window.location.assign(href);
     } catch (err) {
       if (typeof onError === 'function') {
         onError(err);
