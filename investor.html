@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>r3nt — Investor Dashboards</title>
+  <link rel="stylesheet" href="./styles/theme.css" />
+
+  <script src="./js/dev-settings.js"></script>
+  <script src="./js/dev-error-console.js"></script>
+</head>
+<body class="page-narrow">
+  <header>
+    <div class="brand">r3nt by SQMU</div>
+  </header>
+
+  <div class="muted beta-note">early beta.</div>
+
+  <nav>
+    <button type="button" class="back-button" data-back-button hidden aria-label="Go back">
+      <span aria-hidden="true">←</span>
+      Back
+    </button>
+    <a href="./index.html">Home</a>
+    <a href="./tenant.html">Tenant</a>
+    <a href="./landlord.html">Landlord</a>
+    <a href="./investor.html">Investor</a>
+    <a href="./agent.html">Agent</a>
+    <span class="version-badge" data-version></span>
+  </nav>
+  <div id="notificationTray" class="notification-tray"></div>
+  <h1>Investor dashboards</h1>
+  <p class="lead">Track tokenised bookings, SQMU-R holdings and live rent accrual across the r3nt platform.</p>
+  <button id="connect">Connect wallet</button>
+  <div id="walletAddress" class="muted" style="margin-top:6px;">Not connected</div>
+  <div id="status" class="status">Loading…</div>
+
+  <section class="card">
+    <h2>Your SQMU-R holdings</h2>
+    <p>Holdings with on-chain SQMU-R balances appear here along with rent details.</p>
+    <div id="holdingsList" class="data-list">
+      <div class="empty-state">Connect your wallet to load holdings.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Tokenisation overview</h2>
+    <p>All tokenised bookings, even those you do not own, to keep an eye on fundraising progress.</p>
+    <div id="tokenisationDashboard" class="data-list">
+      <div class="empty-state">Connect your wallet to inspect tokenised bookings.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Rent accrual</h2>
+    <p>Claimable rent across your SQMU-R holdings. Claim in a single click when available.</p>
+    <div id="rentDashboard" class="data-list">
+      <div class="empty-state">No claimable rent yet.</div>
+    </div>
+  </section>
+
+  <footer>
+    r3nt by SQMU. USDC. Arbitrum.
+  </footer>
+
+  <script type="module" src="./js/investor.js"></script>
+</body>
+</html>
