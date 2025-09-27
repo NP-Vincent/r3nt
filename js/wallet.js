@@ -159,19 +159,240 @@ export function buildWalletSendCallsParamAttempts(options = {}) {
   return attempts;
 }
 
+const USER_REJECTION_NUMERIC_CODES = new Set([4001]);
+const USER_REJECTION_STRING_CODES = new Set([
+  '4001',
+  'action_rejected',
+  'user_rejected_request',
+  'userrejectedrequest',
+]);
+const USER_REJECTION_NAMES = new Set([
+  'userrejectedrequesterror',
+  'userrejectedrequest',
+  'provideruserrejectedrequesterror',
+  'provideruserrejectedrequest',
+  'actionrejectederror',
+  'actionrejected',
+]);
+const USER_REJECTION_MESSAGE_PATTERNS = [
+  /user[^a-z0-9]*rejected/i,
+  /user[^a-z0-9]*denied/i,
+  /user[^a-z0-9]*cancell?ed/i,
+  /rejected[^a-z0-9]*by[^a-z0-9]*user/i,
+  /denied[^a-z0-9]*by[^a-z0-9]*user/i,
+  /action[^a-z0-9]*rejected[^a-z0-9]*by[^a-z0-9]*user/i,
+];
+const ERROR_NESTED_KEYS = [
+  'cause',
+  'error',
+  'data',
+  'details',
+  'errors',
+  'innerError',
+  'originalError',
+  'reason',
+  'response',
+  'source',
+  'value',
+];
+
+function normalizeCode(value) {
+  if (value == null) return '';
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (typeof value === 'string') {
+    return value.trim().toLowerCase();
+  }
+  return '';
+}
+
+function matchesUserRejectionMessage(value) {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return USER_REJECTION_MESSAGE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
 export function isUserRejectedRequestError(error) {
-  if (!error) return false;
-  const code = Number(error.code);
-  if (Number.isFinite(code) && code === 4001) return true;
-  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
-  if (!message) return false;
-  return (
-    message.includes('user rejected') ||
-    message.includes('user denied') ||
-    message.includes('request rejected') ||
-    message.includes('denied transaction') ||
-    message.includes('transaction rejected')
-  );
+  if (error == null) return false;
+
+  const visited = new Set();
+  const queue = [error];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null) {
+      continue;
+    }
+
+    if (typeof current === 'string') {
+      if (matchesUserRejectionMessage(current)) {
+        return true;
+      }
+      continue;
+    }
+
+    if (typeof current !== 'object') {
+      continue;
+    }
+
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+
+    const code = normalizeCode(current.code ?? current.status ?? current.errorCode);
+    if (code) {
+      if (USER_REJECTION_STRING_CODES.has(code)) return true;
+      const numeric = Number(code);
+      if (Number.isFinite(numeric) && USER_REJECTION_NUMERIC_CODES.has(numeric)) return true;
+    }
+
+    const name = typeof current.name === 'string' ? current.name.trim().toLowerCase() : '';
+    if (name && USER_REJECTION_NAMES.has(name)) {
+      return true;
+    }
+
+    if (matchesUserRejectionMessage(current.shortMessage)) return true;
+    if (matchesUserRejectionMessage(current.message)) return true;
+    if (matchesUserRejectionMessage(current.reason)) return true;
+    if (matchesUserRejectionMessage(current.details)) return true;
+
+    for (const key of ERROR_NESTED_KEYS) {
+      if (!(key in current)) continue;
+      const value = current[key];
+      if (value == null) continue;
+      if (typeof value === 'string') {
+        if (matchesUserRejectionMessage(value)) {
+          return true;
+        }
+        continue;
+      }
+      if (Array.isArray(value)) {
+        for (const entry of value) {
+          if (entry != null) queue.push(entry);
+        }
+        continue;
+      }
+      if (typeof value === 'object') {
+        queue.push(value);
+      }
+    }
+  }
+
+  return false;
+}
+
+function pushMessage(messages, value) {
+  if (typeof value !== 'string') return;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '[object Object]') return;
+  messages.push(trimmed);
+}
+
+function parseJsonBody(body, messages, visited) {
+  if (typeof body !== 'string') return;
+  try {
+    const parsed = JSON.parse(body);
+    traverseErrorForMessages(parsed, messages, visited);
+  } catch {}
+}
+
+function traverseErrorForMessages(value, messages, visited) {
+  if (value == null) return;
+
+  if (typeof value === 'string') {
+    pushMessage(messages, value);
+    return;
+  }
+
+  if (typeof value !== 'object') {
+    return;
+  }
+
+  if (visited.has(value)) {
+    return;
+  }
+  visited.add(value);
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => traverseErrorForMessages(entry, messages, visited));
+    return;
+  }
+
+  pushMessage(messages, value.shortMessage);
+  pushMessage(messages, value.message);
+  pushMessage(messages, value.reason);
+
+  if (typeof value.details === 'string') {
+    pushMessage(messages, value.details);
+  } else if (typeof value.details === 'object') {
+    traverseErrorForMessages(value.details, messages, visited);
+  }
+
+  if (typeof value.error === 'string') {
+    pushMessage(messages, value.error);
+  } else if (typeof value.error === 'object') {
+    traverseErrorForMessages(value.error, messages, visited);
+  }
+
+  if (typeof value.data === 'string') {
+    pushMessage(messages, value.data);
+  } else if (typeof value.data === 'object') {
+    traverseErrorForMessages(value.data, messages, visited);
+  }
+
+  if (Array.isArray(value.errors)) {
+    value.errors.forEach((item) => traverseErrorForMessages(item, messages, visited));
+  }
+
+  if (Array.isArray(value.details)) {
+    value.details.forEach((item) => traverseErrorForMessages(item, messages, visited));
+  }
+
+  if (typeof value.body === 'string') {
+    pushMessage(messages, value.body);
+    parseJsonBody(value.body, messages, visited);
+  }
+
+  if (typeof value.error?.body === 'string') {
+    pushMessage(messages, value.error.body);
+    parseJsonBody(value.error.body, messages, visited);
+  }
+
+  if (typeof value.cause === 'string' || typeof value.cause === 'object') {
+    traverseErrorForMessages(value.cause, messages, visited);
+  }
+
+  if (typeof value.originalError === 'object') {
+    traverseErrorForMessages(value.originalError, messages, visited);
+  }
+}
+
+export function extractErrorMessage(error, fallback = 'Unknown error') {
+  const messages = [];
+  traverseErrorForMessages(error, messages, new Set());
+  const primary = messages.find(Boolean);
+  if (primary) {
+    return primary;
+  }
+  if (typeof error === 'string') {
+    const trimmed = error.trim();
+    if (trimmed) return trimmed;
+  }
+  if (error != null) {
+    try {
+      const stringified = String(error);
+      if (stringified && stringified !== '[object Object]') {
+        return stringified;
+      }
+    } catch {}
+  }
+  return fallback;
 }
 
 export function isMethodNotFoundError(error) {

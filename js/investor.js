@@ -2,7 +2,7 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
-import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
+import { requestWalletSendCalls, isUserRejectedRequestError, extractErrorMessage } from './wallet.js';
 import {
   RPC_URL,
   PLATFORM_ADDRESS,
@@ -1138,7 +1138,8 @@ async function loadInvestorData(account, options = {}) {
   } catch (err) {
     console.error('Failed to load investor data', err);
     setStatus('Unable to load investor data.');
-    notify({ message: err?.message || 'Unable to load investor data.', variant: 'error', role: 'investor', timeout: 6000 });
+    const message = extractErrorMessage(err, 'Unable to load investor data.');
+    notify({ message, variant: 'error', role: 'investor', timeout: 6000 });
     return false;
   } finally {
     investorDataLoading = false;
@@ -1399,7 +1400,7 @@ async function investInSale(entry, amountValue, form) {
       notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
     }
-    const message = err?.message || 'Investment failed.';
+    const message = extractErrorMessage(err, 'Investment failed.');
     setStatus(message);
     notify({ message, variant: 'error', role: 'investor', timeout: 6000 });
   } finally {
@@ -1452,8 +1453,9 @@ async function claimRent(entry, button) {
       notify({ message: 'Claim cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
       return;
     }
-    setStatus(err?.message || 'Claim failed.');
-    notify({ message: err?.message || 'Claim failed.', variant: 'error', role: 'investor', timeout: 6000 });
+    const message = extractErrorMessage(err, 'Claim failed.');
+    setStatus(message);
+    notify({ message, variant: 'error', role: 'investor', timeout: 6000 });
   } finally {
     if (button) button.disabled = false;
   }
@@ -1477,8 +1479,9 @@ els.connect?.addEventListener('click', async () => {
   } catch (err) {
     console.error('Wallet connection failed', err);
     updateConnectedAccount(null);
-    setStatus(err?.message || 'Wallet connection failed.');
-    notify({ message: err?.message || 'Wallet connection failed.', variant: 'error', role: 'investor', timeout: 6000 });
+    const message = extractErrorMessage(err, 'Wallet connection failed.');
+    setStatus(message);
+    notify({ message, variant: 'error', role: 'investor', timeout: 6000 });
   }
 });
 
