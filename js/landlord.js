@@ -1404,7 +1404,6 @@ function renderLandlordListingCard(listing) {
   const bookingsRefresh = el('button', {
     type: 'button',
     class: 'inline-button small',
-    disabled: true,
   }, 'Refresh');
   const bookingsStatus = el('div', { class: 'bookings-status' }, 'Press refresh to load bookings.');
   const bookingsList = el('div', { class: 'bookings-list' });
