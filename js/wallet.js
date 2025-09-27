@@ -512,14 +512,19 @@ export async function requestWalletSendCalls(provider, options = {}) {
   if (attempts.length === 0) {
     throw new Error('No calls provided for wallet_sendCalls.');
   }
+  let promptlessErrorRecord;
+  let lastError;
   for (let i = 0; i < attempts.length; i++) {
     const params = attempts[i];
     try {
       const result = await provider.request({ method: 'wallet_sendCalls', params });
-      return { result, unsupported: false };
+      return { result, unsupported: false, reason: undefined };
     } catch (error) {
       if (isWalletSendCallsPromptlessRejection(error)) {
-        return { result: undefined, unsupported: true, error, reason: 'promptless-user-rejection' };
+        if (!promptlessErrorRecord) {
+          promptlessErrorRecord = { error, reason: 'promptless-user-rejection' };
+        }
+        continue;
       }
       if (isUserRejectedRequestError(error)) {
         throw error;
@@ -527,10 +532,19 @@ export async function requestWalletSendCalls(provider, options = {}) {
       if (isMethodNotFoundError(error)) {
         return { result: undefined, unsupported: true, error, reason: 'method-not-found' };
       }
-      if (i === attempts.length - 1) {
-        throw error;
-      }
+      lastError = error;
     }
   }
-  return { result: undefined, unsupported: false };
+  if (promptlessErrorRecord) {
+    return {
+      result: undefined,
+      unsupported: true,
+      error: promptlessErrorRecord.error,
+      reason: promptlessErrorRecord.reason,
+    };
+  }
+  if (lastError) {
+    throw lastError;
+  }
+  return { result: undefined, unsupported: false, reason: undefined };
 }
