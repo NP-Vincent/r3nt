@@ -2,7 +2,12 @@ import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { createPublicClient, http, encodeFunctionData, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
-import { requestWalletSendCalls, isUserRejectedRequestError, extractErrorMessage } from './wallet.js';
+import {
+  requestWalletSendCalls,
+  isUserRejectedRequestError,
+  extractErrorMessage,
+  isMethodNotFoundError,
+} from './wallet.js';
 import {
   RPC_URL,
   PLATFORM_ADDRESS,
@@ -147,6 +152,186 @@ function extractSuccessfulIndexes(partial) {
     indexes.push(index);
   }
   return indexes;
+}
+
+const walletSendCallsCapabilityCache = new WeakMap();
+
+function parseCapabilityBoolean(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const normalised = value.trim().toLowerCase();
+    if (normalised === 'true') return true;
+    if (normalised === 'false') return false;
+  }
+  if (typeof value === 'number') {
+    if (value === 0) return false;
+    if (value === 1) return true;
+  }
+  return null;
+}
+
+function inspectWalletSendCallsCapability(capabilities) {
+  if (capabilities == null) {
+    return { supported: null };
+  }
+  const visited = new Set();
+  const queue = [capabilities];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null) continue;
+    if (typeof current !== 'object') continue;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    if (Array.isArray(current)) {
+      for (const entry of current) {
+        if (entry != null) queue.push(entry);
+      }
+      continue;
+    }
+    for (const [key, value] of Object.entries(current)) {
+      if (key === 'wallet_sendCalls') {
+        if (value == null) {
+          return { supported: true };
+        }
+        if (typeof value === 'boolean') {
+          return { supported: value };
+        }
+        if (typeof value === 'string' || typeof value === 'number') {
+          const parsed = parseCapabilityBoolean(value);
+          if (parsed !== null) {
+            return { supported: parsed };
+          }
+          return { supported: Boolean(value) };
+        }
+        if (typeof value === 'object') {
+          if ('supported' in value) {
+            const parsed = parseCapabilityBoolean(value.supported);
+            if (parsed !== null) {
+              return { supported: parsed };
+            }
+          }
+          if ('enabled' in value) {
+            const parsed = parseCapabilityBoolean(value.enabled);
+            if (parsed !== null) {
+              return { supported: parsed };
+            }
+          }
+          return { supported: true };
+        }
+        return { supported: Boolean(value) };
+      }
+      if (value != null && typeof value === 'object') {
+        queue.push(value);
+      }
+    }
+  }
+  return { supported: null };
+}
+
+async function detectWalletSendCallsSupport(p) {
+  if (!p || typeof p.request !== 'function') {
+    return { supported: false, reason: 'no-provider' };
+  }
+  const cached = walletSendCallsCapabilityCache.get(p);
+  if (cached) {
+    return cached;
+  }
+  let supported = null;
+  let reason = null;
+  try {
+    const capabilities = await p.request({ method: 'wallet_getCapabilities' });
+    const inspected = inspectWalletSendCallsCapability(capabilities);
+    supported = inspected.supported;
+    if (supported === false && !reason) {
+      reason = 'capability-disabled';
+    }
+  } catch (err) {
+    if (isMethodNotFoundError(err)) {
+      supported = false;
+      reason = 'method-not-found';
+    } else if (isUserRejectedRequestError(err)) {
+      supported = null;
+      reason = 'user-rejected-capabilities';
+    } else {
+      supported = false;
+      reason = 'capabilities-error';
+    }
+  }
+  const record = { supported, reason, checkedAt: Date.now() };
+  walletSendCallsCapabilityCache.set(p, record);
+  return record;
+}
+
+function buildConfirmationMessage({ batched, requiresApproval, requiresInvest, formattedCost }) {
+  if (batched && requiresApproval && requiresInvest) {
+    return `Confirm the combined approval and investment (${formattedCost} USDC) in a single wallet prompt.`;
+  }
+  if (requiresApproval && requiresInvest) {
+    return `Your wallet will prompt twice: approve USDC (${formattedCost} USDC) then confirm the investment.`;
+  }
+  if (requiresApproval) {
+    if (batched) {
+      return `Confirm the USDC approval (${formattedCost} USDC) in your wallet.`;
+    }
+    return `Your wallet will prompt once to approve USDC (${formattedCost} USDC).`;
+  }
+  if (requiresInvest) {
+    return `Your wallet will prompt once to confirm the investment (${formattedCost} USDC).`;
+  }
+  return 'Finalising investment…';
+}
+
+async function executeSequentialInvestmentFlow(options) {
+  const {
+    provider: p,
+    from,
+    needsApproval,
+    approveData,
+    investData,
+    saleAddress,
+    formattedCost,
+    approvalCallIndex,
+    investCallIndex,
+    executedIndexes = new Set(),
+    tracePrefix = 'sequential',
+    startDetails,
+  } = options || {};
+
+  const executed = executedIndexes instanceof Set ? executedIndexes : new Set(executedIndexes || []);
+  traceInvestmentStep(`${tracePrefix}:start`, {
+    needsApproval,
+    formattedCost,
+    executedIndexes: Array.from(executed),
+    ...(startDetails && typeof startDetails === 'object' ? startDetails : {}),
+  });
+  const replayed = [];
+
+  if (needsApproval && approveData && approvalCallIndex !== null && !executed.has(approvalCallIndex)) {
+    traceInvestmentStep(`${tracePrefix}:approval`, { action: 'send' });
+    setStatus(`Approve USDC (${formattedCost} USDC).`);
+    await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+    replayed.push('approval');
+  } else if (needsApproval && approvalCallIndex !== null) {
+    traceInvestmentStep(`${tracePrefix}:approval`, { action: 'skip', reason: 'already-executed' });
+  }
+
+  if (!executed.has(investCallIndex)) {
+    traceInvestmentStep(`${tracePrefix}:invest`, { action: 'send' });
+    setStatus(`Confirm investment (${formattedCost} USDC).`);
+    await p.request({ method: 'eth_sendTransaction', params: [{ from, to: saleAddress, data: investData }] });
+    replayed.push('invest');
+  } else {
+    traceInvestmentStep(`${tracePrefix}:invest`, { action: 'skip', reason: 'already-executed' });
+  }
+
+  traceInvestmentStep(`${tracePrefix}:success`, {
+    replayed,
+    skippedIndexes: Array.from(executed),
+  });
+
+  return { replayed };
 }
 
 function isDevConsoleOpen(settings) {
@@ -1365,60 +1550,112 @@ async function investInSale(entry, amountValue, form) {
 
     const submitBtn = form?.querySelector('button[type="submit"]');
     if (submitBtn) submitBtn.disabled = true;
-    setStatus(
-      needsApproval
-        ? `Submitting USDC approval and investment (${formattedCost} USDC)…`
-        : `Submitting investment (${formattedCost} USDC)…`
-    );
+    const callCount = calls.length;
+    let walletCapability = { supported: null, reason: null };
+    if (callCount > 1) {
+      walletCapability = await detectWalletSendCallsSupport(p);
+    }
+    traceInvestmentStep('wallet-send:capability', {
+      callCount,
+      includesApproval: needsApproval,
+      supported: walletCapability.supported ?? null,
+      reason: walletCapability.reason || undefined,
+    });
+    const shouldUseWalletSendCalls = callCount > 1 && walletCapability.supported !== false;
+    const confirmationMessage = buildConfirmationMessage({
+      batched: shouldUseWalletSendCalls,
+      requiresApproval: needsApproval,
+      requiresInvest: true,
+      formattedCost,
+    });
+    if (confirmationMessage) {
+      setStatus(confirmationMessage);
+      notify({ message: confirmationMessage, variant: 'info', role: 'investor', timeout: 5000 });
+    }
 
     let walletSendUnsupported = false;
     let walletSendUnsupportedReason = null;
     let batchedSuccess = false;
     let partialExecution = null;
-    try {
-      traceInvestmentStep('wallet-send:start', {
-        callCount: calls.length,
+
+    if (!shouldUseWalletSendCalls) {
+      traceInvestmentStep('wallet-send:skip', {
+        callCount,
         includesApproval: needsApproval,
+        reason:
+          callCount === 1
+            ? 'single-call'
+            : walletCapability.reason || 'capability-unsupported',
       });
-      const { unsupported, reason: sendCallsReason, partial } = await requestWalletSendCalls(p, {
-        calls,
-        from,
-        chainId: ARBITRUM_HEX,
-      });
-      batchedSuccess = !unsupported;
-      walletSendUnsupported = unsupported;
-      walletSendUnsupportedReason = sendCallsReason || null;
-      if (Array.isArray(partial) && partial.length > 0) {
-        partialExecution = partial;
-        traceInvestmentStep('wallet-send:partial', {
-          executedIndexes: extractSuccessfulIndexes(partial),
-          raw: partial,
-        });
-      }
-      traceInvestmentStep('wallet-send:complete', {
-        unsupported,
-        batchedSuccess,
-        reason: sendCallsReason || undefined,
-      });
-    } catch (err) {
-      traceInvestmentStep('error', { stage: 'wallet-send', error: err });
-      if (err && typeof err === 'object' && err.unsupported) {
+      if (callCount > 1 && walletCapability.supported === false) {
         walletSendUnsupported = true;
-        walletSendUnsupportedReason = err.reason || err.unsupportedReason || null;
-        batchedSuccess = false;
-        if (Array.isArray(err.partial) && err.partial.length > 0) {
-          partialExecution = err.partial;
-          traceInvestmentStep('wallet-send:error-partial', {
-            executedIndexes: extractSuccessfulIndexes(err.partial),
-            raw: err.partial,
+        walletSendUnsupportedReason = walletCapability.reason || 'capability-unsupported';
+      }
+      try {
+        await executeSequentialInvestmentFlow({
+          provider: p,
+          from,
+          needsApproval,
+          approveData,
+          investData,
+          saleAddress: sale.listingAddress,
+          formattedCost,
+          approvalCallIndex,
+          investCallIndex,
+          executedIndexes: new Set(),
+          tracePrefix: 'sequential',
+        });
+        batchedSuccess = true;
+      } catch (err) {
+        traceInvestmentStep('error', { stage: 'sequential', error: err });
+        throw err;
+      }
+    } else {
+      try {
+        traceInvestmentStep('wallet-send:start', {
+          callCount,
+          includesApproval: needsApproval,
+        });
+        const { unsupported, reason: sendCallsReason, partial } = await requestWalletSendCalls(p, {
+          calls,
+          from,
+          chainId: ARBITRUM_HEX,
+        });
+        batchedSuccess = !unsupported;
+        walletSendUnsupported = unsupported;
+        walletSendUnsupportedReason = sendCallsReason || null;
+        if (Array.isArray(partial) && partial.length > 0) {
+          partialExecution = partial;
+          traceInvestmentStep('wallet-send:partial', {
+            executedIndexes: extractSuccessfulIndexes(partial),
+            raw: partial,
           });
         }
-      } else if (isUserRejectedRequestError(err)) {
-        setStatus('Investment cancelled by user.');
-        notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
-        return;
-      } else {
-        throw err;
+        traceInvestmentStep('wallet-send:complete', {
+          unsupported,
+          batchedSuccess,
+          reason: sendCallsReason || undefined,
+        });
+      } catch (err) {
+        traceInvestmentStep('error', { stage: 'wallet-send', error: err });
+        if (err && typeof err === 'object' && err.unsupported) {
+          walletSendUnsupported = true;
+          walletSendUnsupportedReason = err.reason || err.unsupportedReason || null;
+          batchedSuccess = false;
+          if (Array.isArray(err.partial) && err.partial.length > 0) {
+            partialExecution = err.partial;
+            traceInvestmentStep('wallet-send:error-partial', {
+              executedIndexes: extractSuccessfulIndexes(err.partial),
+              raw: err.partial,
+            });
+          }
+        } else if (isUserRejectedRequestError(err)) {
+          setStatus('Investment cancelled by user.');
+          notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
+          return;
+        } else {
+          throw err;
+        }
       }
     }
 
@@ -1457,45 +1694,43 @@ async function investInSale(entry, amountValue, form) {
       } catch (err) {
         traceInvestmentStep('error', { stage: 'allowance:recheck', error: err });
       }
+      const approvalIndex = approvalCallIndex;
+      const investIndex = investCallIndex;
+      const requiresApprovalTx =
+        needsApproval && approveData && approvalIndex !== null && !executedIndexes.has(approvalIndex);
+      const requiresInvestTx = !executedIndexes.has(investIndex);
+      const introMessage = executedIndexes.size > 0
+        ? 'Wallet only completed part of the batch.'
+        : needsApproval
+          ? 'Wallet does not support batched approval + investment.'
+          : 'Wallet does not support batched investment calls.';
+      const promptMessage = buildConfirmationMessage({
+        batched: false,
+        requiresApproval: requiresApprovalTx,
+        requiresInvest: requiresInvestTx,
+        formattedCost,
+      });
+      const fallbackStatus = promptMessage ? `${introMessage} ${promptMessage}` : introMessage;
+      setStatus(fallbackStatus);
+      notify({ message: fallbackStatus, variant: 'info', role: 'investor', timeout: 5000 });
       try {
-        traceInvestmentStep('fallback:sequential:start', {
+        await executeSequentialInvestmentFlow({
+          provider: p,
+          from,
           needsApproval,
+          approveData,
+          investData,
+          saleAddress: sale.listingAddress,
           formattedCost,
-          reason: walletSendUnsupportedReason || undefined,
-          executedIndexes: Array.from(executedIndexes),
+          approvalCallIndex,
+          investCallIndex,
+          executedIndexes,
+          tracePrefix: 'fallback:sequential',
+          startDetails: {
+            reason: walletSendUnsupportedReason || undefined,
+          },
         });
-        const fallbackStatus = executedIndexes.size > 0
-          ? 'Wallet only completed part of the batch. Finalising remaining transactions…'
-          : needsApproval
-            ? 'Wallet does not support batched approval + invest. Retrying sequentially…'
-            : 'Wallet does not support batched invest calls. Retrying sequentially…';
-        setStatus(fallbackStatus);
-        notify({ message: fallbackStatus, variant: 'info', role: 'investor', timeout: 5000 });
-        const replayed = [];
-        const approvalIndex = approvalCallIndex;
-        const investIndex = investCallIndex;
-        if (needsApproval && approveData && approvalIndex !== null && !executedIndexes.has(approvalIndex)) {
-          traceInvestmentStep('fallback:sequential:approval', { action: 'send' });
-          setStatus(`Approve USDC (${formattedCost} USDC).`);
-          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
-          replayed.push('approval');
-        } else if (needsApproval && approvalIndex !== null && executedIndexes.has(approvalIndex)) {
-          traceInvestmentStep('fallback:sequential:approval', { action: 'skip', reason: 'already-executed' });
-        }
-        if (!executedIndexes.has(investIndex)) {
-          traceInvestmentStep('fallback:sequential:invest', { action: 'send' });
-          setStatus(`Confirm investment (${formattedCost} USDC).`);
-          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: sale.listingAddress, data: investData }] });
-          replayed.push('invest');
-        } else {
-          traceInvestmentStep('fallback:sequential:invest', { action: 'skip', reason: 'already-executed' });
-        }
         batchedSuccess = true;
-        traceInvestmentStep('fallback:sequential:success', {
-          batchedSuccess,
-          replayed,
-          skippedIndexes: Array.from(executedIndexes),
-        });
       } catch (err) {
         traceInvestmentStep('error', { stage: 'fallback:sequential', error: err });
         if (isUserRejectedRequestError(err)) {
