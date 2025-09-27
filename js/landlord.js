@@ -2118,6 +2118,7 @@ function renderDepositBookingInfo(container, listingAddr, bookingId, booking, pe
   if (tokenised) {
     lines.push(
       'Tokenisation: Enabled',
+      'Deposit split proposals are disabled while tokenisation is active.',
       `Total SQMU: ${fmt.sqmu(booking.totalSqmu)}`,
       `Sold SQMU: ${fmt.sqmu(booking.soldSqmu)}`,
       `Price per SQMU: ${fmt.usdc(booking.pricePerSqmu)} USDC`,
@@ -2172,6 +2173,9 @@ function createDepositTools(listing) {
   tenantLabel.appendChild(tenantInput);
   fieldset.appendChild(tenantLabel);
 
+  const tenantInputDefaultValue = tenantInput.value;
+  const tenantInputDefaultPlaceholder = tenantInput.placeholder || '';
+
   content.appendChild(fieldset);
 
   const actions = document.createElement('div');
@@ -2203,6 +2207,7 @@ function createDepositTools(listing) {
     quickAuthReady: false,
     walletConnected: false,
     currentBookingId: null,
+    bookingTokenised: false,
   };
 
   const setStatus = (message, variant = 'info', { notify: shouldNotify = false } = {}) => {
@@ -2215,13 +2220,35 @@ function createDepositTools(listing) {
   const updateButtonState = () => {
     loadBtn.disabled = !state.quickAuthReady;
     const noBooking = !state.currentBookingId;
-    proposeBtn.disabled = !state.quickAuthReady || !state.walletConnected || noBooking;
+    const blocked = state.bookingTokenised;
+    proposeBtn.disabled = !state.quickAuthReady || !state.walletConnected || noBooking || blocked;
+    if (blocked) {
+      proposeBtn.title = 'Tokenised bookings cannot adjust deposit splits.';
+    } else {
+      proposeBtn.removeAttribute('title');
+    }
+  };
+
+  const updateTenantInputState = () => {
+    const locked = state.bookingTokenised;
+    tenantInput.disabled = locked;
+    if (locked) {
+      tenantInput.value = '';
+      tenantInput.placeholder = 'Tokenised booking — proposals disabled.';
+    } else {
+      tenantInput.placeholder = tenantInputDefaultPlaceholder;
+      if (!tenantInput.value) {
+        tenantInput.value = tenantInputDefaultValue;
+      }
+    }
   };
 
   const clearBookingDetails = () => {
     bookingInfoEl.innerHTML = '';
     state.currentBookingId = null;
+    state.bookingTokenised = false;
     updateButtonState();
+    updateTenantInputState();
   };
 
   const loadBooking = async ({ preserveStatus = false } = {}) => {
@@ -2241,12 +2268,20 @@ function createDepositTools(listing) {
     try {
       const { booking, pending } = await fetchDepositBookingDetails(listing.address, bookingId);
       renderDepositBookingInfo(bookingInfoEl, listing.address, bookingId, booking, pending);
-      state.currentBookingId = bookingId;
-      if (pending?.tenantBps != null) {
-        tenantInput.value = toNumberOr(pending.tenantBps, 0).toString();
+      state.bookingTokenised = Boolean(booking?.tokenised);
+      state.currentBookingId = state.bookingTokenised ? null : bookingId;
+      updateTenantInputState();
+      if (!state.bookingTokenised) {
+        if (pending?.tenantBps != null) {
+          tenantInput.value = toNumberOr(pending.tenantBps, 0).toString();
+        }
       }
-      if (!preserveStatus) {
-        setStatus('Booking details loaded.', state.walletConnected ? 'success' : 'info');
+      if (!preserveStatus || state.bookingTokenised) {
+        if (state.bookingTokenised) {
+          setStatus('Booking is tokenised. Deposit split proposals are disabled.', 'info');
+        } else {
+          setStatus('Booking details loaded.', state.walletConnected ? 'success' : 'info');
+        }
       }
     } catch (err) {
       console.error('Unable to load deposit booking details', err);
@@ -2258,6 +2293,7 @@ function createDepositTools(listing) {
       }
     } finally {
       updateButtonState();
+      updateTenantInputState();
     }
   };
 
@@ -2343,6 +2379,7 @@ function createDepositTools(listing) {
       setStatus(extractErrorMessage(err, 'Failed to propose split.'), variant);
     } finally {
       updateButtonState();
+      updateTenantInputState();
     }
   };
 
@@ -2356,6 +2393,7 @@ function createDepositTools(listing) {
 
   setStatus('Sign in with Farcaster to manage deposit splits.');
   updateButtonState();
+  updateTenantInputState();
 
   return {
     section,
@@ -2363,9 +2401,12 @@ function createDepositTools(listing) {
       setQuickAuthReady: (ready) => {
         state.quickAuthReady = Boolean(ready);
         updateButtonState();
+        updateTenantInputState();
         if (state.quickAuthReady) {
           const message = state.walletConnected
-            ? 'Load a booking to review its deposit.'
+            ? state.bookingTokenised
+              ? 'Booking is tokenised. Deposit split proposals are disabled.'
+              : 'Load a booking to review its deposit.'
             : 'Connect wallet to manage deposit splits.';
           setStatus(message);
         }
@@ -2374,18 +2415,22 @@ function createDepositTools(listing) {
         state.quickAuthReady = false;
         clearBookingDetails();
         updateButtonState();
+        updateTenantInputState();
         setStatus(message, 'error');
       },
       setWalletConnected: (connected) => {
         state.walletConnected = Boolean(connected);
         updateButtonState();
+        updateTenantInputState();
         if (!state.quickAuthReady) {
           return;
         }
         const message = state.walletConnected
-          ? state.currentBookingId
-            ? 'Booking details loaded.'
-            : 'Load a booking to review its deposit.'
+          ? state.bookingTokenised
+            ? 'Booking is tokenised. Deposit split proposals are disabled.'
+            : state.currentBookingId
+              ? 'Booking details loaded.'
+              : 'Load a booking to review its deposit.'
           : 'Connect wallet to manage deposit splits.';
         setStatus(message);
       },
