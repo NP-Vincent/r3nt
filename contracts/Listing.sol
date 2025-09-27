@@ -555,6 +555,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         require(block.timestamp < booking.start, "already started");
         require(!_depositReleased[bookingId], "deposit handled");
         require(_grossRentPaid[bookingId] == 0, "rent paid");
+        require(!booking.tokenised && booking.soldSqmu == 0, "tokenised");
 
         _cancelUpcomingBooking(bookingId, booking, msg.sender);
 
