@@ -206,6 +206,158 @@ function hasNonEmptyObject(obj) {
   return Object.keys(obj).length > 0;
 }
 
+function normalizeTxResultEntry(entry, index) {
+  if (entry == null) {
+    return null;
+  }
+
+  let hash = null;
+  if (typeof entry === 'string') {
+    const trimmed = entry.trim();
+    if (!trimmed) return null;
+    hash = trimmed;
+  } else if (typeof entry === 'object') {
+    if (typeof entry.hash === 'string' && entry.hash.trim()) {
+      hash = entry.hash.trim();
+    } else if (typeof entry.txHash === 'string' && entry.txHash.trim()) {
+      hash = entry.txHash.trim();
+    } else if (typeof entry.transactionHash === 'string' && entry.transactionHash.trim()) {
+      hash = entry.transactionHash.trim();
+    }
+  }
+
+  const status = typeof entry === 'object' && entry !== null && typeof entry.status === 'string'
+    ? entry.status.trim().toLowerCase()
+    : '';
+  let success = false;
+  if (typeof entry === 'string') {
+    success = true;
+  } else if (entry && typeof entry === 'object') {
+    if (typeof entry.success === 'boolean') {
+      success = entry.success;
+    } else if (status) {
+      if (status === 'success' || status === 'succeeded' || status === 'ok' || status === 'completed') {
+        success = true;
+      } else if (status === 'failed' || status === 'error' || status === 'reverted') {
+        success = false;
+      }
+    } else if ('error' in entry && entry.error != null) {
+      success = false;
+    } else if ('failure' in entry && entry.failure != null) {
+      success = false;
+    } else if ('result' in entry && entry.result != null) {
+      success = true;
+    } else if (hash) {
+      success = true;
+    }
+  }
+
+  if (!success && !hash && !(entry && typeof entry === 'object' && ('error' in entry || 'failure' in entry))) {
+    return null;
+  }
+
+  let errorMessage = null;
+  if (entry && typeof entry === 'object') {
+    if (typeof entry.error === 'string') {
+      errorMessage = entry.error;
+    } else if (entry.error && typeof entry.error === 'object' && typeof entry.error.message === 'string') {
+      errorMessage = entry.error.message;
+    } else if (typeof entry.failure === 'string') {
+      errorMessage = entry.failure;
+    }
+  }
+
+  return {
+    index,
+    success,
+    hash: hash || null,
+    status: status || null,
+    error: errorMessage,
+  };
+}
+
+function normalizeTxResultsArray(value) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const normalized = [];
+  for (let i = 0; i < value.length; i++) {
+    const entry = normalizeTxResultEntry(value[i], i);
+    if (entry) {
+      normalized.push(entry);
+    }
+  }
+  if (normalized.length === 0) {
+    return null;
+  }
+  return normalized;
+}
+
+function extractPartialExecutionDetails(error) {
+  if (error == null) {
+    return null;
+  }
+  const visited = new Set();
+  const queue = [error];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null) {
+      continue;
+    }
+
+    if (Array.isArray(current)) {
+      const normalized = normalizeTxResultsArray(current);
+      if (normalized) {
+        return normalized;
+      }
+      for (const entry of current) {
+        if (entry != null) queue.push(entry);
+      }
+      continue;
+    }
+
+    if (typeof current !== 'object') {
+      continue;
+    }
+
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+
+    if ('txResults' in current) {
+      const normalized = normalizeTxResultsArray(current.txResults);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    if ('data' in current) {
+      const dataValue = current.data;
+      if (Array.isArray(dataValue)) {
+        const normalized = normalizeTxResultsArray(dataValue);
+        if (normalized) {
+          return normalized;
+        }
+        for (const entry of dataValue) {
+          if (entry != null) queue.push(entry);
+        }
+      } else if (dataValue && typeof dataValue === 'object') {
+        queue.push(dataValue);
+      }
+    }
+
+    for (const key of Object.keys(current)) {
+      if (key === 'txResults' || key === 'data') continue;
+      const value = current[key];
+      if (value != null) {
+        queue.push(value);
+      }
+    }
+  }
+  return null;
+}
+
 function isWalletSendCallsPromptlessRejection(error) {
   if (error == null) {
     return false;
@@ -528,6 +680,16 @@ export async function requestWalletSendCalls(provider, options = {}) {
       }
       if (isUserRejectedRequestError(error)) {
         throw error;
+      }
+      const partial = extractPartialExecutionDetails(error);
+      if (partial && partial.length > 0) {
+        return {
+          result: undefined,
+          unsupported: true,
+          error,
+          reason: 'partial-execution',
+          partial,
+        };
       }
       if (isMethodNotFoundError(error)) {
         return { result: undefined, unsupported: true, error, reason: 'method-not-found' };

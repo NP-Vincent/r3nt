@@ -105,6 +105,50 @@ function toBigInt(value, fallback = 0n) {
   }
 }
 
+function toNonNegativeInteger(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const truncated = Math.trunc(value);
+    return truncated >= 0 ? truncated : null;
+  }
+  if (typeof value === 'bigint') {
+    return value >= 0n ? Number(value) : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed || /[^0-9]/.test(trimmed)) {
+      return null;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return parsed >= 0 ? parsed : null;
+  }
+  if (value && typeof value === 'object' && 'index' in value) {
+    return toNonNegativeInteger(value.index);
+  }
+  return null;
+}
+
+function extractSuccessfulIndexes(partial) {
+  if (!Array.isArray(partial)) {
+    return [];
+  }
+  const indexes = [];
+  for (const entry of partial) {
+    const index = toNonNegativeInteger(entry);
+    if (index == null) {
+      continue;
+    }
+    const success = entry && typeof entry === 'object' && 'success' in entry ? Boolean(entry.success) : true;
+    if (!success) {
+      continue;
+    }
+    indexes.push(index);
+  }
+  return indexes;
+}
+
 function isDevConsoleOpen(settings) {
   if (settings && typeof settings.devConsoleOpen === 'boolean') {
     return Boolean(settings.devConsoleOpen);
@@ -1326,12 +1370,13 @@ async function investInSale(entry, amountValue, form) {
     let walletSendUnsupported = false;
     let walletSendUnsupportedReason = null;
     let batchedSuccess = false;
+    let partialExecution = null;
     try {
       traceInvestmentStep('wallet-send:start', {
         callCount: calls.length,
         includesApproval: needsApproval,
       });
-      const { unsupported, reason: sendCallsReason } = await requestWalletSendCalls(p, {
+      const { unsupported, reason: sendCallsReason, partial } = await requestWalletSendCalls(p, {
         calls,
         from,
         chainId: ARBITRUM_HEX,
@@ -1339,6 +1384,13 @@ async function investInSale(entry, amountValue, form) {
       batchedSuccess = !unsupported;
       walletSendUnsupported = unsupported;
       walletSendUnsupportedReason = sendCallsReason || null;
+      if (Array.isArray(partial) && partial.length > 0) {
+        partialExecution = partial;
+        traceInvestmentStep('wallet-send:partial', {
+          executedIndexes: extractSuccessfulIndexes(partial),
+          raw: partial,
+        });
+      }
       traceInvestmentStep('wallet-send:complete', {
         unsupported,
         batchedSuccess,
@@ -1350,6 +1402,13 @@ async function investInSale(entry, amountValue, form) {
         walletSendUnsupported = true;
         walletSendUnsupportedReason = err.reason || err.unsupportedReason || null;
         batchedSuccess = false;
+        if (Array.isArray(err.partial) && err.partial.length > 0) {
+          partialExecution = err.partial;
+          traceInvestmentStep('wallet-send:error-partial', {
+            executedIndexes: extractSuccessfulIndexes(err.partial),
+            raw: err.partial,
+          });
+        }
       } else if (isUserRejectedRequestError(err)) {
         setStatus('Investment cancelled by user.');
         notify({ message: 'Investment cancelled by user.', variant: 'warning', role: 'investor', timeout: 5000 });
@@ -1360,25 +1419,49 @@ async function investInSale(entry, amountValue, form) {
     }
 
     if (!batchedSuccess && walletSendUnsupported) {
+      const executedIndexes = new Set();
+      for (const index of extractSuccessfulIndexes(partialExecution)) {
+        executedIndexes.add(index);
+      }
       try {
         traceInvestmentStep('fallback:sequential:start', {
           needsApproval,
           formattedCost,
           reason: walletSendUnsupportedReason || undefined,
+          executedIndexes: Array.from(executedIndexes),
         });
-        const fallbackStatus = needsApproval
-          ? 'Wallet does not support batched approval + invest. Retrying sequentially…'
-          : 'Wallet does not support batched invest calls. Retrying sequentially…';
+        const fallbackStatus = executedIndexes.size > 0
+          ? 'Wallet only completed part of the batch. Finalising remaining transactions…'
+          : needsApproval
+            ? 'Wallet does not support batched approval + invest. Retrying sequentially…'
+            : 'Wallet does not support batched invest calls. Retrying sequentially…';
         setStatus(fallbackStatus);
         notify({ message: fallbackStatus, variant: 'info', role: 'investor', timeout: 5000 });
-        if (needsApproval && approveData) {
+        const replayed = [];
+        const approvalIndex = needsApproval ? 0 : null;
+        const investIndex = needsApproval ? 1 : 0;
+        if (needsApproval && approveData && approvalIndex !== null && !executedIndexes.has(approvalIndex)) {
+          traceInvestmentStep('fallback:sequential:approval', { action: 'send' });
           setStatus(`Approve USDC (${formattedCost} USDC).`);
           await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
+          replayed.push('approval');
+        } else if (needsApproval && approvalIndex !== null && executedIndexes.has(approvalIndex)) {
+          traceInvestmentStep('fallback:sequential:approval', { action: 'skip', reason: 'already-executed' });
         }
-        setStatus(`Confirm investment (${formattedCost} USDC).`);
-        await p.request({ method: 'eth_sendTransaction', params: [{ from, to: sale.listingAddress, data: investData }] });
+        if (!executedIndexes.has(investIndex)) {
+          traceInvestmentStep('fallback:sequential:invest', { action: 'send' });
+          setStatus(`Confirm investment (${formattedCost} USDC).`);
+          await p.request({ method: 'eth_sendTransaction', params: [{ from, to: sale.listingAddress, data: investData }] });
+          replayed.push('invest');
+        } else {
+          traceInvestmentStep('fallback:sequential:invest', { action: 'skip', reason: 'already-executed' });
+        }
         batchedSuccess = true;
-        traceInvestmentStep('fallback:sequential:success', { batchedSuccess });
+        traceInvestmentStep('fallback:sequential:success', {
+          batchedSuccess,
+          replayed,
+          skippedIndexes: Array.from(executedIndexes),
+        });
       } catch (err) {
         traceInvestmentStep('error', { stage: 'fallback:sequential', error: err });
         if (isUserRejectedRequestError(err)) {
