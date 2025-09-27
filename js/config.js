@@ -52,4 +52,4 @@ export const AGENT_ABI = AgentArtifact.abi || [];
 
 export const APP_NAME = 'r3nt';
 export const APP_DOMAIN = 'r3nt.sqmu.net'; // origin used in EIP-712 domain if needed
-export const APP_VERSION = '0.4.8';
+export const APP_VERSION = '0.4.9';
