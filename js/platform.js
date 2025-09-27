@@ -1385,6 +1385,58 @@ async function loadDepositDetails(options = {}) {
   }
 }
 
+async function cancelBookingAfterDepositRelease(contextSnapshot) {
+  if (!contextSnapshot) {
+    setDepositStatus('Deposit release confirmed, but booking context unavailable for cancellation.', 'warning');
+    return;
+  }
+
+  const { listingAddress, bookingId } = contextSnapshot;
+  if (!listingAddress || bookingId === undefined || bookingId === null) {
+    setDepositStatus('Deposit release confirmed, but booking reference missing. Cancel manually if needed.', 'warning');
+    return;
+  }
+
+  if (!Array.isArray(LISTING_ABI) || LISTING_ABI.length === 0) {
+    setDepositStatus('Deposit released, but listing ABI unavailable to cancel automatically.', 'warning');
+    return;
+  }
+
+  if (!signer) {
+    setDepositStatus('Deposit released, but wallet disconnected before cancellation could be submitted.', 'error');
+    return;
+  }
+
+  let listingContract;
+  try {
+    listingContract = new Contract(listingAddress, LISTING_ABI, signer);
+  } catch (err) {
+    console.error('Failed to create listing contract instance for cancellation', err);
+    const { message, severity } = interpretError(err);
+    setDepositStatus(`Deposit released, but cancellation contract initialisation failed: ${message}`, severity);
+    return;
+  }
+
+  try {
+    const cancelled = await withSigner(
+      'Cancelling booking after deposit release',
+      () => listingContract.cancelBooking(bookingId),
+      confirmDepositBtn,
+    );
+
+    if (cancelled) {
+      await loadDepositDetails({ quiet: true });
+      setDepositStatus('Deposit released and booking cancelled.', 'success');
+    } else {
+      setDepositStatus('Deposit released. Booking cancellation not executed.', 'warning');
+    }
+  } catch (err) {
+    console.error('Failed to cancel booking after deposit release', err);
+    const { message, severity } = interpretError(err);
+    setDepositStatus(`Deposit released, but booking cancellation failed: ${message}`, severity);
+  }
+}
+
 function enableForms(enabled) {
   document.querySelectorAll('form[data-requires-signer]').forEach((form) => {
     Array.from(form.elements).forEach((control) => {
@@ -1733,6 +1785,12 @@ if (depositConfirmForm && confirmDepositBtn) {
       return;
     }
     try {
+      const cancellationContext = currentDepositContext
+        ? {
+            listingAddress: currentDepositContext.listingAddress,
+            bookingId: currentDepositContext.bookingId,
+          }
+        : null;
       const success = await withSigner(
         'Confirming deposit release',
         () =>
@@ -1745,7 +1803,8 @@ if (depositConfirmForm && confirmDepositBtn) {
       );
       if (success) {
         await loadDepositDetails({ quiet: true });
-        setDepositStatus('Deposit release confirmed on-chain.', 'success');
+        setDepositStatus('Deposit release confirmed on-chain. Attempting booking cancellation…', 'success');
+        await cancelBookingAfterDepositRelease(cancellationContext);
       }
     } catch (err) {
       console.error('Failed to confirm deposit release', err);

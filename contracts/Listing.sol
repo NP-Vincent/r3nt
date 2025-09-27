@@ -556,8 +556,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         require(!_depositReleased[bookingId], "deposit handled");
         require(_grossRentPaid[bookingId] == 0, "rent paid");
 
-        booking.status = Status.CANCELLED;
-        _releaseBookingRange(bookingId);
+        _cancelUpcomingBooking(bookingId, booking, msg.sender);
 
         uint256 deposit = booking.deposit;
         if (deposit > 0) {
@@ -568,8 +567,13 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             IERC20Upgradeable(usdc).safeTransfer(booking.tenant, deposit);
             emit DepositReleased(bookingId, msg.sender, deposit, 0);
         }
+    }
 
-        emit BookingCancelled(bookingId, msg.sender);
+    function _cancelUpcomingBooking(uint256 bookingId, Booking storage booking, address triggeredBy) internal {
+        booking.status = Status.CANCELLED;
+        _releaseBookingRange(bookingId);
+
+        emit BookingCancelled(bookingId, triggeredBy);
     }
 
     /**
@@ -654,6 +658,10 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         _depositReleased[bookingId] = true;
         _confirmedDepositTenantBps[bookingId] = tenantBps;
         delete _depositSplitProposals[bookingId];
+
+        if (booking.status == Status.ACTIVE && block.timestamp < booking.start) {
+            _cancelUpcomingBooking(bookingId, booking, msg.sender);
+        }
 
         IERC20Upgradeable token = IERC20Upgradeable(usdc);
         if (tenantAmount > 0) {
