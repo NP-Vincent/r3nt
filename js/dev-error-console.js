@@ -23,6 +23,8 @@
   const OVERRIDE = overrideSetting === null ? null : overrideSetting;
   const defaultSetting = normalizeBoolean(settings.devConsoleDefault);
   const DEFAULT_ENABLED = defaultSetting === null ? false : defaultSetting;
+  const traceSetting = normalizeBoolean(settings.showTrace);
+  const SHOW_TRACE = traceSetting === null ? true : traceSetting;
 
   if (window[MANAGER_KEY]) {
     return;
@@ -43,6 +45,8 @@
     copyResetTimer: null,
     originalError: null,
     originalWarn: null,
+    originalInfo: null,
+    originalDebug: null,
     domReadyListener: null,
   };
 
@@ -262,7 +266,17 @@
     state.logList.scrollTop = state.logList.scrollHeight;
   }
 
+  function shouldDisplay(type) {
+    if (SHOW_TRACE) {
+      return true;
+    }
+    return type !== 'console.info' && type !== 'console.debug' && type !== 'trace';
+  }
+
   function addEntry(type, argsLike) {
+    if (!shouldDisplay(type)) {
+      return;
+    }
     const args = Array.prototype.slice.call(argsLike ?? []);
     const payload = { type, args, time: new Date() };
     state.entries.push(payload);
@@ -327,6 +341,18 @@
       addEntry('console.warn', args);
       if (typeof state.originalWarn === 'function') {
         state.originalWarn.apply(console, args);
+      }
+    },
+    consoleInfo: (...args) => {
+      addEntry('console.info', args);
+      if (typeof state.originalInfo === 'function') {
+        state.originalInfo.apply(console, args);
+      }
+    },
+    consoleDebug: (...args) => {
+      addEntry('console.debug', args);
+      if (typeof state.originalDebug === 'function') {
+        state.originalDebug.apply(console, args);
       }
     },
   };
@@ -448,6 +474,14 @@
     console.warn = function (...args) {
       handlers.consoleWarn(...args);
     };
+    state.originalInfo = typeof console.info === 'function' ? console.info : null;
+    console.info = function (...args) {
+      handlers.consoleInfo(...args);
+    };
+    state.originalDebug = typeof console.debug === 'function' ? console.debug : null;
+    console.debug = function (...args) {
+      handlers.consoleDebug(...args);
+    };
     window.__DEV_ERROR_CONSOLE__ = true;
   }
 
@@ -501,6 +535,14 @@
       console.warn = state.originalWarn;
       state.originalWarn = null;
     }
+    if (state.originalInfo !== null) {
+      console.info = state.originalInfo;
+      state.originalInfo = null;
+    }
+    if (state.originalDebug !== null) {
+      console.debug = state.originalDebug;
+      state.originalDebug = null;
+    }
     window.__DEV_ERROR_CONSOLE__ = false;
   }
 
@@ -542,6 +584,9 @@
   const manager = { enable, disable, setEnabled, isEnabled, isActive };
   window.r3ntDevConsole = manager;
   window[MANAGER_KEY] = manager;
+  window.__R3NT_TRACE_LOG__ = function (...args) {
+    addEntry('trace', args);
+  };
 
   if (isEnabled()) {
     enable();
