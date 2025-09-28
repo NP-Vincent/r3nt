@@ -803,10 +803,25 @@ async function loadListingBookings(listingAddress, account) {
       period = 0n;
     }
     const periodLabel = formatPeriodLabel(period);
+
+    let sqmuToken = null;
+    let tokenIdForBalance = bookingId;
+    try {
+      sqmuToken = sqmuTokenIdentity(listingAddress, bookingId);
+      tokenIdForBalance = sqmuToken.tokenId;
+    } catch (err) {
+      console.warn('Failed to derive SQMU token identity', listingAddress, bookingId.toString(), err);
+    }
+
     let balance = 0n;
     let claimable = 0n;
     try {
-      balance = await pub.readContract({ address: R3NT_ADDRESS, abi: R3NT_ABI, functionName: 'balanceOf', args: [account, bookingId] });
+      balance = await pub.readContract({
+        address: R3NT_ADDRESS,
+        abi: R3NT_ABI,
+        functionName: 'balanceOf',
+        args: [account, tokenIdForBalance],
+      });
     } catch {}
     if (tokenised && balance > 0n) {
       try {
@@ -816,14 +831,6 @@ async function loadListingBookings(listingAddress, account) {
     if (totalSqmu > 0n && soldSqmu >= totalSqmu && balance === 0n) {
       continue;
     }
-
-    let sqmuToken = null;
-    try {
-      sqmuToken = sqmuTokenIdentity(listingAddress, bookingId);
-    } catch (err) {
-      console.warn('Failed to derive SQMU token identity', listingAddress, bookingId.toString(), err);
-    }
-
     entries.push({
       listingAddress,
       bookingId: id,
@@ -938,7 +945,7 @@ function renderHoldings(entries, options = {}) {
 
     const balanceMetric = document.createElement('div');
     balanceMetric.className = 'metric';
-    balanceMetric.innerHTML = '<label>Balance</label>';
+    balanceMetric.innerHTML = '<label>Holding</label>';
     const balanceValue = document.createElement('span');
     balanceValue.textContent = `${entry.balance.toString()} SQMU-R`;
     balanceMetric.appendChild(balanceValue);
