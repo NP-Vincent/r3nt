@@ -465,6 +465,11 @@ contract Platform is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         address listing = listingById[listingId];
         require(listing != address(0), "listing not found");
 
+        address sqmuToken_ = sqmuToken;
+        require(sqmuToken_ != address(0), "sqmu=0");
+
+        IR3ntSQMUManager(sqmuToken_).grantListingMinter(listing);
+
         IListingTokenisation(listing).approveTokenisation(bookingId);
     }
 
