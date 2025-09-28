@@ -101,6 +101,10 @@ let activeTokenProposalKey = null;
 let activeTokenProposalPanel = null;
 let activeTokenProposalCard = null;
 
+const cancellationConfirmations = new WeakMap();
+let activeCancellationConfirmationButton = null;
+const CANCEL_CONFIRMATION_TIMEOUT_MS = 12000;
+
 mountNotificationCenter(document.getElementById('notificationTray'), { role: 'tenant' });
 mountCollapsibles();
 
@@ -1558,6 +1562,92 @@ async function submitTokenisationProposalForTenant(record, { amount, totalSqmu, 
   }
 }
 
+function presentCancellationConfirmation(button, message) {
+  if (!button) {
+    return false;
+  }
+  if (activeCancellationConfirmationButton && activeCancellationConfirmationButton !== button) {
+    clearCancellationConfirmation(activeCancellationConfirmationButton);
+  }
+  const normalizedMessage = typeof message === 'string' && message.trim() ? message.trim() : 'Confirm cancellation?';
+  if (!button.dataset.originalText) {
+    button.dataset.originalText = button.textContent || '';
+  }
+  button.dataset.confirmationArmed = 'true';
+  button.textContent = 'Confirm cancellation';
+
+  const card = button.closest('.booking-entry');
+  let confirmationFootnote = null;
+  if (card) {
+    confirmationFootnote = el('div', { class: 'card-footnote cancel-confirmation', dataset: { role: 'cancel-confirmation' } }, [
+      el('span', { class: 'cancel-confirmation-message' }, normalizedMessage),
+      el(
+        'button',
+        {
+          type: 'button',
+          class: 'inline-button ghost cancel-confirmation-dismiss',
+          onClick: (event) => {
+            event?.stopPropagation?.();
+            clearCancellationConfirmation(button, { notifyDismissed: true });
+          },
+        },
+        'Keep booking',
+      ),
+    ]);
+    card.append(confirmationFootnote);
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    if (button.dataset.confirmationArmed === 'true') {
+      clearCancellationConfirmation(button);
+    }
+  }, CANCEL_CONFIRMATION_TIMEOUT_MS);
+
+  cancellationConfirmations.set(button, { footnote: confirmationFootnote, timeoutId });
+  activeCancellationConfirmationButton = button;
+  if (normalizedMessage) {
+    els.status.textContent = normalizedMessage;
+  }
+  try {
+    button.focus({ preventScroll: true });
+  } catch (err) {
+    try {
+      button.focus();
+    } catch {}
+  }
+  return true;
+}
+
+function clearCancellationConfirmation(button, options = {}) {
+  if (!button) {
+    return;
+  }
+  const { notifyDismissed = false } = options;
+  const entry = cancellationConfirmations.get(button);
+  if (entry?.timeoutId) {
+    window.clearTimeout(entry.timeoutId);
+  }
+  if (entry?.footnote && entry.footnote.parentElement) {
+    entry.footnote.parentElement.removeChild(entry.footnote);
+  }
+  cancellationConfirmations.delete(button);
+  if (activeCancellationConfirmationButton === button) {
+    activeCancellationConfirmationButton = null;
+  }
+  const originalText = button.dataset.originalText;
+  if (originalText !== undefined) {
+    button.textContent = originalText;
+  }
+  delete button.dataset.confirmationArmed;
+  delete button.dataset.originalText;
+
+  if (notifyDismissed) {
+    const dismissedMessage = 'Cancellation dismissed.';
+    els.status.textContent = dismissedMessage;
+    notify({ message: dismissedMessage, variant: 'info', role: 'tenant', timeout: 4000 });
+  }
+}
+
 async function cancelBookingForTenant(recordKeyOrRecord, button) {
   const key = typeof recordKeyOrRecord === 'object' ? recordKeyOrRecord?.key : recordKeyOrRecord;
   const record = typeof recordKeyOrRecord === 'object' ? recordKeyOrRecord : bookingRecords.get(key);
@@ -1609,13 +1699,14 @@ async function cancelBookingForTenant(recordKeyOrRecord, button) {
     return;
   }
 
-    const confirmationMessage = record.deposit > 0n
-      ? `Cancel booking #${record.bookingIdText}? Your ${fmt.usdc(record.deposit)} USDC deposit will be refunded automatically.`
-      : `Cancel booking #${record.bookingIdText}? This frees up the stay for other tenants.`;
-  const confirmed = window.confirm(confirmationMessage);
-  if (!confirmed) {
-    els.status.textContent = 'Cancellation dismissed.';
-    notify({ message: 'Cancellation dismissed.', variant: 'info', role: 'tenant', timeout: 4000 });
+  const confirmationMessage = record.deposit > 0n
+    ? `Cancel booking #${record.bookingIdText}? Your ${fmt.usdc(record.deposit)} USDC deposit will be refunded automatically.`
+    : `Cancel booking #${record.bookingIdText}? This frees up the stay for other tenants.`;
+
+  if (button.dataset.confirmationArmed === 'true') {
+    clearCancellationConfirmation(button);
+  } else {
+    presentCancellationConfirmation(button, confirmationMessage);
     return;
   }
 
@@ -1723,6 +1814,7 @@ async function cancelBookingForTenant(recordKeyOrRecord, button) {
       });
     }
   } finally {
+    clearCancellationConfirmation(button);
     button.disabled = false;
     button.textContent = originalText;
   }
