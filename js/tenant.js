@@ -9,6 +9,7 @@ import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
 import { createCollapsibleSection, makeCollapsible, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
+import { confirmBookingAction } from './ui/confirm.js';
 import { applyListingFilters, DEFAULT_LISTING_SORT_MODE } from './listing-filters.js';
 import { createOpenMapButton } from './map-assist.js';
 import {
@@ -1609,10 +1610,27 @@ async function cancelBookingForTenant(recordKeyOrRecord, button) {
     return;
   }
 
-    const confirmationMessage = record.deposit > 0n
-      ? `Cancel booking #${record.bookingIdText}? Your ${fmt.usdc(record.deposit)} USDC deposit will be refunded automatically.`
-      : `Cancel booking #${record.bookingIdText}? This frees up the stay for other tenants.`;
-  const confirmed = window.confirm(confirmationMessage);
+  const confirmationMessage = record.deposit > 0n
+    ? `Your ${fmt.usdc(record.deposit)} USDC deposit will be refunded automatically.`
+    : 'This frees up the stay for other tenants.';
+
+  const confirmed = await confirmBookingAction({
+    title: `Cancel booking #${record.bookingIdText}?`,
+    message: confirmationMessage,
+    confirmLabel: 'Cancel booking',
+    cancelLabel: 'Keep booking',
+    footnote: 'This submits an on-chain cancellation request to the listing contract.',
+    booking: {
+      bookingId: record.bookingIdText || record.bookingId?.toString?.() || '',
+      listingTitle: record.listingTitle || short(record.listingAddress),
+      startLabel: record.startLabel,
+      endLabel: record.endLabel,
+      deposit: record.deposit,
+      rent: record.grossRent,
+      periodLabel: record.periodLabel,
+    },
+  });
+
   if (!confirmed) {
     els.status.textContent = 'Cancellation dismissed.';
     notify({ message: 'Cancellation dismissed.', variant: 'info', role: 'tenant', timeout: 4000 });
