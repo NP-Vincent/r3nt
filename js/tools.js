@@ -208,6 +208,98 @@ export function bytes32ToCastUrl(castHash32) {
   return `https://warpcast.com/~/casts/${bytes32ToCastHash(castHash32)}`;
 }
 
+// ------------------------------------------------------------
+// SQMU token id helpers
+// ------------------------------------------------------------
+
+const SQMU_BOOKING_BITS = 96n;
+const SQMU_BOOKING_MASK = (1n << SQMU_BOOKING_BITS) - 1n;
+
+function coerceBigInt(value, label) {
+  if (typeof value === 'bigint') {
+    return value;
+  }
+  if (value === null || value === undefined || value === '') {
+    throw new Error(`${label} is required.`);
+  }
+  try {
+    return BigInt(value);
+  } catch (err) {
+    throw new Error(`${label} must be a bigint-compatible value.`);
+  }
+}
+
+function normaliseAddress(addr, label) {
+  if (typeof addr !== 'string') {
+    throw new Error(`${label} must be a string.`);
+  }
+  const trimmed = addr.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+    throw new Error(`${label} must be a 0x-prefixed 20-byte hex address.`);
+  }
+  return '0x' + trimmed.slice(2).toLowerCase();
+}
+
+/**
+ * Compose the ERC-1155 SQMU token id by packing the listing address and booking id.
+ * Mirrors Listing._sqmuTokenId / Agent._sqmuTokenId on-chain helpers.
+ * @param {string} listingAddress 0x-prefixed 20-byte hex address.
+ * @param {bigint|number|string} bookingId Non-negative integer < 2^96.
+ * @returns {bigint} token id
+ */
+export function sqmuTokenIdFromListing(listingAddress, bookingId) {
+  const normalised = normaliseAddress(listingAddress, 'Listing address');
+  const booking = coerceBigInt(bookingId, 'Booking id');
+  if (booking < 0n || booking > SQMU_BOOKING_MASK) {
+    throw new Error('Booking id is out of range for SQMU token packing.');
+  }
+  const listingValue = BigInt(normalised);
+  return (listingValue << SQMU_BOOKING_BITS) | booking;
+}
+
+/**
+ * Decode a SQMU token id into its constituent listing address and booking id.
+ * @param {bigint|number|string} tokenId
+ * @returns {{ tokenId: bigint, hex: string, shortHex: string, listingAddress: string, listingShort: string, bookingId: bigint, slug: string, display: string }}
+ */
+export function sqmuTokenIdComponents(tokenId) {
+  const id = coerceBigInt(tokenId, 'Token id');
+  if (id < 0n) {
+    throw new Error('Token id cannot be negative.');
+  }
+
+  const hex = '0x' + id.toString(16).padStart(64, '0');
+  const listingPart = id >> SQMU_BOOKING_BITS;
+  const booking = id & SQMU_BOOKING_MASK;
+  const listingHex = '0x' + listingPart.toString(16).padStart(40, '0');
+  const shortHex = `0x${hex.slice(2, 10)}…${hex.slice(-4)}`;
+  const listingShort = `0x${listingHex.slice(2, 6)}…${listingHex.slice(-4)}`;
+  const bookingLabel = booking.toString();
+  const slug = `${listingShort}/${bookingLabel}`;
+  const display = `${slug} · ${shortHex}`;
+
+  return {
+    tokenId: id,
+    hex,
+    shortHex,
+    listingAddress: listingHex,
+    listingShort,
+    bookingId: booking,
+    slug,
+    display,
+  };
+}
+
+/**
+ * Convenience helper that composes the token id and returns its decoded identity.
+ * @param {string} listingAddress
+ * @param {bigint|number|string} bookingId
+ */
+export function sqmuTokenIdentity(listingAddress, bookingId) {
+  const tokenId = sqmuTokenIdFromListing(listingAddress, bookingId);
+  return sqmuTokenIdComponents(tokenId);
+}
+
 /**
  * Build a Farcaster URL that points to the landlord's cast. If we know the
  * author's fid we can deep-link through the `/~/profiles/{fid}` route so the
