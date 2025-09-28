@@ -821,8 +821,9 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             token.safeTransfer(landlord, proceeds);
         }
 
+        uint256 tokenId = _sqmuTokenId(bookingId);
         IR3ntSQMU sqmu = IR3ntSQMU(sqmuToken);
-        sqmu.mint(investor, bookingId, sqmuAmount, "");
+        sqmu.mint(investor, tokenId, sqmuAmount, "");
 
         uint256 acc = booking.accRentPerSqmu;
         if (acc > 0) {
@@ -835,7 +836,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
 
         if (booking.soldSqmu == booking.totalSqmu) {
             // Best-effort attempt to lock transfers; ignore failures for backwards compatibility.
-            try sqmu.lockTransfers(bookingId) {} catch {}
+            try sqmu.lockTransfers(tokenId) {} catch {}
         }
     }
 
@@ -849,8 +850,9 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         require(booking.tokenised, "not tokenised");
         require(booking.soldSqmu > 0, "no sqmu minted");
 
+        uint256 tokenId = _sqmuTokenId(bookingId);
         IR3ntSQMU sqmu = IR3ntSQMU(sqmuToken);
-        uint256 sqmuBalance = sqmu.balanceOf(msg.sender, bookingId);
+        uint256 sqmuBalance = sqmu.balanceOf(msg.sender, tokenId);
         require(sqmuBalance > 0, "no sqmu");
 
         uint256 acc = booking.accRentPerSqmu;
@@ -878,7 +880,8 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
             return 0;
         }
 
-        uint256 sqmuBalance = IR3ntSQMU(sqmuToken).balanceOf(account, bookingId);
+        uint256 tokenId = _sqmuTokenId(bookingId);
+        uint256 sqmuBalance = IR3ntSQMU(sqmuToken).balanceOf(account, tokenId);
         if (sqmuBalance == 0) {
             return 0;
         }
@@ -891,6 +894,14 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         }
 
         pending = accumulated - debt;
+    }
+
+    /**
+     * @notice Derive the ERC-1155 token id for a booking scoped to this listing instance.
+     * @param bookingId Identifier of the booking.
+     */
+    function _sqmuTokenId(uint256 bookingId) internal view returns (uint256) {
+        return (uint256(uint160(address(this))) << 96) | bookingId;
     }
 
     // -------------------------------------------------

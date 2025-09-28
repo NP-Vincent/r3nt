@@ -399,7 +399,8 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
             token.safeTransfer(landlord, proceeds);
         }
 
-        IR3ntSQMU(sqmuToken).mint(investor, bookingId, sqmuAmount, "");
+        uint256 tokenId = _sqmuTokenId();
+        IR3ntSQMU(sqmuToken).mint(investor, tokenId, sqmuAmount, "");
 
         uint256 acc = accRentPerSqmu;
         if (acc > 0) {
@@ -528,7 +529,8 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
      * @return amount Amount of USDC transferred to the recipient.
      */
     function claim(address recipient) external nonReentrant returns (uint256 amount) {
-        uint256 balance = IR3ntSQMU(sqmuToken).balanceOf(msg.sender, bookingId);
+        uint256 tokenId = _sqmuTokenId();
+        uint256 balance = IR3ntSQMU(sqmuToken).balanceOf(msg.sender, tokenId);
         require(balance > 0, "no sqmu");
 
         uint256 acc = accRentPerSqmu;
@@ -551,7 +553,8 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
      * @return pending Amount of USDC currently claimable.
      */
     function previewClaim(address account) external view returns (uint256 pending) {
-        uint256 balance = IR3ntSQMU(sqmuToken).balanceOf(account, bookingId);
+        uint256 tokenId = _sqmuTokenId();
+        uint256 balance = IR3ntSQMU(sqmuToken).balanceOf(account, tokenId);
         if (balance == 0) {
             return 0;
         }
@@ -649,8 +652,13 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
         }
     }
 
+    function _sqmuTokenId() internal view returns (uint256) {
+        return (uint256(uint160(listing)) << 96) | bookingId;
+    }
+
     function _attemptLockTransfers() internal {
-        try IR3ntSQMU(sqmuToken).lockTransfers(bookingId) {} catch {}
+        uint256 tokenId = _sqmuTokenId();
+        try IR3ntSQMU(sqmuToken).lockTransfers(tokenId) {} catch {}
     }
 
     // -------------------------------------------------
