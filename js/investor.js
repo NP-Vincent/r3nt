@@ -3,6 +3,7 @@ import { createPublicClient, http, encodeFunctionData, erc20Abi } from 'https://
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
+import { sqmuTokenIdentity } from './tools.js';
 import {
   RPC_URL,
   PLATFORM_ADDRESS,
@@ -815,9 +816,18 @@ async function loadListingBookings(listingAddress, account) {
     if (totalSqmu > 0n && soldSqmu >= totalSqmu && balance === 0n) {
       continue;
     }
+
+    let sqmuToken = null;
+    try {
+      sqmuToken = sqmuTokenIdentity(listingAddress, bookingId);
+    } catch (err) {
+      console.warn('Failed to derive SQMU token identity', listingAddress, bookingId.toString(), err);
+    }
+
     entries.push({
       listingAddress,
       bookingId: id,
+      bookingIdBigInt: bookingId,
       tokenised,
       totalSqmu,
       soldSqmu,
@@ -835,6 +845,7 @@ async function loadListingBookings(listingAddress, account) {
       metadataURI: descriptor.metadataURI,
       propertyTitle: descriptor.title,
       propertyDescription: descriptor.description,
+      sqmuToken,
     });
   }
   return entries;
@@ -889,16 +900,28 @@ function renderHoldings(entries, options = {}) {
       actions,
     });
 
+    if (entry.sqmuToken) {
+      card.dataset.tokenId = entry.sqmuToken.tokenId.toString();
+      card.dataset.tokenIdHex = entry.sqmuToken.hex;
+    }
+
     if (statusClass) {
       card.classList.add(`booking-status-${statusClass}`);
     }
 
     const header = card.querySelector('.card-header');
     if (header) {
-      const listingLabel = document.createElement('div');
-      listingLabel.className = 'muted mono';
-      listingLabel.textContent = shortAddress(entry.listingAddress);
-      header.appendChild(listingLabel);
+      const identity = document.createElement('div');
+      identity.className = 'muted mono sqmu-token-identity';
+      if (entry.sqmuToken) {
+        identity.textContent = entry.sqmuToken.display;
+        identity.title = `SQMU token ${entry.sqmuToken.hex} (listing ${entry.sqmuToken.listingAddress}, booking ${entry.sqmuToken.bookingId.toString()})`;
+        identity.dataset.tokenId = entry.sqmuToken.tokenId.toString();
+        identity.dataset.tokenIdHex = entry.sqmuToken.hex;
+      } else {
+        identity.textContent = shortAddress(entry.listingAddress);
+      }
+      header.appendChild(identity);
     }
 
     const actionsContainer = card.querySelector('.card-actions');
@@ -999,6 +1022,10 @@ function renderTokenisation(entries) {
 
     card.classList.add('tokenisation-invest-card');
     card.dataset.listingAddress = entry.listingAddress;
+    if (entry.sqmuToken) {
+      card.dataset.tokenId = entry.sqmuToken.tokenId.toString();
+      card.dataset.tokenIdHex = entry.sqmuToken.hex;
+    }
 
     const sqmuInput = card.querySelector('input[name="amount"]');
     const totalDisplay = card.querySelector('[data-role="total-usdc"]');
@@ -1050,6 +1077,21 @@ function renderTokenisation(entries) {
       card.insertBefore(description, header.nextSibling);
     }
 
+    if (entry.sqmuToken) {
+      const identity = document.createElement('div');
+      identity.className = 'muted mono sqmu-token-identity';
+      identity.textContent = entry.sqmuToken.display;
+      identity.title = `SQMU token ${entry.sqmuToken.hex} (listing ${entry.sqmuToken.listingAddress}, booking ${entry.sqmuToken.bookingId.toString()})`;
+      identity.dataset.tokenId = entry.sqmuToken.tokenId.toString();
+      identity.dataset.tokenIdHex = entry.sqmuToken.hex;
+      const afterHeader = header.nextSibling;
+      if (afterHeader) {
+        card.insertBefore(identity, afterHeader);
+      } else {
+        card.appendChild(identity);
+      }
+    }
+
     const remaining = sale.remainingSqmu ?? 0n;
     const supplyNote = document.createElement('div');
     supplyNote.className = 'token-progress';
@@ -1077,11 +1119,6 @@ function renderTokenisation(entries) {
       amountInput.placeholder = `Max ${sale.remainingSqmu.toString()} SQMU`;
     }
 
-    const listingLabel = document.createElement('div');
-    listingLabel.className = 'muted mono';
-    listingLabel.textContent = shortAddress(entry.listingAddress);
-    card.appendChild(listingLabel);
-
     container.appendChild(card);
   }
 }
@@ -1100,6 +1137,10 @@ function renderRent(entries) {
   for (const entry of entries) {
     const card = document.createElement('div');
     card.className = 'data-card';
+    if (entry.sqmuToken) {
+      card.dataset.tokenId = entry.sqmuToken.tokenId.toString();
+      card.dataset.tokenIdHex = entry.sqmuToken.hex;
+    }
 
     const header = document.createElement('div');
     header.className = 'data-card-header';
@@ -1108,6 +1149,16 @@ function renderRent(entries) {
     header.appendChild(title);
     header.appendChild(createBookingBadge(entry.bookingId));
     card.appendChild(header);
+
+    if (entry.sqmuToken) {
+      const identity = document.createElement('div');
+      identity.className = 'muted mono sqmu-token-identity';
+      identity.textContent = entry.sqmuToken.display;
+      identity.title = `SQMU token ${entry.sqmuToken.hex} (listing ${entry.sqmuToken.listingAddress}, booking ${entry.sqmuToken.bookingId.toString()})`;
+      identity.dataset.tokenId = entry.sqmuToken.tokenId.toString();
+      identity.dataset.tokenIdHex = entry.sqmuToken.hex;
+      card.appendChild(identity);
+    }
 
     const metric = document.createElement('div');
     metric.className = 'metric-row';
