@@ -188,6 +188,68 @@ export function isMethodNotFoundError(error) {
   );
 }
 
+export function extractErrorMessage(error, fallback = 'Something went wrong.') {
+  const fallbackMessage = typeof fallback === 'string' && fallback.trim() ? fallback.trim() : 'Something went wrong.';
+
+  const push = (list, value) => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    list.push(trimmed);
+  };
+
+  const visit = (value, results, depth = 0) => {
+    if (value === null || value === undefined || depth > 6) {
+      return;
+    }
+    if (typeof value === 'string') {
+      push(results, value);
+      return;
+    }
+    if (typeof value !== 'object') {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        visit(entry, results, depth + 1);
+      }
+      return;
+    }
+
+    push(results, value.shortMessage);
+    push(results, value.message);
+    push(results, value.reason);
+    push(results, value.details);
+    push(results, value.body);
+
+    if (value.data) {
+      if (typeof value.data === 'string') {
+        push(results, value.data);
+      } else {
+        visit(value.data, results, depth + 1);
+      }
+    }
+
+    if (value.error && value.error !== value) {
+      visit(value.error, results, depth + 1);
+    }
+    if (value.cause && value.cause !== value) {
+      visit(value.cause, results, depth + 1);
+    }
+  };
+
+  const candidates = [];
+  visit(error, candidates, 0);
+  const unique = dedupe(candidates);
+
+  if (unique.length > 0) {
+    return unique[0];
+  }
+
+  return fallbackMessage;
+}
+
 export async function requestWalletSendCalls(provider, options = {}) {
   if (!provider || typeof provider.request !== 'function') {
     throw new Error('Ethereum provider with request(...) is required.');
