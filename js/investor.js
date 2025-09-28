@@ -48,7 +48,7 @@ mountNotificationCenter(document.getElementById('notificationTray'), { role: 'in
 
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 let provider;
-const state = { account: null, holdings: [] };
+const state = { account: null, holdings: [], filters: { holdings: null } };
 let investorDataLoading = false;
 const investorListingEventWatchers = new Map();
 const investorEventRefreshState = { timer: null, messages: new Set(), running: false };
@@ -101,6 +101,125 @@ function toBigInt(value, fallback = 0n) {
     return fallback;
   }
 }
+
+function parseHoldingsFilterFromUrl() {
+  if (typeof window === 'undefined' || typeof window.location === 'undefined') {
+    return { listing: '', listingInput: '', booking: null, bookingInput: '' };
+  }
+
+  const result = { listing: '', listingInput: '', booking: null, bookingInput: '' };
+
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const listingParam = params.get('listing');
+    if (listingParam) {
+      const cleaned = listingParam.trim();
+      const normalised = normaliseAddress(cleaned);
+      if (isHexAddress(normalised)) {
+        result.listing = normalised;
+        result.listingInput = cleaned;
+      } else {
+        result.listingInput = cleaned;
+      }
+    }
+
+    const bookingParam = params.get('booking');
+    if (bookingParam) {
+      const cleaned = bookingParam.trim();
+      const bookingValue = toBigInt(cleaned, null);
+      if (typeof bookingValue === 'bigint' && bookingValue >= 0n) {
+        result.booking = bookingValue;
+      }
+      result.bookingInput = cleaned;
+    }
+  } catch (err) {
+    console.warn('Failed to parse holdings filter from URL', err);
+  }
+
+  return result;
+}
+
+function isHoldingsFilterActive(filter) {
+  if (!filter) return false;
+  if (filter.listing && isHexAddress(filter.listing)) {
+    return true;
+  }
+  if (typeof filter.booking === 'bigint') {
+    return true;
+  }
+  return false;
+}
+
+function applyHoldingsFilter(entries, filter) {
+  if (!Array.isArray(entries) || !entries.length || !isHoldingsFilterActive(filter)) {
+    return entries;
+  }
+
+  const listingTarget = filter.listing ? normaliseAddress(filter.listing) : '';
+  const bookingTarget = typeof filter.booking === 'bigint' ? filter.booking : null;
+
+  return entries.filter((entry) => {
+    if (listingTarget) {
+      const entryListing = normaliseAddress(entry?.listingAddress);
+      if (!entryListing || entryListing !== listingTarget) {
+        return false;
+      }
+    }
+
+    if (bookingTarget !== null) {
+      let entryId;
+      if (typeof entry?.bookingId === 'bigint') {
+        entryId = entry.bookingId;
+      } else if (typeof entry?.bookingId === 'number') {
+        entryId = BigInt(entry.bookingId);
+      } else if (typeof entry?.bookingId === 'string' && entry.bookingId.trim()) {
+        entryId = toBigInt(entry.bookingId.trim(), null);
+      } else {
+        entryId = toBigInt(entry?.bookingId, null);
+      }
+
+      if (typeof entryId !== 'bigint' || entryId !== bookingTarget) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+function describeHoldingsFilter(filter) {
+  if (!isHoldingsFilterActive(filter)) {
+    return '';
+  }
+
+  const parts = [];
+  if (filter.listing && isHexAddress(filter.listing)) {
+    parts.push(`listing ${shortAddress(filter.listing)}`);
+  } else if (filter.listingInput) {
+    parts.push(`listing ${filter.listingInput}`);
+  }
+
+  if (typeof filter.booking === 'bigint') {
+    parts.push(`booking #${filter.booking.toString()}`);
+  } else if (filter.bookingInput) {
+    parts.push(`booking #${filter.bookingInput}`);
+  }
+
+  if (!parts.length) {
+    return '';
+  }
+
+  return `Filtered by ${parts.join(' and ')}.`;
+}
+
+function holdingsEmptyMessage(filter) {
+  if (!isHoldingsFilterActive(filter)) {
+    return 'No SQMU-R holdings yet.';
+  }
+  return 'No SQMU-R holdings match the selected listing and booking.';
+}
+
+state.filters.holdings = parseHoldingsFilterFromUrl();
 
 function makeBookingKey(listingAddress, bookingId) {
   const addr = typeof listingAddress === 'string' ? listingAddress.toLowerCase() : '';
@@ -721,14 +840,22 @@ async function loadListingBookings(listingAddress, account) {
   return entries;
 }
 
-function renderHoldings(entries) {
+function renderHoldings(entries, options = {}) {
+  const { filter = null } = options;
   const container = els.holdingsList;
   if (!container) return;
   container.innerHTML = '';
+  const filterActive = isHoldingsFilterActive(filter);
+  if (filterActive) {
+    const note = document.createElement('div');
+    note.className = 'muted filter-note';
+    note.textContent = describeHoldingsFilter(filter);
+    container.appendChild(note);
+  }
   if (!entries.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = 'No SQMU-R holdings yet.';
+    empty.textContent = holdingsEmptyMessage(filter);
     container.appendChild(empty);
     return;
   }
@@ -1007,18 +1134,27 @@ function renderRent(entries) {
 }
 
 function renderDashboards(results) {
+  const holdingsFilter = state.filters?.holdings || null;
   const holdings = results.filter((entry) => entry.balance > 0n);
+  const filteredHoldings = applyHoldingsFilter(holdings, holdingsFilter);
   const tokenised = results.filter((entry) => {
     if (!entry.tokenised) return false;
     const total = typeof entry.totalSqmu === 'bigint' ? entry.totalSqmu : BigInt(entry.totalSqmu || 0);
     const sold = typeof entry.soldSqmu === 'bigint' ? entry.soldSqmu : BigInt(entry.soldSqmu || 0);
     return total <= 0n || sold < total;
   });
-  const rentClaims = holdings.filter((entry) => entry.claimable > 0n);
+  const rentClaims = filteredHoldings.filter((entry) => entry.claimable > 0n);
 
-  renderHoldings(holdings);
+  renderHoldings(filteredHoldings, { filter: holdingsFilter });
   renderTokenisation(tokenised);
   renderRent(rentClaims);
+
+  return {
+    holdingsTotal: holdings.length,
+    holdingsVisible: filteredHoldings.length,
+    rentClaimsVisible: rentClaims.length,
+    tokenisedTotal: tokenised.length,
+  };
 }
 
 async function loadInvestorData(account, options = {}) {
@@ -1044,9 +1180,24 @@ async function loadInvestorData(account, options = {}) {
       allEntries.push(...bookings);
     }
     state.holdings = allEntries;
-    renderDashboards(allEntries);
+    const dashboardStats = renderDashboards(allEntries);
     if (!silent) {
-      setStatus(`Loaded ${allEntries.length} booking${allEntries.length === 1 ? '' : 's'}.`);
+      const filter = state.filters?.holdings || null;
+      const bookingsLabel = `Loaded ${allEntries.length} booking${allEntries.length === 1 ? '' : 's'}.`;
+      let holdingsLabel = '';
+      if (dashboardStats) {
+        const { holdingsTotal = 0, holdingsVisible = 0 } = dashboardStats;
+        if (holdingsTotal > 0) {
+          if (isHoldingsFilterActive(filter)) {
+            holdingsLabel = ` Showing ${holdingsVisible} of ${holdingsTotal} SQMU-R holding${holdingsTotal === 1 ? '' : 's'} for the selected filter.`;
+          } else {
+            holdingsLabel = ` ${holdingsTotal} SQMU-R holding${holdingsTotal === 1 ? '' : 's'} detected.`;
+          }
+        } else if (isHoldingsFilterActive(filter)) {
+          holdingsLabel = ' No SQMU-R holdings matched the selected filter.';
+        }
+      }
+      setStatus(`${bookingsLabel}${holdingsLabel}`.trim());
       notify({ message: 'Investor data refreshed.', variant: 'success', role: 'investor', timeout: 5000 });
     }
     return true;

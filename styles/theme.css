@@ -1403,6 +1403,11 @@ dl.summary-breakdown dd {
   gap: 12px;
 }
 
+.data-list .filter-note {
+  font-size: 0.82rem;
+  margin-bottom: -4px;
+}
+
 .metric-row {
   display: flex;
   flex-wrap: wrap;
