@@ -926,6 +926,25 @@ footer {
   box-shadow: var(--shadow-subtle);
 }
 
+.card-footnote.cancel-confirmation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--color-warning-text);
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.card-footnote.cancel-confirmation .cancel-confirmation-message {
+  flex: 1 1 220px;
+}
+
+.card-footnote.cancel-confirmation .cancel-confirmation-dismiss {
+  flex: 0 0 auto;
+}
+
 .data-card.selectable {
   cursor: pointer;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
