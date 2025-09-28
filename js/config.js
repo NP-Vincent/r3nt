@@ -39,7 +39,7 @@ export const R3NT_ABI = R3NTSQMUArtifact.abi || [];
 export const REGISTRY_ADDRESS = '0xa863B419d947e77888C25329011fDEF1d355d24D'; // BookingRegistry
 export const REGISTRY_ABI = BookingRegistryArtifact.abi || [];
 
-export const LISTING_ADDRESS = '0x22b47987A59623255f27c2382C3e0967a686Ea4A'; // Listing implementation
+export const LISTING_ADDRESS = '0x0C27402c0ab01e00B370771BDb08Fd48330E65be'; // Listing implementation
 export const LISTING_ABI = ListingArtifact.abi || [];
 
 export const FACTORY_ADDRESS = '0x4CC6c3B30DAf5473919a943B67B83a23B87bAe87'; // ListingFactory
