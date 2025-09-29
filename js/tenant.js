@@ -9,7 +9,11 @@ import { ListingCard, BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
 import { createCollapsibleSection, makeCollapsible, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
-import { applyListingFilters, DEFAULT_LISTING_SORT_MODE } from './listing-filters.js';
+import {
+  applyListingFilters,
+  DEFAULT_LISTING_SORT_MODE,
+  LISTING_LOCATION_FILTER_RADIUS_KM,
+} from './listing-filters.js';
 import { createOpenMapButton } from './map-assist.js';
 import {
   RPC_URL,
@@ -33,6 +37,7 @@ const els = {
   listingControls: document.getElementById('listingControls'),
   listingSort: document.getElementById('listingSort'),
   listingLocationFilter: document.getElementById('listingLocationFilter'),
+  listingLocationDetect: document.getElementById('listingLocationDetect'),
   listingLocationClear: document.getElementById('listingLocationClear'),
   planner: {
     card: document.querySelector('[data-planner-card]'),
@@ -170,6 +175,100 @@ if (els.listingLocationClear) {
       els.listingLocationFilter.focus();
     }
     renderTenantListingView();
+  });
+}
+
+let locationDetectionInFlight = false;
+
+function setDetectLocationButtonState(isBusy) {
+  const btn = els.listingLocationDetect;
+  if (!btn) return;
+  if (!btn.dataset.defaultLabel) {
+    btn.dataset.defaultLabel = (btn.textContent || '').trim();
+  }
+  btn.disabled = Boolean(isBusy);
+  if (isBusy) {
+    btn.textContent = 'Detecting…';
+    btn.setAttribute('aria-busy', 'true');
+  } else {
+    btn.textContent = btn.dataset.defaultLabel || 'Detect location';
+    btn.removeAttribute('aria-busy');
+  }
+}
+
+async function detectTenantLocation() {
+  if (locationDetectionInFlight) return;
+  if (!('geolocation' in navigator)) {
+    notify({
+      message: 'Geolocation is not supported in this browser.',
+      variant: 'error',
+      role: 'tenant',
+      timeout: 5000,
+    });
+    return;
+  }
+  locationDetectionInFlight = true;
+  setDetectLocationButtonState(true);
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      locationDetectionInFlight = false;
+      setDetectLocationButtonState(false);
+      if (!position || !position.coords) {
+        notify({
+          message: 'Location unavailable — please try again.',
+          variant: 'error',
+          role: 'tenant',
+          timeout: 5000,
+        });
+        return;
+      }
+      const { latitude, longitude } = position.coords;
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        notify({
+          message: 'Detected location was invalid.',
+          variant: 'error',
+          role: 'tenant',
+          timeout: 5000,
+        });
+        return;
+      }
+      const formatted = `${latitude.toFixed(5)},${longitude.toFixed(5)}`;
+      listingLocationFilterValue = formatted;
+      if (els.listingLocationFilter) {
+        els.listingLocationFilter.value = formatted;
+      }
+      notify({
+        message: `Showing listings within ${LISTING_LOCATION_FILTER_RADIUS_KM} km of your location.`,
+        variant: 'success',
+        role: 'tenant',
+        timeout: 4000,
+      });
+      renderTenantListingView();
+    },
+    (error) => {
+      locationDetectionInFlight = false;
+      setDetectLocationButtonState(false);
+      const msg = error && typeof error.message === 'string' && error.message.trim()
+        ? error.message.trim()
+        : 'Unable to detect location.';
+      notify({
+        message: `Location detection failed: ${msg}`,
+        variant: 'error',
+        role: 'tenant',
+        timeout: 6000,
+      });
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 120000,
+    },
+  );
+}
+
+if (els.listingLocationDetect) {
+  els.listingLocationDetect.addEventListener('click', () => {
+    detectTenantLocation();
   });
 }
 
@@ -1013,7 +1112,19 @@ function renderListings(listings, options = {}) {
     : Array.isArray(listings)
     ? listings.length
     : 0;
-  const filterInfo = options.filterInfo || { typed: false, applied: false, invalid: false, prefix: '' };
+  const filterInfo = options.filterInfo || {
+    typed: false,
+    applied: false,
+    invalid: false,
+    prefix: '',
+    mode: null,
+  };
+  const filterApplied = Boolean(filterInfo.applied);
+  const usingRadiusFilter = filterApplied && filterInfo.mode === 'radius';
+  const usingPrefixFilter = filterApplied && filterInfo.mode === 'prefix';
+  const radiusKm = Number.isFinite(filterInfo.radiusKm)
+    ? Number(filterInfo.radiusKm)
+    : LISTING_LOCATION_FILTER_RADIUS_KM;
 
   container.innerHTML = '';
   const plannerEmpty = els.planner?.empty;
@@ -1026,7 +1137,9 @@ function renderListings(listings, options = {}) {
     let emptyMessage = 'No active listings.';
     if (filterInfo.invalid && filterInfo.typed) {
       emptyMessage = 'Location filter not recognised — showing all listings.';
-    } else if (filterInfo.applied && filterInfo.prefix) {
+    } else if (usingRadiusFilter) {
+      emptyMessage = `No listings within ${radiusKm} km of the selected location.`;
+    } else if (usingPrefixFilter) {
       emptyMessage = 'No listings match the current filters.';
     } else if (total > 0) {
       emptyMessage = 'No listings to display.';
@@ -1036,7 +1149,9 @@ function renderListings(listings, options = {}) {
     if (plannerEmpty) {
       if (filterInfo.invalid && filterInfo.typed) {
         plannerEmpty.textContent = 'Location filter not recognised — showing all listings.';
-      } else if (filterInfo.applied && filterInfo.prefix) {
+      } else if (usingRadiusFilter) {
+        plannerEmpty.textContent = `Adjust the location filter to see listings within ${radiusKm} km.`;
+      } else if (usingPrefixFilter) {
         plannerEmpty.textContent = 'Adjust your filters to see listings.';
       } else if (total === 0) {
         plannerEmpty.textContent = 'No active listings.';
@@ -1050,7 +1165,13 @@ function renderListings(listings, options = {}) {
   container.classList.remove('muted');
 
   if (plannerEmpty) {
-    if (filterInfo.applied && filterInfo.prefix) {
+    if (usingRadiusFilter) {
+      if (total === listings.length) {
+        plannerEmpty.textContent = `Showing all ${total} listing${total === 1 ? '' : 's'} within ${radiusKm} km.`;
+      } else {
+        plannerEmpty.textContent = `Showing ${listings.length} of ${total} listing${total === 1 ? '' : 's'} within ${radiusKm} km.`;
+      }
+    } else if (usingPrefixFilter) {
       if (total === listings.length) {
         plannerEmpty.textContent = `Showing all ${total} listing${total === 1 ? '' : 's'} (filters applied).`;
       } else {
