@@ -744,10 +744,7 @@ footer {
   box-shadow: var(--color-selected-shadow);
 }
 
-#landlordListings,
-#listings,
-#bookingsList {
-  margin-top: 12px;
+.carousel-track {
   display: flex;
   gap: 16px;
   overflow-x: auto;
@@ -760,21 +757,23 @@ footer {
   overscroll-behavior-inline: contain;
 }
 
+#landlordListings,
+#listings,
+#bookingsList {
+  margin-top: 12px;
+}
+
 #listings {
   margin-top: 20px;
 }
 
-#landlordListings > *,
-#listings > *,
-#bookingsList > * {
+.carousel-track > * {
   flex: 0 0 clamp(260px, 80vw, 340px);
   scroll-snap-align: start;
   scroll-snap-stop: always;
 }
 
-#landlordListings:focus-visible,
-#listings:focus-visible,
-#bookingsList:focus-visible {
+.carousel-track:focus-visible {
   outline: 2px solid var(--color-link);
   outline-offset: 4px;
 }
@@ -1248,10 +1247,8 @@ dl.summary-breakdown dd {
   color: var(--color-muted);
 }
 
-.bookings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.bookings-list:not(.carousel-track) > * + * {
+  margin-top: 12px;
 }
 
 .booking-entry {
