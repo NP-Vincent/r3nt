@@ -7,6 +7,8 @@ import {
   RPC_URL,
   LISTING_ABI,
   AGENT_ABI,
+  PLATFORM_ABI,
+  PLATFORM_ADDRESS,
   R3NT_ABI,
   R3NT_ADDRESS,
   APP_VERSION,
@@ -23,6 +25,9 @@ const els = {
   connect: document.getElementById('connect'),
   loadAgent: document.getElementById('loadAgent'),
   agentAddress: document.getElementById('agentAddress'),
+  operatorProxySection: document.getElementById('operatorProxySection'),
+  operatorProxyStatus: document.getElementById('operatorProxyStatus'),
+  operatorProxyList: document.getElementById('operatorProxyList'),
   walletAddress: document.getElementById('walletAddress'),
   status: document.getElementById('status'),
   overviewCard: document.getElementById('overviewCard'),
@@ -71,7 +76,7 @@ if (els.fundraisingPeriod && !els.fundraisingPeriod.value) {
 
 const pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
 let provider;
-const state = { account: null, agent: null, data: null };
+const state = { account: null, agent: null, data: null, operatorProxies: [] };
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
 let agentViewBackEntry = null;
@@ -100,6 +105,146 @@ function shortAddress(value) {
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
+function renderOperatorProxies({ loading = false, error = null, proxies } = {}) {
+  const list = Array.isArray(proxies) ? proxies : state.operatorProxies;
+  const selected = state.agent ? state.agent.toLowerCase() : '';
+  const hasSelection = Boolean(
+    selected && Array.isArray(list) && list.some((address) => typeof address === 'string' && address.toLowerCase() === selected)
+  );
+  const statusEl = els.operatorProxyStatus;
+  const listEl = els.operatorProxyList;
+  const account = state.account;
+
+  if (statusEl) {
+    let message = '';
+    if (!account) {
+      message = 'Connect your wallet to view your agent proxies.';
+    } else if (loading) {
+      message = 'Loading agent proxies…';
+    } else if (error) {
+      message = error;
+    } else if (!list || !list.length) {
+      message = 'No agent proxies assigned to this operator.';
+    } else if (!hasSelection) {
+      message = 'Select an agent proxy to load details.';
+    } else {
+      message = `Selected proxy: ${shortAddress(state.agent)}.`;
+    }
+    statusEl.textContent = message;
+    statusEl.classList.toggle('error', Boolean(error));
+    statusEl.hidden = !message;
+  }
+
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  if (!account || loading || error) {
+    return;
+  }
+
+  if (!list || !list.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No agent proxies assigned to this operator.';
+    listEl.appendChild(empty);
+    return;
+  }
+
+  for (const address of list) {
+    if (typeof address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      continue;
+    }
+
+    const card = document.createElement('div');
+    card.className = 'data-card';
+    const isSelected = selected === address.toLowerCase();
+    if (isSelected) {
+      card.classList.add('is-selected');
+    }
+
+    const header = document.createElement('div');
+    header.className = 'data-card-header';
+    const title = document.createElement('strong');
+    title.textContent = shortAddress(address);
+    header.appendChild(title);
+    card.appendChild(header);
+
+    const addressLine = document.createElement('div');
+    addressLine.className = 'muted';
+    addressLine.textContent = address;
+    card.appendChild(addressLine);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.agentAddress = address;
+    button.textContent = isSelected ? 'Selected' : 'Load agent';
+    button.className = isSelected ? 'secondary' : 'ghost';
+    button.disabled = isSelected;
+    actions.appendChild(button);
+    card.appendChild(actions);
+
+    listEl.appendChild(card);
+  }
+}
+
+async function refreshOperatorProxies({ showLoading = true } = {}) {
+  const account = state.account ? state.account.toLowerCase() : '';
+  if (!account) {
+    state.operatorProxies = [];
+    renderOperatorProxies({ proxies: [] });
+    return;
+  }
+
+  if (showLoading) {
+    renderOperatorProxies({ loading: true });
+  }
+
+  const requestAccount = account;
+
+  try {
+    const allAgents = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allAgents' });
+    if ((state.account ? state.account.toLowerCase() : '') !== requestAccount) {
+      return;
+    }
+
+    const addresses = Array.isArray(allAgents) ? allAgents : [];
+    const filtered = [];
+
+    for (const address of addresses) {
+      if (typeof address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+        continue;
+      }
+
+      try {
+        const operator = await pub.readContract({ address, abi: AGENT_ABI, functionName: 'agent' });
+        if ((state.account ? state.account.toLowerCase() : '') !== requestAccount) {
+          return;
+        }
+        if (typeof operator === 'string' && operator.toLowerCase() === requestAccount) {
+          if (!filtered.includes(address)) {
+            filtered.push(address);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to inspect agent proxy', address, err);
+      }
+    }
+
+    state.operatorProxies = filtered;
+    renderOperatorProxies({ proxies: filtered });
+  } catch (err) {
+    if ((state.account ? state.account.toLowerCase() : '') !== requestAccount) {
+      return;
+    }
+    const message = extractErrorMessage(err, 'Unable to load agent proxies.');
+    state.operatorProxies = [];
+    renderOperatorProxies({ error: message, proxies: [] });
+    notify({ message, variant: 'error', role: 'agent', timeout: 6000 });
+  }
+}
+
 function updateConnectedAccount(addr) {
   const value = typeof addr === 'string' ? addr : null;
   state.account = value;
@@ -124,6 +269,12 @@ function updateConnectedAccount(addr) {
     } else {
       els.walletAddress.textContent = 'Not connected';
     }
+  }
+  if (value) {
+    refreshOperatorProxies();
+  } else {
+    state.operatorProxies = [];
+    renderOperatorProxies({ proxies: [] });
   }
 }
 
@@ -258,6 +409,10 @@ function resetAgentView() {
   if (els.subBookingsList) {
     els.subBookingsList.innerHTML = '';
   }
+  if (els.agentAddress) {
+    els.agentAddress.value = '';
+  }
+  renderOperatorProxies();
   setStatus('Connect your wallet and load an agent to begin.');
   backController.reset({ skipHandlers: true });
   backController.update();
@@ -583,6 +738,7 @@ async function loadAgentData(address) {
 
     state.agent = agentAddress;
     state.data = data;
+    renderOperatorProxies();
     if (els.agentAddress) {
       els.agentAddress.value = agentAddress;
     }
@@ -664,6 +820,7 @@ async function sendAgentTransaction(functionName, args, messages = {}, button) {
     setStatus(success);
     notify({ message: success, variant: 'success', role: 'agent', timeout: 6000 });
     await loadAgentData(state.agent);
+    await refreshOperatorProxies({ showLoading: false });
   } catch (err) {
     console.error('Transaction failed', err);
     if (isUserRejectedRequestError(err)) {
@@ -711,6 +868,27 @@ if (els.agentAddress) {
       event.preventDefault();
       els.loadAgent?.click();
     }
+  });
+}
+
+if (els.operatorProxyList) {
+  els.operatorProxyList.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const button = target.closest('button[data-agent-address]');
+    if (!button || button.disabled) {
+      return;
+    }
+    const address = button.dataset.agentAddress;
+    if (!address) {
+      return;
+    }
+    if (els.agentAddress) {
+      els.agentAddress.value = address;
+    }
+    await loadAgentData(address);
   });
 }
 
@@ -893,6 +1071,7 @@ if (els.collectSubRentForm) {
 
 function boot() {
   setStatus('Connect your wallet and load an agent to begin.');
+  renderOperatorProxies();
 }
 
 if (document.readyState === 'loading') {
