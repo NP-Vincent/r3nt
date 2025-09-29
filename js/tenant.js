@@ -2008,19 +2008,17 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
     filterEl.value = bookingFilterMode;
   }
 
-  const filtered = records.filter((record) => {
-    if (bookingFilterMode === 'active') {
-      return record.isActive;
-    }
-    return !record.isCancelled;
-  });
+  const filtered =
+    bookingFilterMode === 'active'
+      ? records.filter((record) => record.isActive)
+      : [...records];
 
   if (filtered.length === 0) {
     if (statusEl) {
       statusEl.textContent =
         bookingFilterMode === 'active'
           ? 'No active bookings found. Switch the filter to view past bookings.'
-          : 'No bookings found. Cancelled bookings are hidden.';
+          : 'No bookings found. Cancelled bookings are included in this view.';
     }
     closeTokenProposal();
     return;
