@@ -52,6 +52,15 @@
     <div data-collapsible-content>
       <p class="muted">Active and past stays linked to your connected wallet.</p>
       <div class="bookings-status" data-bookings-status>Connect wallet to view bookings.</div>
+      <div id="bookingControls" class="listing-controls" hidden>
+        <label>
+          <span>Show</span>
+          <select id="bookingFilter">
+            <option value="active">Active bookings</option>
+            <option value="all">All bookings (cancelled hidden)</option>
+          </select>
+        </label>
+      </div>
       <div id="bookingsList" class="bookings-list"></div>
       <div id="tokenProposalPanel" class="token-proposal-card" hidden></div>
     </div>
