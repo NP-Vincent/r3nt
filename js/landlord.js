@@ -1432,7 +1432,7 @@ function renderLandlordListingCard(listing) {
     class: 'inline-button small',
   }, 'Refresh');
   const bookingsStatus = el('div', { class: 'bookings-status' }, 'Press refresh to load bookings.');
-  const bookingsList = el('div', { class: 'bookings-list' });
+  const bookingsList = el('div', { class: 'bookings-list carousel-track' });
   const bookingsHeader = el('div', { class: 'bookings-header' }, [
     el('h3', {}, 'Bookings'),
     bookingsRefresh,
