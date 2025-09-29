@@ -165,6 +165,7 @@
       <a href="./landlord.html">Landlord</a>
       <a href="./investor.html">Investor</a>
       <a href="./agent.html">Agent</a>
+      <a href="./faq.html">FAQ</a>
       <span class="version-badge" data-version></span>
     </nav>
 
@@ -372,7 +373,7 @@
     </main>
 
     <footer>
-      &copy; <span data-year></span> r3nt. This page describes user-facing flows; it omits deep technical implementation details. For integration or audits, consult the project documentation.
+      r3nt by SQMU. USDC. Arbitrum.
     </footer>
   </div>
 
@@ -386,18 +387,12 @@
       if (badge) badge.textContent = `Build ${APP_VERSION}`;
     };
 
-    const applyYear = () => {
-      const target = document.querySelector('[data-year]');
-      if (target) target.textContent = new Date().getFullYear();
-    };
-
     const backButton = document.querySelector('[data-back-button]');
     const backController = createBackController({ sdk, button: backButton });
     backController.update();
 
     const boot = () => {
       applyVersionBadge();
-      applyYear();
     };
 
     if (document.readyState === 'loading') {
