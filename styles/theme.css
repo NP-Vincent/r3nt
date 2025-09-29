@@ -748,13 +748,35 @@ footer {
 #listings,
 #bookingsList {
   margin-top: 12px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 4px;
+  -webkit-overflow-scrolling: touch;
+  align-items: stretch;
+  overscroll-behavior-inline: contain;
 }
 
 #listings {
   margin-top: 20px;
+}
+
+#landlordListings > *,
+#listings > *,
+#bookingsList > * {
+  flex: 0 0 clamp(260px, 80vw, 340px);
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+#landlordListings:focus-visible,
+#listings:focus-visible,
+#bookingsList:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 4px;
 }
 
 .checklist {
@@ -924,6 +946,14 @@ footer {
   line-height: 1.5;
   word-break: break-word;
   box-shadow: var(--shadow-subtle);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.landlord-card:focus-within,
+.listing-card:focus-within,
+.booking-entry:focus-within {
+  border-color: var(--color-selected-border);
+  box-shadow: var(--color-selected-shadow);
 }
 
 .card-footnote.cancel-confirmation {
