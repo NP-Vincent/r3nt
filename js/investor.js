@@ -815,6 +815,7 @@ async function loadListingBookings(listingAddress, account) {
 
     let balance = 0n;
     let claimable = 0n;
+    let transferLocked = false;
     try {
       balance = await pub.readContract({
         address: R3NT_ADDRESS,
@@ -823,6 +824,17 @@ async function loadListingBookings(listingAddress, account) {
         args: [account, tokenIdForBalance],
       });
     } catch {}
+    try {
+      const locked = await pub.readContract({
+        address: R3NT_ADDRESS,
+        abi: R3NT_ABI,
+        functionName: 'isTransferLocked',
+        args: [tokenIdForBalance],
+      });
+      transferLocked = Boolean(locked);
+    } catch (err) {
+      console.warn('Failed to determine transfer lock state', listingAddress, bookingId.toString(), err);
+    }
     if (tokenised && balance > 0n) {
       try {
         claimable = await pub.readContract({ address: listingAddress, abi: LISTING_ABI, functionName: 'previewClaim', args: [bookingId, account] });
@@ -849,10 +861,12 @@ async function loadListingBookings(listingAddress, account) {
       deposit: BigInt(info.deposit ?? 0),
       expectedNetRent: BigInt(info.expectedNetRent ?? 0),
       status: info.status,
+      isActiveBooking: normaliseStatusValue(info.status) === 1,
       metadataURI: descriptor.metadataURI,
       propertyTitle: descriptor.title,
       propertyDescription: descriptor.description,
       sqmuToken,
+      transferLocked,
     });
   }
   return entries;
@@ -1015,6 +1029,10 @@ function renderTokenisation(entries) {
       continue;
     }
 
+    const saleClosed = !entry.isActiveBooking || entry.transferLocked;
+    const saleClosedReason = entry.transferLocked
+      ? 'Transfers locked: sale has been closed.'
+      : 'Booking inactive: sale is no longer available.';
     const priceDisplay = Number(sale.pricePerSqmu ?? 0n) / Number(USDC_SCALAR);
     const card = TokenisationCard({
       bookingId: entry.bookingId,
@@ -1024,7 +1042,12 @@ function renderTokenisation(entries) {
       feeBps: sale.feeBps,
       period: sale.periodLabel,
       mode: 'invest',
-      onSubmit: ({ amount }) => investInSale(entry, amount, card),
+      onSubmit: ({ amount }) => {
+        if (saleClosed) {
+          return;
+        }
+        investInSale(entry, amount, card);
+      },
     });
 
     card.classList.add('tokenisation-invest-card');
@@ -1037,7 +1060,7 @@ function renderTokenisation(entries) {
     const sqmuInput = card.querySelector('input[name="amount"]');
     const totalDisplay = card.querySelector('[data-role="total-usdc"]');
     const price = sale.pricePerSqmu;
-    if (sqmuInput && totalDisplay && typeof price === 'bigint') {
+    if (!saleClosed && sqmuInput && totalDisplay && typeof price === 'bigint') {
       const updateTotal = () => {
         const raw = sqmuInput.value != null ? sqmuInput.value.trim() : '';
         if (!raw) {
@@ -1112,7 +1135,25 @@ function renderTokenisation(entries) {
 
     const submitBtn = card.querySelector('button[type="submit"]');
     const amountInput = card.querySelector('input[name="amount"]');
-    if (remaining <= 0n) {
+    if (saleClosed) {
+      card.classList.add('sale-closed');
+      if (submitBtn) {
+        submitBtn.textContent = 'Sale closed';
+        submitBtn.disabled = true;
+        submitBtn.classList.add('secondary');
+      }
+      if (amountInput) {
+        amountInput.disabled = true;
+        amountInput.placeholder = 'Sale unavailable';
+      }
+      const closureNote = document.createElement('div');
+      closureNote.className = 'token-progress warning';
+      closureNote.textContent = saleClosedReason;
+      card.appendChild(closureNote);
+      if (totalDisplay) {
+        totalDisplay.textContent = '0 USDC';
+      }
+    } else if (remaining <= 0n) {
       if (submitBtn) {
         submitBtn.textContent = 'Sold out';
         submitBtn.disabled = true;
@@ -1197,6 +1238,8 @@ function renderDashboards(results) {
   const filteredHoldings = applyHoldingsFilter(holdings, holdingsFilter);
   const tokenised = results.filter((entry) => {
     if (!entry.tokenised) return false;
+    if (!entry.isActiveBooking) return false;
+    if (entry.transferLocked) return false;
     const total = typeof entry.totalSqmu === 'bigint' ? entry.totalSqmu : BigInt(entry.totalSqmu || 0);
     const sold = typeof entry.soldSqmu === 'bigint' ? entry.soldSqmu : BigInt(entry.soldSqmu || 0);
     return total <= 0n || sold < total;
