@@ -2,282 +2,414 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>r3nt – User Guide & FAQ</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>r3nt — User Guide &amp; FAQ</title>
+  <meta name="description" content="Guided walkthroughs for tenants, landlords, agents and investors using r3nt. Learn how tokenisation models work and find answers to common questions." />
+  <meta name="fc:miniapp" content='{
+    "version":"1",
+    "imageUrl":"https://r3nt.sqmu.net/assets/icon.png",
+    "button":{
+      "title":"Open r3nt",
+      "action":{
+        "type":"launch_miniapp",
+        "name":"r3nt",
+        "url":"https://r3nt.sqmu.net/index.html",
+        "splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png",
+        "splashBackgroundColor":"#FFFFFF"
+      }
+    }
+  }' />
+  <link rel="stylesheet" href="./styles/theme.css" />
+  <script src="./js/dev-settings.js"></script>
+  <script src="./js/dev-error-console.js"></script>
   <style>
-    :root {
-      --bg: #0b0d12;
-      --panel: #111521;
-      --muted: #a7b0c0;
-      --text: #e7ecf5;
-      --accent: #6aa6ff;
-      --accent-2: #9ce6ff;
-      --border: #222a3a;
-    }
-    html, body { height: 100%; }
-    body {
-      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      color: var(--text); background: linear-gradient(180deg, #0b0d12 0%, #0e111a 100%);
-      line-height: 1.55;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-
-    .container { max-width: 1000px; margin: 0 auto; padding: 40px 24px 96px; }
-    header {
-      display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 32px;
-    }
-    .brand { font-weight: 700; letter-spacing: 0.3px; font-size: 20px; color: var(--accent-2); }
-    .title { font-size: 36px; line-height: 1.15; margin: 8px 0 6px; }
-    .subtitle { color: var(--muted); font-size: 16px; }
-
-    .toc, .card {
-      background: radial-gradient(1000px 600px at 20% -40%, rgba(106,166,255,0.12), transparent 60%),
-                  linear-gradient(180deg, rgba(156,230,255,0.05), rgba(156,230,255,0.00));
-      border: 1px solid var(--border);
-      border-radius: 16px; padding: 20px; box-shadow: 0 0 0 1px rgba(255,255,255,0.02) inset;
+    body.page-faq .content-flow {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
     }
 
-    .toc h2 { margin: 0 0 12px; font-size: 18px; }
-    .toc ul { margin: 0; padding-left: 18px; columns: 2; column-gap: 24px; }
-    .toc li { margin: 6px 0; break-inside: avoid; }
-
-    h2 { margin: 32px 0 8px; font-size: 26px; }
-    h3 { margin: 20px 0 8px; font-size: 20px; }
-    h4 { margin: 16px 0 6px; font-size: 16px; color: var(--accent-2); }
-
-    .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-
-    .role-section { margin-top: 28px; }
-    .role-section .card { padding: 20px; }
-
-    .steps { counter-reset: step; list-style: none; padding-left: 0; }
-    .steps li { position: relative; padding-left: 42px; margin: 12px 0; }
-    .steps li::before {
-      counter-increment: step; content: counter(step);
-      position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 8px;
-      display: inline-flex; align-items: center; justify-content: center;
-      background: #0c1322; border: 1px solid var(--border); color: var(--accent-2);
-      font-weight: 700; font-size: 14px;
+    .toc-card ul {
+      margin: 0;
+      padding-left: 18px;
+      columns: 1;
+      column-gap: 24px;
     }
 
-    .callout { background: rgba(106,166,255,0.08); border: 1px dashed #2a3d63; padding: 12px 14px; border-radius: 12px; color: #cfe4ff; }
+    .toc-card li {
+      margin: 6px 0;
+      break-inside: avoid;
+    }
 
-    details.faq { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: rgba(255,255,255,0.02); }
-    details.faq + details.faq { margin-top: 10px; }
-    details.faq summary { cursor: pointer; font-weight: 600; }
-    details.faq summary::-webkit-details-marker { display: none; }
+    .step-list {
+      counter-reset: step;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
 
-    .model { border-left: 3px solid var(--accent); padding-left: 12px; margin: 10px 0 16px; }
-    code { background: #121826; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--border); }
+    .step-list li {
+      position: relative;
+      padding-left: 44px;
+    }
 
-    @media (min-width: 900px) {
-      .grid-2 { grid-template-columns: 1fr 1fr; }
+    .step-list li::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: var(--color-heading);
+    }
+
+    .callout {
+      margin-top: 16px;
+      padding: 12px 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--color-border);
+      background: var(--color-info-bg);
+      color: var(--color-info-text);
+    }
+
+    .token-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .token-grid .card h3 {
+      margin-top: 0;
+    }
+
+    .token-grid .card h4 {
+      margin-bottom: 8px;
+    }
+
+    .faq-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    details.faq-item {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      background: var(--color-surface);
+    }
+
+    details.faq-item summary {
+      cursor: pointer;
+      font-weight: 600;
+      list-style: none;
+    }
+
+    details.faq-item summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.faq-item[open] {
+      background: #ffffff;
+    }
+
+    .faq-item p {
+      margin: 12px 0 0;
+      color: var(--color-muted);
+    }
+
+    footer {
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid var(--color-border);
+      color: var(--color-muted);
+    }
+
+    @media (min-width: 960px) {
+      .toc-card ul {
+        columns: 2;
+      }
+
+      .token-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
   </style>
 </head>
-<body>
-  <div class="container">
+<body class="page-wide page-faq">
+  <div class="wrap">
     <header>
-      <div>
-        <div class="brand">r3nt</div>
-        <h1 class="title">User Guide &amp; FAQ</h1>
-        <p class="subtitle">Walk‑through instructions and answers for Tenants, Landlords, Agents, and Investors. Includes all tokenisation models (1, 2, 3a, 3b).</p>
-      </div>
+      <div class="brand">r3nt by SQMU</div>
     </header>
 
-    <section class="toc card" id="toc">
-      <h2>Contents</h2>
-      <ul>
-        <li><a href="#tenants">Tenant guide</a></li>
-        <li><a href="#landlords">Landlord guide</a></li>
-        <li><a href="#agents">Agent guide</a></li>
-        <li><a href="#investors">Investor guide</a></li>
-        <li><a href="#models">Tokenisation models</a></li>
-        <li><a href="#faq-tenant">FAQ – Tenant</a></li>
-        <li><a href="#faq-landlord">FAQ – Landlord</a></li>
-        <li><a href="#faq-agent">FAQ – Agent</a></li>
-        <li><a href="#faq-investor">FAQ – Investor</a></li>
-      </ul>
-    </section>
+    <div class="muted beta-note">early beta.</div>
 
-    <!-- TENANT -->
-    <section id="tenants" class="role-section">
-      <h2>Tenant guide</h2>
-      <div class="card">
-        <ol class="steps">
-          <li><strong>Browse listings.</strong> Use filters to find a property. Review rate, deposit, and any view‑pass requirements.</li>
-          <li><strong>Select dates and book.</strong> Pick check‑in/check‑out and confirm. The app checks availability and escrows your security deposit.</li>
-          <li><strong>Pay rent on cadence.</strong> Use <code>Pay rent</code> for weekly/monthly payments as agreed. If the booking is tokenised, your rent is still paid in‑app; it’s distributed to SQMU‑R holders behind the scenes.</li>
-          <li><strong>Check status.</strong> Track booking, payments, and deposit status in your dashboard.</li>
-          <li><strong>Deposit return.</strong> After checkout, the landlord proposes a deposit split; once finalised, your portion is released automatically.</li>
-        </ol>
-        <p class="callout"><strong>Tip:</strong> If your landlord requires a one‑time payment, ask about the <em>Tenant‑Financed</em> model which lets you pay monthly while investors fund the upfront capital.</p>
-      </div>
-    </section>
+    <nav>
+      <button type="button" class="back-button" data-back-button hidden aria-label="Go back">
+        <span aria-hidden="true">←</span>
+        Back
+      </button>
+      <a href="./index.html">Home</a>
+      <a href="./tenant.html">Tenant</a>
+      <a href="./landlord.html">Landlord</a>
+      <a href="./investor.html">Investor</a>
+      <a href="./agent.html">Agent</a>
+      <span class="version-badge" data-version></span>
+    </nav>
 
-    <!-- LANDLORD -->
-    <section id="landlords" class="role-section">
-      <h2>Landlord guide</h2>
-      <div class="card">
-        <ol class="steps">
-          <li><strong>Create a listing.</strong> Enter pricing (daily/monthly), deposit, and metadata. The app deploys a listing contract for your unit.</li>
-          <li><strong>Manage bookings.</strong> View confirmed stays and incoming rent. After each stay, propose a deposit split for final release.</li>
-          <li><strong>Optional: Tokenise a lease.</strong> Prefer upfront cash? Propose tokenisation terms (amount, pricing). Once approved, investors fund you now; future rent routes to SQMU‑R holders.</li>
-          <li><strong>Monitor performance.</strong> See payouts (lump‑sum or periodic), fees, and booking history in your dashboard.</li>
-        </ol>
-        <p class="callout"><strong>Example:</strong> Instead of receiving <em>12 × USDC 1,000</em>, you may receive <em>USDC 11,000</em> upfront from investors via tokenisation (Model 2).</p>
-      </div>
-    </section>
-
-    <!-- AGENT -->
-    <section id="agents" class="role-section">
-      <h2>Agent guide</h2>
-      <div class="card">
-        <ol class="steps">
-          <li><strong>Get allow‑listed.</strong> Approved agents receive a dedicated agent proxy tied to specific listing(s).</li>
-          <li><strong>Wrap a listing &amp; booking.</strong> Configure calendar sync, fundraising terms, and your <em>agentFee</em> basis points.</li>
-          <li><strong>Raise capital.</strong> Collect USDC from investors; forward required upfront funds (deposit/guaranteed rent) to the listing; mint SQMU‑R for investors.</li>
-          <li><strong>Operate.</strong> Sub‑let short‑term stays if applicable. Collect rent, skim the agent fee, and forward net to investors/landlord.</li>
-          <li><strong>Report.</strong> Provide transparent statements on income, fees, and distributions.</li>
-        </ol>
-        <p class="callout"><strong>Hybrid bridge:</strong> Landlord wants a lump sum, tenant wants monthly? Use Model 3b: pay landlord upfront via tokenisation, then have the tenant pay installments; investors earn most of each payment, you retain a monthly fee.</p>
-      </div>
-    </section>
-
-    <!-- INVESTOR -->
-    <section id="investors" class="role-section">
-      <h2>Investor guide</h2>
-      <div class="card">
-        <ol class="steps">
-          <li><strong>Discover tokenised bookings.</strong> Review terms: duration, expected rent stream, fees, and risk notes.</li>
-          <li><strong>Invest.</strong> Commit USDC to receive SQMU‑R (ERC‑1155) tokens representing your pro‑rata share of rent for a specific booking.</li>
-          <li><strong>Accrue.</strong> As tenants pay, your entitlement updates automatically in the on‑chain accumulator.</li>
-          <li><strong>Claim.</strong> Withdraw accrued rent (and any eligible deposit proceeds) via <code>Claim</code> at your convenience.</li>
-          <li><strong>Track.</strong> Use portfolio views for position size, yield, and claimable amounts.</li>
-        </ol>
-        <p class="callout"><strong>Note:</strong> Returns depend on tenant payments and occupancy if sub‑let. Review model specifics below.</p>
-      </div>
-    </section>
-
-    <!-- MODELS -->
-    <section id="models" class="role-section">
-      <h2>Tokenisation models</h2>
-      <div class="grid grid-2">
-        <div class="card">
-          <h3>1) Tenant converts one‑time to installments</h3>
-          <div class="model">
-            The tenant pays weekly/monthly while investors fund the contract now. Example: a 12‑month USDC 12,000 lease becomes USDC 1,070/month to SQMU‑R holders for 12 months (premium reflects financing and fees).
-          </div>
-          <h4>Who benefits?</h4>
-          <ul>
-            <li><strong>Tenant:</strong> Budget‑friendly cadence.</li>
-            <li><strong>Investors:</strong> Receive periodic payments with a premium.</li>
-            <li><strong>Landlord:</strong> May still receive regular rent or a portion via structure.</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>2) Landlord converts installments to a lump sum</h3>
-          <div class="model">
-            Investors pay the landlord upfront (e.g., USDC 11,000 instead of 12 × 1,000). The investor group then receives the tenant’s future rent.
-          </div>
-          <h4>Who benefits?</h4>
-          <ul>
-            <li><strong>Landlord:</strong> Immediate liquidity and reduced collection risk.</li>
-            <li><strong>Investors:</strong> Acquire rights to the rent stream.</li>
-            <li><strong>Tenant:</strong> Continues paying as scheduled.</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>3a) Agent pays upfront &amp; sub‑lets short‑term</h3>
-          <div class="model">
-            Agent funds landlord upfront via investors, turns the unit into short‑term serviced stays. Rent from sub‑bookings flows to SQMU‑R holders; agent takes a fee.
-          </div>
-          <h4>Who benefits?</h4>
-          <ul>
-            <li><strong>Landlord:</strong> Lump sum and hands‑off operations.</li>
-            <li><strong>Investors:</strong> Participate in potentially higher short‑term yields (with occupancy risk).</li>
-            <li><strong>Agent:</strong> Earns an operating fee.</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>3b) Agent bridges lump‑sum landlord &amp; tenant installments</h3>
-          <div class="model">
-            Agent uses tokenisation to pay landlord once; tenant pays monthly. Example: tenant pays USDC 1,070/month; USDC 1,050 distributed to investors, USDC 20 to agent.
-          </div>
-          <h4>Who benefits?</h4>
-          <ul>
-            <li><strong>Landlord:</strong> Upfront certainty.</li>
-            <li><strong>Tenant:</strong> Keeps installment plan.</li>
-            <li><strong>Investors &amp; Agent:</strong> Receive periodic income.</li>
-          </ul>
+    <main class="content-flow">
+      <div class="hero">
+        <div>
+          <h1>User Guide &amp; FAQ</h1>
+          <p class="lead">
+            Walk through each console, review tokenisation models and get answers to the most common questions for tenants, landlords, agents and investors.
+          </p>
         </div>
       </div>
-    </section>
 
-    <!-- FAQ: TENANT -->
-    <section id="faq-tenant" class="role-section">
-      <h2>FAQ – Tenant</h2>
-      <details class="faq"><summary>How do rent payments work if my booking is tokenised?</summary>
-        <p>Exactly the same from your side. You pay weekly/monthly in‑app. The smart contract sends those funds to SQMU‑R holders instead of directly to the landlord.</p>
-      </details>
-      <details class="faq"><summary>Is my deposit safe?</summary>
-        <p>Deposits are escrowed on‑chain. After checkout, the landlord proposes a split and, once confirmed, your share is automatically released.</p>
-      </details>
-      <details class="faq"><summary>Can I switch from monthly to weekly?</summary>
-        <p>If the listing supports multiple cadences, you can change at the next billing cycle. Fees may adjust accordingly.</p>
-      </details>
-    </section>
+      <section class="card toc-card" id="toc">
+        <h2>Contents</h2>
+        <ul>
+          <li><a href="#tenants">Tenant guide</a></li>
+          <li><a href="#landlords">Landlord guide</a></li>
+          <li><a href="#agents">Agent guide</a></li>
+          <li><a href="#investors">Investor guide</a></li>
+          <li><a href="#models">Tokenisation models</a></li>
+          <li><a href="#faq-tenant">FAQ – Tenant</a></li>
+          <li><a href="#faq-landlord">FAQ – Landlord</a></li>
+          <li><a href="#faq-agent">FAQ – Agent</a></li>
+          <li><a href="#faq-investor">FAQ – Investor</a></li>
+        </ul>
+      </section>
 
-    <!-- FAQ: LANDLORD -->
-    <section id="faq-landlord" class="role-section">
-      <h2>FAQ – Landlord</h2>
-      <details class="faq"><summary>What does tokenising a lease do?</summary>
-        <p>You receive cash now by selling the future rent stream to investors. The app handles minting SQMU‑R and routing future rent accordingly.</p>
-      </details>
-      <details class="faq"><summary>Who handles deposit disputes?</summary>
-        <p>You propose a split after checkout. The platform finalises and releases funds on‑chain per the agreed outcome.</p>
-      </details>
-      <details class="faq"><summary>Can I deactivate a listing temporarily?</summary>
-        <p>Yes. You can pause new bookings while honouring existing ones.</p>
-      </details>
-    </section>
+      <section id="tenants">
+        <div class="card">
+          <h2>Tenant guide</h2>
+          <ol class="step-list">
+            <li><strong>Browse listings.</strong> Use filters to find a property. Review rate, deposit and any view-pass requirements.</li>
+            <li><strong>Select dates and book.</strong> Pick check-in/check-out and confirm. The app checks availability and escrows your security deposit.</li>
+            <li><strong>Pay rent on cadence.</strong> Use <code>Pay rent</code> for weekly/monthly payments as agreed. If the booking is tokenised, your rent is still paid in-app; it’s distributed to SQMU-R holders behind the scenes.</li>
+            <li><strong>Check status.</strong> Track booking, payments and deposit status in your dashboard.</li>
+            <li><strong>Deposit return.</strong> After checkout, the landlord proposes a deposit split; once finalised, your portion is released automatically.</li>
+          </ol>
+          <div class="callout"><strong>Tip:</strong> If your landlord requires a one-time payment, ask about the <em>Tenant-Financed</em> model which lets you pay monthly while investors fund the upfront capital.</div>
+        </div>
+      </section>
 
-    <!-- FAQ: AGENT -->
-    <section id="faq-agent" class="role-section">
-      <h2>FAQ – Agent</h2>
-      <details class="faq"><summary>How is my fee collected?</summary>
-        <p>Your configured <em>agentFee</em> (basis points) is skimmed automatically from rent flows before distributions to investors and landlord.</p>
-      </details>
-      <details class="faq"><summary>Can I manage multiple listings?</summary>
-        <p>If the platform allow‑lists you for multiple proxies, yes. Each proxy is scoped to its assigned listing(s).</p>
-      </details>
-      <details class="faq"><summary>Do I need to loop over investors to pay them?</summary>
-        <p>No. The system uses an accumulator pattern. Investors claim their pro‑rata share without agent‑side loops.</p>
-      </details>
-    </section>
+      <section id="landlords">
+        <div class="card">
+          <h2>Landlord guide</h2>
+          <ol class="step-list">
+            <li><strong>Create a listing.</strong> Enter pricing (daily/monthly), deposit and metadata. The app deploys a listing contract for your unit.</li>
+            <li><strong>Manage bookings.</strong> View confirmed stays and incoming rent. After each stay, propose a deposit split for final release.</li>
+            <li><strong>Optional: Tokenise a lease.</strong> Prefer upfront cash? Propose tokenisation terms (amount, pricing). Once approved, investors fund you now; future rent routes to SQMU-R holders.</li>
+            <li><strong>Monitor performance.</strong> See payouts (lump-sum or periodic), fees and booking history in your dashboard.</li>
+          </ol>
+          <div class="callout"><strong>Example:</strong> Instead of receiving <em>12 × USDC 1,000</em>, you may receive <em>USDC 11,000</em> upfront from investors via tokenisation (Model 2).</div>
+        </div>
+      </section>
 
-    <!-- FAQ: INVESTOR -->
-    <section id="faq-investor" class="role-section">
-      <h2>FAQ – Investor</h2>
-      <details class="faq"><summary>What exactly is SQMU‑R?</summary>
-        <p>An ERC‑1155 token representing your share of a specific booking’s rent stream and related distributions.</p>
-      </details>
-      <details class="faq"><summary>When can I claim returns?</summary>
-        <p>Anytime. Use <em>Claim</em> to withdraw accrued amounts. Network fees apply.</p>
-      </details>
-      <details class="faq"><summary>What are the key risks?</summary>
-        <p>Tenant non‑payment, lower‑than‑expected occupancy for sub‑lets, and general market conditions. Review each deal’s terms and fees.</p>
-      </details>
-    </section>
+      <section id="agents">
+        <div class="card">
+          <h2>Agent guide</h2>
+          <ol class="step-list">
+            <li><strong>Get allow-listed.</strong> Approved agents receive a dedicated agent proxy tied to specific listing(s).</li>
+            <li><strong>Wrap a listing &amp; booking.</strong> Configure calendar sync, fundraising terms and your <em>agentFee</em> basis points.</li>
+            <li><strong>Raise capital.</strong> Collect USDC from investors; forward required upfront funds (deposit/guaranteed rent) to the listing; mint SQMU-R for investors.</li>
+            <li><strong>Operate.</strong> Sub-let short-term stays if applicable. Collect rent, skim the agent fee and forward net to investors/landlord.</li>
+            <li><strong>Report.</strong> Provide transparent statements on income, fees and distributions.</li>
+          </ol>
+          <div class="callout"><strong>Hybrid bridge:</strong> Landlord wants a lump sum, tenant wants monthly? Use Model 3b: pay landlord upfront via tokenisation, then have the tenant pay instalments; investors earn most of each payment, you retain a monthly fee.</div>
+        </div>
+      </section>
 
-    <footer style="margin-top:48px; color: var(--muted);">
-      <hr style="border: none; border-top: 1px solid var(--border); margin: 24px 0;" />
-      <p>&copy; <span id="year"></span> r3nt. This page describes user‑facing flows; it omits deep technical implementation details. For integration or audits, consult the project documentation.</p>
+      <section id="investors">
+        <div class="card">
+          <h2>Investor guide</h2>
+          <ol class="step-list">
+            <li><strong>Discover tokenised bookings.</strong> Review terms: duration, expected rent stream, fees and risk notes.</li>
+            <li><strong>Invest.</strong> Commit USDC to receive SQMU-R (ERC-1155) tokens representing your pro-rata share of rent for a specific booking.</li>
+            <li><strong>Accrue.</strong> As tenants pay, your entitlement updates automatically in the on-chain accumulator.</li>
+            <li><strong>Claim.</strong> Withdraw accrued rent (and any eligible deposit proceeds) via <code>Claim</code> at your convenience.</li>
+            <li><strong>Track.</strong> Use portfolio views for position size, yield and claimable amounts.</li>
+          </ol>
+          <div class="callout"><strong>Note:</strong> Returns depend on tenant payments and occupancy if sub-let. Review model specifics below.</div>
+        </div>
+      </section>
+
+      <section id="models">
+        <h2>Tokenisation models</h2>
+        <div class="token-grid">
+          <article class="card">
+            <h3>1) Tenant converts one-time to instalments</h3>
+            <p class="muted">
+              The tenant pays weekly/monthly while investors fund the contract now. Example: a 12-month USDC 12,000 lease becomes USDC 1,070/month to SQMU-R holders for 12 months (premium reflects financing and fees).
+            </p>
+            <h4>Who benefits?</h4>
+            <ul>
+              <li><strong>Tenant:</strong> Budget-friendly cadence.</li>
+              <li><strong>Investors:</strong> Receive periodic payments with a premium.</li>
+              <li><strong>Landlord:</strong> May still receive regular rent or a portion via structure.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>2) Landlord converts instalments to a lump sum</h3>
+            <p class="muted">
+              Investors pay the landlord upfront (e.g., USDC 11,000 instead of 12 × 1,000). The investor group then receives the tenant’s future rent.
+            </p>
+            <h4>Who benefits?</h4>
+            <ul>
+              <li><strong>Landlord:</strong> Immediate liquidity and reduced collection risk.</li>
+              <li><strong>Investors:</strong> Acquire rights to the rent stream.</li>
+              <li><strong>Tenant:</strong> Continues paying as scheduled.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>3a) Agent pays upfront &amp; sub-lets short-term</h3>
+            <p class="muted">
+              Agent funds landlord upfront via investors, turns the unit into short-term serviced stays. Rent from sub-bookings flows to SQMU-R holders; agent takes a fee.
+            </p>
+            <h4>Who benefits?</h4>
+            <ul>
+              <li><strong>Landlord:</strong> Lump sum and hands-off operations.</li>
+              <li><strong>Investors:</strong> Participate in potentially higher short-term yields (with occupancy risk).</li>
+              <li><strong>Agent:</strong> Earns an operating fee.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>3b) Agent bridges lump-sum landlord &amp; tenant instalments</h3>
+            <p class="muted">
+              Agent uses tokenisation to pay landlord once; tenant pays monthly. Example: tenant pays USDC 1,070/month; USDC 1,050 distributed to investors, USDC 20 to agent.
+            </p>
+            <h4>Who benefits?</h4>
+            <ul>
+              <li><strong>Landlord:</strong> Upfront certainty.</li>
+              <li><strong>Tenant:</strong> Keeps instalment plan.</li>
+              <li><strong>Investors &amp; Agent:</strong> Receive periodic income.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="faq-tenant">
+        <div class="card">
+          <h2>FAQ – Tenant</h2>
+          <div class="faq-group">
+            <details class="faq-item"><summary>How do rent payments work if my booking is tokenised?</summary>
+              <p>Exactly the same from your side. You pay weekly/monthly in-app. The smart contract sends those funds to SQMU-R holders instead of directly to the landlord.</p>
+            </details>
+            <details class="faq-item"><summary>Is my deposit safe?</summary>
+              <p>Deposits are escrowed on-chain. After checkout, the landlord proposes a split and, once confirmed, your share is automatically released.</p>
+            </details>
+            <details class="faq-item"><summary>Can I switch from monthly to weekly?</summary>
+              <p>If the listing supports multiple cadences, you can change at the next billing cycle. Fees may adjust accordingly.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq-landlord">
+        <div class="card">
+          <h2>FAQ – Landlord</h2>
+          <div class="faq-group">
+            <details class="faq-item"><summary>What does tokenising a lease do?</summary>
+              <p>You receive cash now by selling the future rent stream to investors. The app handles minting SQMU-R and routing future rent accordingly.</p>
+            </details>
+            <details class="faq-item"><summary>Who handles deposit disputes?</summary>
+              <p>You propose a split after checkout. The platform finalises and releases funds on-chain per the agreed outcome.</p>
+            </details>
+            <details class="faq-item"><summary>Can I deactivate a listing temporarily?</summary>
+              <p>Yes. You can pause new bookings while honouring existing ones.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq-agent">
+        <div class="card">
+          <h2>FAQ – Agent</h2>
+          <div class="faq-group">
+            <details class="faq-item"><summary>How is my fee collected?</summary>
+              <p>Your configured <em>agentFee</em> (basis points) is skimmed automatically from rent flows before distributions to investors and landlord.</p>
+            </details>
+            <details class="faq-item"><summary>Can I manage multiple listings?</summary>
+              <p>If the platform allow-lists you for multiple proxies, yes. Each proxy is scoped to its assigned listing(s).</p>
+            </details>
+            <details class="faq-item"><summary>Do I need to loop over investors to pay them?</summary>
+              <p>No. The system uses an accumulator pattern. Investors claim their pro-rata share without agent-side loops.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq-investor">
+        <div class="card">
+          <h2>FAQ – Investor</h2>
+          <div class="faq-group">
+            <details class="faq-item"><summary>What exactly is SQMU-R?</summary>
+              <p>An ERC-1155 token representing your share of a specific booking’s rent stream and related distributions.</p>
+            </details>
+            <details class="faq-item"><summary>When can I claim returns?</summary>
+              <p>Anytime. Use <em>Claim</em> to withdraw accrued amounts. Network fees apply.</p>
+            </details>
+            <details class="faq-item"><summary>What are the key risks?</summary>
+              <p>Tenant non-payment, lower-than-expected occupancy for sub-lets and general market conditions. Review each deal’s terms and fees.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      &copy; <span data-year></span> r3nt. This page describes user-facing flows; it omits deep technical implementation details. For integration or audits, consult the project documentation.
     </footer>
   </div>
-  <script>
-    document.getElementById('year').textContent = new Date().getFullYear();
+
+  <script type="module">
+    import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+    import { APP_VERSION } from './js/config.js';
+    import createBackController from './js/back-navigation.js';
+
+    const applyVersionBadge = () => {
+      const badge = document.querySelector('[data-version]');
+      if (badge) badge.textContent = `Build ${APP_VERSION}`;
+    };
+
+    const applyYear = () => {
+      const target = document.querySelector('[data-year]');
+      if (target) target.textContent = new Date().getFullYear();
+    };
+
+    const backButton = document.querySelector('[data-back-button]');
+    const backController = createBackController({ sdk, button: backButton });
+    backController.update();
+
+    const boot = () => {
+      applyVersionBadge();
+      applyYear();
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
+    }
+
+    (async () => {
+      try { await sdk.actions.ready(); } catch {}
+      setTimeout(() => { try { sdk.actions.ready(); } catch {} }, 800);
+    })();
   </script>
 </body>
 </html>
