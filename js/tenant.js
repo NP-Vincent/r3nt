@@ -64,6 +64,8 @@ const els = {
     list: document.getElementById('bookingsList'),
     status: document.querySelector('[data-bookings-status]'),
     refresh: document.getElementById('refreshBookings'),
+    controls: document.getElementById('bookingControls'),
+    filter: document.getElementById('bookingFilter'),
   },
 };
 const tokenProposalHost = document.getElementById('tokenProposalPanel');
@@ -98,6 +100,9 @@ let bookingsRendered = false;
 let listingSortMode = DEFAULT_LISTING_SORT_MODE;
 let listingLocationFilterValue = '';
 let tenantListingRecords = [];
+let bookingFilterMode = 'active';
+let cachedBookingRecords = [];
+let cachedBookingsEmptyMessage = 'No bookings found for this wallet yet.';
 
 const listingInfoCache = new Map();
 const bookingRecords = new Map();
@@ -175,6 +180,17 @@ if (els.listingLocationClear) {
       els.listingLocationFilter.focus();
     }
     renderTenantListingView();
+  });
+}
+
+if (els.bookings?.filter) {
+  els.bookings.filter.value = bookingFilterMode;
+  els.bookings.filter.addEventListener('change', () => {
+    const nextMode = els.bookings.filter?.value === 'all' ? 'all' : 'active';
+    if (nextMode !== bookingFilterMode) {
+      bookingFilterMode = nextMode;
+      renderBookings(cachedBookingRecords, cachedBookingsEmptyMessage);
+    }
   });
 }
 
@@ -1965,19 +1981,52 @@ async function multicallChunks(contracts, chunkSize = MULTICALL_CHUNK) {
 function renderBookings(records, emptyMessage = 'No bookings found for this wallet yet.') {
   const listEl = els.bookings?.list;
   const statusEl = els.bookings?.status;
+  const controlsEl = els.bookings?.controls;
+  const filterEl = els.bookings?.filter;
   if (!listEl) {
     return;
   }
+  cachedBookingRecords = Array.isArray(records) ? [...records] : [];
+  cachedBookingsEmptyMessage = emptyMessage;
   bookingRecords.clear();
   listEl.innerHTML = '';
   if (!records || records.length === 0) {
+    if (controlsEl) {
+      controlsEl.hidden = true;
+    }
     if (statusEl) {
       statusEl.textContent = emptyMessage;
     }
     closeTokenProposal();
     return;
   }
-  const sorted = [...records];
+
+  if (controlsEl) {
+    controlsEl.hidden = false;
+  }
+  if (filterEl && filterEl.value !== bookingFilterMode) {
+    filterEl.value = bookingFilterMode;
+  }
+
+  const filtered = records.filter((record) => {
+    if (bookingFilterMode === 'active') {
+      return record.isActive;
+    }
+    return !record.isCancelled;
+  });
+
+  if (filtered.length === 0) {
+    if (statusEl) {
+      statusEl.textContent =
+        bookingFilterMode === 'active'
+          ? 'No active bookings found. Switch the filter to view past bookings.'
+          : 'No bookings found. Cancelled bookings are hidden.';
+    }
+    closeTokenProposal();
+    return;
+  }
+
+  const sorted = [...filtered];
   sorted.sort((a, b) => {
     if (a.start === b.start) {
       if (a.bookingId === b.bookingId) return 0;
@@ -2071,7 +2120,15 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
     listEl.append(card);
   }
   if (statusEl) {
-    statusEl.textContent = `Showing ${sorted.length} booking${sorted.length === 1 ? '' : 's'}.`;
+    const hiddenCount = records.length - filtered.length;
+    const baseMessage =
+      bookingFilterMode === 'active'
+        ? `Showing ${sorted.length} active booking${sorted.length === 1 ? '' : 's'}.`
+        : `Showing ${sorted.length} booking${sorted.length === 1 ? '' : 's'}.`;
+    statusEl.textContent =
+      hiddenCount > 0 && bookingFilterMode !== 'active'
+        ? `${baseMessage} ${hiddenCount} cancelled booking${hiddenCount === 1 ? ' is' : 's are'} hidden.`
+        : baseMessage;
   }
 
   if (activeTokenProposalPanel?.section && !document.body.contains(activeTokenProposalPanel.section)) {
