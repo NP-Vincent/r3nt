@@ -1067,7 +1067,7 @@ function renderLandlordBookingTokenSection(record) {
       createBookingDetailElement('Proposed price', `${fmt.usdc(record.pending?.pricePerSqmu)} USDC`)
     );
     details.appendChild(createBookingDetailElement('Proposed fee', fmt.bps(record.pending?.feeBps)));
-    details.appendChild(createBookingDetailElement('Proposed cadence', record.pendingPeriodLabel || 'Custom'));
+    details.appendChild(createBookingDetailElement('Proposed payment interval', record.pendingPeriodLabel || 'Custom'));
     const proposerText = record.pendingProposerShort || (record.pendingProposer || '—');
     details.appendChild(
       createBookingDetailElement('Proposer', proposerText, { tooltip: record.pendingProposer || undefined })
@@ -2560,7 +2560,7 @@ function createTokenTools(listing) {
 
   const intro = document.createElement('p');
   intro.className = 'muted';
-  intro.textContent = 'Define SQMU supply, pricing and cadence for bookings you manage. Platform approval is required before investors can participate.';
+  intro.textContent = 'Define SQMU supply, pricing and payment intervals for bookings you manage. Platform approval is required before investors can participate.';
   content.appendChild(intro);
 
   const bookingLabel = document.createElement('label');

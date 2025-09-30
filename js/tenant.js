@@ -579,9 +579,9 @@ function calculateInstallmentCap(totalRent, startTs, endTs, periodDays) {
   const rent = typeof totalRent === 'bigint' ? totalRent : BigInt(totalRent || 0);
   const start = typeof startTs === 'bigint' ? startTs : BigInt(startTs || 0);
   const end = typeof endTs === 'bigint' ? endTs : BigInt(endTs || 0);
-  const cadenceDays = typeof periodDays === 'bigint' ? periodDays : BigInt(periodDays || 0);
+  const intervalDays = typeof periodDays === 'bigint' ? periodDays : BigInt(periodDays || 0);
   if (rent <= 0n) return 0n;
-  if (cadenceDays <= 0n) return rent;
+  if (intervalDays <= 0n) return rent;
   if (end <= start) return rent;
 
   let duration = end - start;
@@ -593,7 +593,7 @@ function calculateInstallmentCap(totalRent, startTs, endTs, periodDays) {
     dailyRate += 1n;
   }
 
-  let installment = dailyRate * cadenceDays;
+  let installment = dailyRate * intervalDays;
   if (installment > rent) {
     installment = rent;
   }
@@ -1606,7 +1606,7 @@ async function submitTokenisationProposalForTenant(record, { amount, totalSqmu, 
   }
   const requiredKey = getPeriodKeyFromValue(target.periodValue);
   if (requiredKey && requiredKey !== periodKey) {
-    notify({ message: `Booking cadence is fixed to ${target.periodLabel.toLowerCase()}.`, variant: 'warning', role: 'tenant', timeout: 5000 });
+    notify({ message: `Booking payment interval is fixed to ${target.periodLabel.toLowerCase()}.`, variant: 'warning', role: 'tenant', timeout: 5000 });
     return false;
   }
 
@@ -2462,13 +2462,13 @@ async function bookListing(listing = selectedListing){
 
     const depositMsg = deposit > 0n ? `${fmt.usdc(deposit)} USDC deposit` : 'no deposit';
     const rentMsg = rent > 0n ? `${fmt.usdc(rent)} USDC rent` : '0 USDC rent';
-    const cadenceMsg = installmentCap > 0n
+    const intervalMsg = installmentCap > 0n
       ? `${selectedPeriod.label} payments up to ${fmt.usdc(installmentCap)} USDC`
       : `${selectedPeriod.label} payments`;
     const approvalNotice = needsApproval
       ? ' Confirm the approval and booking when prompted.'
       : '';
-    els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}; ${cadenceMsg}).${approvalNotice}`;
+    els.status.textContent = `Booking stay (${depositMsg}; rent due later: ${rentMsg}; ${intervalMsg}).${approvalNotice}`;
 
     let walletSendUnsupported = false;
     let batchedSuccess = false;

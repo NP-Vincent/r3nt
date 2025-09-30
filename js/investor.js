@@ -360,7 +360,7 @@ function formatPeriodLabel(periodValue) {
   if (Object.prototype.hasOwnProperty.call(PERIOD_LABELS, numeric)) {
     return PERIOD_LABELS[numeric];
   }
-  return numeric > 0 ? 'Custom cadence' : PERIOD_LABELS[0];
+  return numeric > 0 ? 'Custom payment interval' : PERIOD_LABELS[0];
 }
 
 function percentOf(numerator, denominator) {
