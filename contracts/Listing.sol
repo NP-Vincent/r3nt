@@ -45,7 +45,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
         DEFAULTED
     }
 
-    /// @notice Supported rent payment cadences.
+    /// @notice Supported rent payment intervals.
     enum Period {
         NONE,
         DAY,
@@ -391,7 +391,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
      *         platform fees for reference and escrows the security deposit.
      * @param start Booking start timestamp (seconds).
      * @param end Booking end timestamp (seconds).
-     * @param period Rent payment cadence selected by the tenant.
+     * @param period Rent payment interval selected by the tenant.
      * @return bookingId Identifier assigned to the new booking.
      */
     function book(uint64 start, uint64 end, Period period) external nonReentrant returns (uint256 bookingId) {
@@ -689,7 +689,7 @@ contract Listing is Initializable, ReentrancyGuardUpgradeable {
      * @param totalSqmu Total number of SQMU-R tokens that will be minted if approved.
      * @param pricePerSqmu Price per SQMU-R token denominated in USDC (6 decimals).
      * @param feeBps Platform fee applied to investments (basis points).
-     * @param period Rent distribution cadence for informational purposes.
+     * @param period Rent distribution interval for informational purposes.
      */
     function proposeTokenisation(
         uint256 bookingId,

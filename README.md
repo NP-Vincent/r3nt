@@ -157,7 +157,7 @@ The per-property clone that handles bookings, deposit escrow, tokenisation and r
 
 ### Tokenisation (Optional)
 - Landlord or tenant proposes tokenisation with `proposeTokenisation`, specifying
-  `totalSqmu`, `pricePerSqmu`, `feeBps` and periodic rent cadence (`Period` enum).
+  `totalSqmu`, `pricePerSqmu`, `feeBps` and periodic rent intervals (`Period` enum).
 - The platform approves via `approveTokenisation` to ensure the raise aligns with remaining
   rent expectations.
 - Investors call `invest(bookingId, sqmuAmount)`; USDC is collected, the landlord receives

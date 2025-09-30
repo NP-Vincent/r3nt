@@ -19,7 +19,7 @@ interface IListingLike {
         DEFAULTED
     }
 
-    /// @notice Supported rent payment cadences (mirrors `Listing.Period`).
+    /// @notice Supported rent payment intervals (mirrors `Listing.Period`).
     enum Period {
         NONE,
         DAY,
@@ -305,7 +305,7 @@ contract Agent is Initializable, UUPSUpgradeable, OwnableUpgradeable, Reentrancy
      * @param totalSqmu_ Total number of SQMU-R tokens that will be minted.
      * @param pricePerSqmu_ Price per SQMU-R token denominated in USDC (6 decimals).
      * @param feeBps_ Platform fee (basis points) applied to investments.
-     * @param period_ Informational rent distribution cadence passed through to the listing.
+     * @param period_ Informational rent distribution interval passed through to the listing.
      */
     function configureFundraising(
         uint256 totalSqmu_,
