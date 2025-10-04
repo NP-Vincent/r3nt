@@ -1375,6 +1375,12 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
   const landlordLower = normaliseAddress(landlord);
   const start = toBigInt(data.start, 0n);
   const end = toBigInt(data.end, 0n);
+  const periodKey = getPeriodKeyFromValue(periodValue);
+  const periodMeta = periodKey ? PERIOD_OPTIONS[periodKey] : null;
+  const installmentCap = periodMeta ? calculateInstallmentCap(grossRent, start, end, periodMeta.days) : 0n;
+  const installmentAmount = installmentCap > 0n
+    ? (rentDue < installmentCap ? rentDue : installmentCap)
+    : rentDue;
   const expectedNetRent = toBigInt(data.expectedNetRent, 0n);
   const depositReleased = Boolean(data.depositReleased);
   const tokenised = Boolean(data.tokenised);
@@ -1429,6 +1435,8 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
     grossRent,
     rentPaid,
     rentDue,
+    installmentCap,
+    installmentAmount,
     deposit,
     depositReleased,
     expectedNetRent,
@@ -2078,10 +2086,20 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
       card.classList.add(`booking-status-${record.statusClass}`);
     }
     card.append(el('div', { class: 'card-footnote' }, record.listingTitle));
-    const rentFootnote = record.rentDue > 0n
-      ? `Outstanding rent: ${fmt.usdc(record.rentDue)} USDC`
-      : 'All rent settled.';
-    card.append(el('div', { class: 'card-footnote' }, rentFootnote));
+    if (record.rentDue > 0n) {
+      card.append(el('div', { class: 'card-footnote' }, `Outstanding rent: ${fmt.usdc(record.rentDue)} USDC`));
+      const hasInstallmentCap = typeof record.installmentCap === 'bigint' && record.installmentCap > 0n;
+      const nextInstallment = typeof record.installmentAmount === 'bigint'
+        ? record.installmentAmount
+        : 0n;
+      if (hasInstallmentCap && nextInstallment > 0n) {
+        card.append(
+          el('div', { class: 'card-footnote' }, `Next installment: ${fmt.usdc(nextInstallment)} USDC`),
+        );
+      }
+    } else {
+      card.append(el('div', { class: 'card-footnote' }, 'All rent settled.'));
+    }
     if (record.isCancelled) {
       card.append(el('div', { class: 'card-footnote' }, 'Booking cancelled. Record kept for reference.'));
     } else if (record.isDefaulted) {
@@ -2759,7 +2777,20 @@ async function payRent(record, options = {}) {
     return;
   }
 
-  const defaultAmount = target.rentDue > 0n ? fmt.usdc(target.rentDue) : '';
+  const installmentCap = toBigInt(target.installmentCap, 0n);
+  let intervalMax = typeof target.installmentAmount === 'bigint'
+    ? target.installmentAmount
+    : installmentCap > 0n
+      ? (target.rentDue > installmentCap ? installmentCap : target.rentDue)
+      : target.rentDue;
+  if (intervalMax <= 0n && target.rentDue > 0n) {
+    intervalMax = target.rentDue;
+  }
+  const defaultAmount = intervalMax > 0n
+    ? fmt.usdc(intervalMax)
+    : target.rentDue > 0n
+      ? fmt.usdc(target.rentDue)
+      : '';
   const promptValue = options.amount ?? window.prompt('Enter rent amount in USDC', defaultAmount);
   if (promptValue === null || promptValue === undefined) {
     return;
@@ -2779,6 +2810,16 @@ async function payRent(record, options = {}) {
       variant: 'warning',
       role: 'tenant',
       timeout: 5000,
+    });
+    return;
+  }
+  if (installmentCap > 0n && parsedAmount > installmentCap) {
+    const allowed = intervalMax > 0n ? intervalMax : installmentCap;
+    notify({
+      message: `Installments are capped at ${fmt.usdc(installmentCap)} USDC. Pay up to ${fmt.usdc(allowed)} USDC this time.`,
+      variant: 'warning',
+      role: 'tenant',
+      timeout: 5500,
     });
     return;
   }
