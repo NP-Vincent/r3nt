@@ -183,13 +183,13 @@
         <ul>
           <li><a href="#tenants">Tenant guide</a></li>
           <li><a href="#landlords">Landlord guide</a></li>
-          <li><a href="#agents">Agent guide</a></li>
           <li><a href="#investors">Investor guide</a></li>
+          <li><a href="#agents">Agent guide</a></li>
           <li><a href="#models">Tokenisation models</a></li>
           <li><a href="#faq-tenant">FAQ – Tenant</a></li>
           <li><a href="#faq-landlord">FAQ – Landlord</a></li>
-          <li><a href="#faq-agent">FAQ – Agent</a></li>
           <li><a href="#faq-investor">FAQ – Investor</a></li>
+          <li><a href="#faq-agent">FAQ – Agent</a></li>
         </ul>
       </section>
 
@@ -220,20 +220,6 @@
         </div>
       </section>
 
-      <section id="agents">
-        <div class="card">
-          <h2>Agent guide</h2>
-          <ol class="step-list">
-            <li><strong>Get allow-listed.</strong> Approved agents receive a dedicated agent proxy tied to specific listing(s).</li>
-            <li><strong>Wrap a listing &amp; booking.</strong> Configure calendar sync, fundraising terms and your <em>agentFee</em> basis points.</li>
-            <li><strong>Raise capital.</strong> Collect USDC from investors; forward required upfront funds (deposit/guaranteed rent) to the listing; mint SQMU-R for investors.</li>
-            <li><strong>Operate.</strong> Sub-let short-term stays if applicable. Collect rent, skim the agent fee and forward net to investors/landlord.</li>
-            <li><strong>Report.</strong> Provide transparent statements on income, fees and distributions.</li>
-          </ol>
-          <div class="callout"><strong>Hybrid bridge:</strong> Landlord wants a lump sum, tenant wants monthly? Use Model 3b: pay landlord upfront via tokenisation, then have the tenant pay instalments; investors earn most of each payment, you retain a monthly fee.</div>
-        </div>
-      </section>
-
       <section id="investors">
         <div class="card">
           <h2>Investor guide</h2>
@@ -245,6 +231,20 @@
             <li><strong>Track.</strong> Use portfolio views for position size, yield and claimable amounts.</li>
           </ol>
           <div class="callout"><strong>Note:</strong> Returns depend on tenant payments and occupancy if sub-let. Review model specifics below.</div>
+        </div>
+      </section>
+
+      <section id="agents">
+        <div class="card">
+          <h2>Agent guide</h2>
+          <ol class="step-list">
+            <li><strong>Get allow-listed.</strong> Approved agents receive a dedicated agent proxy tied to specific listing(s).</li>
+            <li><strong>Wrap a listing &amp; booking.</strong> Configure calendar sync, fundraising terms and your <em>agentFee</em> basis points.</li>
+            <li><strong>Raise capital.</strong> Collect USDC from investors; forward required upfront funds (deposit/guaranteed rent) to the listing; mint SQMU-R for investors.</li>
+            <li><strong>Operate.</strong> Sub-let short-term stays if applicable. Collect rent, skim the agent fee and forward net to investors/landlord.</li>
+            <li><strong>Report.</strong> Provide transparent statements on income, fees and distributions.</li>
+          </ol>
+          <div class="callout"><strong>Hybrid bridge:</strong> Landlord wants a lump sum, tenant wants monthly? Use Model 3b: pay landlord upfront via tokenisation, then have the tenant pay instalments; investors earn most of each payment, you retain a monthly fee.</div>
         </div>
       </section>
 
@@ -336,23 +336,6 @@
         </div>
       </section>
 
-      <section id="faq-agent">
-        <div class="card">
-          <h2>FAQ – Agent</h2>
-          <div class="faq-group">
-            <details class="faq-item"><summary>How is my fee collected?</summary>
-              <p>Your configured <em>agentFee</em> (basis points) is skimmed automatically from rent flows before distributions to investors and landlord.</p>
-            </details>
-            <details class="faq-item"><summary>Can I manage multiple listings?</summary>
-              <p>If the platform allow-lists you for multiple proxies, yes. Each proxy is scoped to its assigned listing(s).</p>
-            </details>
-            <details class="faq-item"><summary>Do I need to loop over investors to pay them?</summary>
-              <p>No. The system uses an accumulator pattern. Investors claim their pro-rata share without agent-side loops.</p>
-            </details>
-          </div>
-        </div>
-      </section>
-
       <section id="faq-investor">
         <div class="card">
           <h2>FAQ – Investor</h2>
@@ -365,6 +348,23 @@
             </details>
             <details class="faq-item"><summary>What are the key risks?</summary>
               <p>Tenant non-payment, lower-than-expected occupancy for sub-lets and general market conditions. Review each deal’s terms and fees.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq-agent">
+        <div class="card">
+          <h2>FAQ – Agent</h2>
+          <div class="faq-group">
+            <details class="faq-item"><summary>How is my fee collected?</summary>
+              <p>Your configured <em>agentFee</em> (basis points) is skimmed automatically from rent flows before distributions to investors and landlord.</p>
+            </details>
+            <details class="faq-item"><summary>Can I manage multiple listings?</summary>
+              <p>If the platform allow-lists you for multiple proxies, yes. Each proxy is scoped to its assigned listing(s).</p>
+            </details>
+            <details class="faq-item"><summary>Do I need to loop over investors to pay them?</summary>
+              <p>No. The system uses an accumulator pattern. Investors claim their pro-rata share without agent-side loops.</p>
             </details>
           </div>
         </div>
