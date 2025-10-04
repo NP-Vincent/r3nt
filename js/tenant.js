@@ -103,6 +103,8 @@ let tenantListingRecords = [];
 let bookingFilterMode = 'active';
 let cachedBookingRecords = [];
 let cachedBookingsEmptyMessage = 'No bookings found for this wallet yet.';
+let listingAccessState = 'unknown';
+let listingsLoading = null;
 
 const listingInfoCache = new Map();
 const bookingRecords = new Map();
@@ -1183,10 +1185,106 @@ function setTenantListingRecords(records) {
   tenantListingRecords = normalized;
 }
 
+function setListingAccessState(nextState) {
+  const previous = listingAccessState;
+  listingAccessState = typeof nextState === 'string' ? nextState : 'unknown';
+  return previous;
+}
+
+function getActiveBookingAddressMap() {
+  const map = new Map();
+  for (const record of cachedBookingRecords) {
+    if (!record || !record.isActive) continue;
+    const candidate =
+      typeof record.listingAddress === 'string'
+        ? record.listingAddress
+        : typeof record.listing === 'string'
+        ? record.listing
+        : typeof record.address === 'string'
+        ? record.address
+        : '';
+    const lower = normaliseAddress(candidate);
+    if (!lower || map.has(lower)) continue;
+    map.set(lower, candidate);
+  }
+  return map;
+}
+
+function hasActiveBookingAccess() {
+  const activeMap = getActiveBookingAddressMap();
+  return activeMap.size > 0;
+}
+
+function showListingsLockedState() {
+  const previousState = setListingAccessState('locked');
+  clearSelection();
+  listingRecords.clear();
+  setTenantListingRecords([]);
+  setPlannerFormVisible(false);
+  renderTenantListingView();
+  if (previousState !== 'locked') {
+    notify({
+      message: 'Purchase or renew your view pass to browse listings.',
+      variant: 'warning',
+      role: 'tenant',
+      timeout: 6000,
+    });
+  }
+}
+
+function handleBookingLinkedListingAccess() {
+  const requiresPass = viewPassRequired && !hasActiveViewPass;
+  if (!requiresPass) {
+    return;
+  }
+  const activeMap = getActiveBookingAddressMap();
+  if (activeMap.size > 0) {
+    if (!listingsLoading) {
+      const loadedAddresses = new Set();
+      for (const record of tenantListingRecords) {
+        if (!record) continue;
+        const addressCandidate =
+          typeof record.address === 'string'
+            ? record.address
+            : typeof record.id === 'string'
+            ? record.id
+            : '';
+        const lower = normaliseAddress(addressCandidate);
+        if (lower) {
+          loadedAddresses.add(lower);
+        }
+      }
+      let needsReload = listingAccessState !== 'bookings';
+      if (!needsReload) {
+        if (loadedAddresses.size !== activeMap.size) {
+          needsReload = true;
+        } else {
+          for (const key of activeMap.keys()) {
+            if (!loadedAddresses.has(key)) {
+              needsReload = true;
+              break;
+            }
+          }
+        }
+      }
+      if (needsReload) {
+        loadListings().catch((err) => {
+          console.warn('Failed to refresh listings for active bookings', err);
+        });
+      }
+    }
+    return;
+  }
+  showListingsLockedState();
+}
+
 function renderListings(listings, options = {}) {
   const container = document.getElementById('listings');
   if (!container) return;
 
+  const accessState = listingAccessState;
+  const isLocked = accessState === 'locked';
+  const isBookingOnly = accessState === 'bookings';
   const total = Number.isFinite(options.total)
     ? Number(options.total)
     : Array.isArray(listings)
@@ -1212,6 +1310,16 @@ function renderListings(listings, options = {}) {
     plannerEmpty.dataset.defaultText = plannerEmpty.textContent || '';
   }
 
+  if (isLocked) {
+    container.classList.add('muted');
+    container.textContent = 'View pass required to browse listings.';
+    if (plannerEmpty) {
+      plannerEmpty.textContent = 'Purchase or renew your view pass to browse listings.';
+      plannerEmpty.hidden = false;
+    }
+    return;
+  }
+
   if (!Array.isArray(listings) || listings.length === 0) {
     container.classList.add('muted');
     let emptyMessage = 'No active listings.';
@@ -1223,6 +1331,8 @@ function renderListings(listings, options = {}) {
       emptyMessage = 'No listings match the current filters.';
     } else if (total > 0) {
       emptyMessage = 'No listings to display.';
+    } else if (isBookingOnly) {
+      emptyMessage = 'Unable to show your booked listings right now. Renew your view pass to browse more properties.';
     }
     container.textContent = emptyMessage;
 
@@ -1233,6 +1343,8 @@ function renderListings(listings, options = {}) {
         plannerEmpty.textContent = `Adjust the location filter to see listings within ${radiusKm} km.`;
       } else if (usingPrefixFilter) {
         plannerEmpty.textContent = 'Adjust your filters to see listings.';
+      } else if (isBookingOnly) {
+        plannerEmpty.textContent = 'Active bookings stay visible here. Renew your view pass to browse new listings.';
       } else if (total === 0) {
         plannerEmpty.textContent = 'No active listings.';
       } else {
@@ -1245,7 +1357,14 @@ function renderListings(listings, options = {}) {
   container.classList.remove('muted');
 
   if (plannerEmpty) {
-    if (usingRadiusFilter) {
+    if (isBookingOnly) {
+      const visible = Array.isArray(listings) ? listings.length : 0;
+      const countLabel = visible === 1 ? 'listing' : 'listings';
+      plannerEmpty.textContent =
+        visible > 0
+          ? `Only your active booking ${countLabel} are visible. Renew your view pass to browse more.`
+          : 'Active bookings stay visible here. Renew your view pass to browse new listings.';
+    } else if (usingRadiusFilter) {
       if (total === listings.length) {
         plannerEmpty.textContent = `Showing all ${total} listing${total === 1 ? '' : 's'} within ${radiusKm} km.`;
       } else {
@@ -2065,6 +2184,7 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
   cachedBookingsEmptyMessage = emptyMessage;
   bookingRecords.clear();
   listEl.innerHTML = '';
+  handleBookingLinkedListingAccess();
   if (!records || records.length === 0) {
     if (controlsEl) {
       controlsEl.hidden = true;
@@ -2385,54 +2505,146 @@ async function loadTenantBookings(account, options = {}) {
 }
 
 async function loadListings(){
-  await loadConfig();
-  els.listings.textContent = 'Loading listings…';
-  clearSelection();
-  listingRecords.clear();
-  setTenantListingRecords([]);
-  updateListingControlsVisibility(false);
-  let addresses;
-  try {
-    const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allListings' });
-    addresses = Array.isArray(result) ? result : [];
-  } catch (err) {
-    console.error('Failed to load listing addresses', err);
-    els.listings.textContent = 'Unable to load listings.';
-    updateListingControlsVisibility(false);
-    notify({ message: 'Unable to load listings.', variant: 'error', role: 'tenant', timeout: 6000 });
-    return;
-  }
-  const cleaned = addresses.filter((addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr) && !/^0x0+$/.test(addr));
-  if (!cleaned.length) {
-    setTenantListingRecords([]);
-    renderTenantListingView();
-    return;
-  }
-  const infos = await Promise.all(cleaned.map((addr) => fetchListingInfo(addr)));
-  const valid = infos.filter(Boolean);
-  if (!valid.length) {
-    setTenantListingRecords([]);
-    renderTenantListingView();
-    notify({ message: 'No active listings right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
-    return;
-  }
-  const entries = valid.map((info) => {
-    const record = buildListingRecord(info);
-    listingRecords.set(record.id, record);
-    if (record.address) {
-      listingRecords.set(normaliseAddress(record.address), record);
-      listingRecords.set(record.address, record);
+  if (listingsLoading) {
+    try {
+      await listingsLoading;
+    } catch (err) {
+      console.warn('Previous listing load failed', err);
     }
-    return record;
-  });
-  setTenantListingRecords(entries);
-  renderTenantListingView();
-  notify({
-    message: `Loaded ${entries.length} listing${entries.length === 1 ? '' : 's'}.`,
-    variant: 'success',
-    role: 'tenant',
-    timeout: 4500,
-  });
+    return;
+  }
+
+  const loaderPromise = (async () => {
+    await loadConfig();
+    const requiresPass = viewPassRequired && !hasActiveViewPass;
+    const activeMap = getActiveBookingAddressMap();
+    if (requiresPass && activeMap.size === 0) {
+      showListingsLockedState();
+      return;
+    }
+
+    const gatingActiveOnly = requiresPass && activeMap.size > 0;
+    const previousState = setListingAccessState(gatingActiveOnly ? 'bookings' : 'open');
+    const previousLoadedCount = previousState === 'bookings' ? tenantListingRecords.length : 0;
+    const activeLowerSet = new Set(gatingActiveOnly ? activeMap.keys() : []);
+
+    if (els.listings) {
+      els.listings.textContent = 'Loading listings…';
+    }
+    clearSelection();
+    listingRecords.clear();
+    setTenantListingRecords([]);
+    updateListingControlsVisibility(false);
+
+    let addresses;
+    try {
+      const result = await pub.readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'allListings' });
+      addresses = Array.isArray(result) ? result : [];
+    } catch (err) {
+      console.error('Failed to load listing addresses', err);
+      if (els.listings) {
+        els.listings.textContent = gatingActiveOnly ? 'Unable to load booked listings.' : 'Unable to load listings.';
+      }
+      setTenantListingRecords([]);
+      renderTenantListingView();
+      notify({
+        message: gatingActiveOnly
+          ? 'Unable to load your booked listings right now. Please try again.'
+          : 'Unable to load listings.',
+        variant: 'error',
+        role: 'tenant',
+        timeout: 6000,
+      });
+      return;
+    }
+
+    let cleaned = addresses.filter(
+      (addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr) && !/^0x0+$/.test(addr)
+    );
+
+    if (gatingActiveOnly) {
+      cleaned = cleaned.filter((addr) => activeLowerSet.has(normaliseAddress(addr)));
+    }
+
+    if (!cleaned.length) {
+      setTenantListingRecords([]);
+      renderTenantListingView();
+      if (gatingActiveOnly) {
+        if (previousState !== 'bookings' || previousLoadedCount > 0) {
+          notify({
+            message: 'View pass inactive. Active booking listings are unavailable right now.',
+            variant: 'warning',
+            role: 'tenant',
+            timeout: 6000,
+          });
+        }
+      } else {
+        notify({ message: 'No active listings right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
+      }
+      return;
+    }
+
+    const infos = await Promise.all(cleaned.map((addr) => fetchListingInfo(addr).catch(() => null)));
+    let valid = infos.filter(Boolean);
+    if (gatingActiveOnly) {
+      valid = valid.filter((info) => info && activeLowerSet.has(normaliseAddress(info.address)));
+    }
+
+    if (!valid.length) {
+      setTenantListingRecords([]);
+      renderTenantListingView();
+      if (gatingActiveOnly) {
+        notify({
+          message: 'Unable to load details for your booked listings. Please try again.',
+          variant: 'warning',
+          role: 'tenant',
+          timeout: 6000,
+        });
+      } else {
+        notify({ message: 'No active listings right now.', variant: 'warning', role: 'tenant', timeout: 5000 });
+      }
+      return;
+    }
+
+    const entries = valid.map((info) => {
+      const record = buildListingRecord(info);
+      listingRecords.set(record.id, record);
+      if (record.address) {
+        listingRecords.set(normaliseAddress(record.address), record);
+        listingRecords.set(record.address, record);
+      }
+      return record;
+    });
+    setTenantListingRecords(entries);
+    renderTenantListingView();
+
+    if (listingAccessState === 'bookings') {
+      if (previousState !== 'bookings' || previousLoadedCount !== entries.length) {
+        const bookingCount = entries.length;
+        const listingWord = bookingCount === 1 ? 'listing' : 'listings';
+        notify({
+          message: `View pass inactive. Showing ${bookingCount} booked ${listingWord}. Renew your view pass to browse more.`,
+          variant: 'info',
+          role: 'tenant',
+          timeout: 6500,
+        });
+      }
+    } else {
+      notify({
+        message: `Loaded ${entries.length} listing${entries.length === 1 ? '' : 's'}.`,
+        variant: 'success',
+        role: 'tenant',
+        timeout: 4500,
+      });
+    }
+  })();
+
+  listingsLoading = loaderPromise;
+  try {
+    await loaderPromise;
+  } finally {
+    listingsLoading = null;
+  }
 }
 
 async function bookListing(listing = selectedListing){
@@ -2711,8 +2923,13 @@ async function checkViewPass(){
       els.status.textContent = `No active view pass.${expiredAt ? ` Expired ${expiredAt}.` : ''}${requirement}`;
     }
 
+    const hasBookingAccess = hasActiveBookingAccess();
     updateSummary();
-    await loadListings();
+    if (!viewPassRequired || hasActiveViewPass || hasBookingAccess) {
+      await loadListings();
+    } else {
+      showListingsLockedState();
+    }
   } catch (e) {
     console.error(e);
     els.status.textContent = 'Unable to verify view pass status.';
