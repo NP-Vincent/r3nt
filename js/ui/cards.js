@@ -59,12 +59,18 @@ export function BookingCard({
   period,
   depositUSDC,
   rentUSDC,
+  tenantFeeBps,
   status,
   statusClass,
   actions = [],
 }) {
   const periodText = (periodLabel(period) || '').trim();
   const showPeriod = Boolean(periodText) && periodText !== '—';
+  const tenantFeeAvailable = tenantFeeBps !== undefined && tenantFeeBps !== null;
+  const tenantFeePill = tenantFeeAvailable ? Pill(`Tenant fee ${fmt.bps(tenantFeeBps)}`) : null;
+  if (tenantFeePill) {
+    tenantFeePill.dataset.role = 'tenant-fee-bps';
+  }
   return el('div', { class: 'card data-card booking-entry', dataset: { bookingId, listingId } }, [
     el('div', { class: 'card-header' }, [
       el('strong', {}, `Booking #${bookingId}`),
@@ -73,6 +79,7 @@ export function BookingCard({
         showPeriod ? Pill(periodText) : null,
         depositUSDC != null ? Pill(`Deposit ${fmt.usdc(depositUSDC)} USDC`) : null,
         rentUSDC != null ? Pill(`Rent ${fmt.usdc(rentUSDC)} USDC`) : null,
+        tenantFeePill,
         status
           ? Pill(
               status,
