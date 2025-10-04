@@ -3,6 +3,7 @@ import { createPublicClient, http, encodeFunctionData, parseUnits } from 'https:
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { requestWalletSendCalls, isUserRejectedRequestError, extractErrorMessage } from './wallet.js';
+import { initializeAddToCollectionPrompt } from './add-to-collection.js';
 import {
   RPC_URL,
   LISTING_ABI,
@@ -81,6 +82,7 @@ const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
 let agentViewBackEntry = null;
 backController.update();
+initializeAddToCollectionPrompt({ sdk });
 
 function setStatus(message) {
   if (els.status) {
