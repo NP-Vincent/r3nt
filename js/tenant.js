@@ -301,6 +301,11 @@ if (document.readyState === 'loading') {
 
 const ARBITRUM_HEX = '0xa4b1';           // 42161
 const USDC_SCALAR = 1_000_000n;
+const BPS_SCALAR = 10_000n;
+
+let platformTenantFeeBps = null;
+let platformLandlordFeeBps = null;
+let platformFeeConfigLoaded = false;
 const SECONDS_PER_DAY = 86_400n;
 const PERIOD_OPTIONS = {
   day: { label: 'Daily', value: 1n, days: 1n },
@@ -470,6 +475,24 @@ function toBigInt(value, fallback = 0n) {
     }
   }
   return fallback;
+}
+
+function toBigIntOrNull(value) {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Number.isNaN(value)) return null;
+    return BigInt(Math.trunc(value));
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      return BigInt(trimmed);
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 
@@ -869,7 +892,7 @@ async function loadConfig(){
       pub = createPublicClient({ chain: arbitrum, transport: http(RPC_URL || 'https://arb1.arbitrum.io/rpc') });
     }
     try {
-      const [price, duration] = await Promise.all([
+      const [price, duration, fees] = await Promise.all([
         pub
           .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'viewPassPrice' })
           .catch((err) => {
@@ -882,12 +905,53 @@ async function loadConfig(){
             console.error('Failed to load view pass duration', err);
             return undefined;
           }),
+        pub
+          .readContract({ address: PLATFORM_ADDRESS, abi: PLATFORM_ABI, functionName: 'fees' })
+          .catch((err) => {
+            console.error('Failed to load platform fees', err);
+            return undefined;
+          }),
       ]);
       if (typeof price === 'bigint') {
         viewPassPrice = price;
       }
       if (typeof duration === 'bigint') {
         viewPassDuration = duration;
+      }
+      if (fees !== undefined && fees !== null) {
+        const tenantRaw = Array.isArray(fees)
+          ? fees[0]
+          : fees.tenantFeeBps ?? fees.tenantBps ?? fees.tenantFeeBps_ ?? fees[0];
+        const landlordRaw = Array.isArray(fees)
+          ? fees[1]
+          : fees.landlordFeeBps ?? fees.landlordBps ?? fees.landlordFeeBps_ ?? fees[1];
+        const tenantHasValue = tenantRaw !== undefined && tenantRaw !== null;
+        const landlordHasValue = landlordRaw !== undefined && landlordRaw !== null;
+        if (tenantHasValue) {
+          const tenantBps = toBigIntOrNull(tenantRaw);
+          if (tenantBps !== null) {
+            platformTenantFeeBps = tenantBps;
+            bookingRecords.forEach((record) => {
+              if (record) {
+                record.tenantFeeBps = tenantBps;
+              }
+            });
+            cachedBookingRecords.forEach((record) => {
+              if (record) {
+                record.tenantFeeBps = tenantBps;
+              }
+            });
+          }
+        }
+        if (landlordHasValue) {
+          const landlordBps = toBigIntOrNull(landlordRaw);
+          if (landlordBps !== null) {
+            platformLandlordFeeBps = landlordBps;
+          }
+        }
+        if (tenantHasValue || landlordHasValue) {
+          platformFeeConfigLoaded = true;
+        }
       }
     } catch (err) {
       console.error('Configuration load failed', err);
@@ -1452,6 +1516,9 @@ function buildBookingRecord(meta, data, pending, listingInfo) {
     landlord,
     landlordLower,
     listingInfo: listingInfo || null,
+    tenantFeeBps: platformFeeConfigLoaded && typeof platformTenantFeeBps === 'bigint'
+      ? platformTenantFeeBps
+      : null,
     canPayRent: statusValue === 1 && rentDue > 0n,
     isActive,
     isCompleted,
@@ -2841,6 +2908,26 @@ async function payRent(record, options = {}) {
     await ensureArbitrum(p);
     await loadConfig();
 
+    const tenantFeeBpsCandidate = toBigIntOrNull(
+      typeof target.tenantFeeBps !== 'undefined' && target.tenantFeeBps !== null
+        ? target.tenantFeeBps
+        : platformTenantFeeBps,
+    );
+    const feeDataAvailable = tenantFeeBpsCandidate !== null;
+    const tenantFee = feeDataAvailable ? (parsedAmount * tenantFeeBpsCandidate) / BPS_SCALAR : 0n;
+    const totalTransfer = parsedAmount + tenantFee;
+    const grossLabel = fmt.usdc(parsedAmount);
+    const tenantFeeLabel = fmt.usdc(tenantFee);
+    const totalLabel = fmt.usdc(totalTransfer);
+    const breakdownLabel = feeDataAvailable
+      ? `${grossLabel} gross + ${tenantFeeLabel} fee = ${totalLabel}`
+      : grossLabel;
+    if (feeDataAvailable) {
+      target.tenantFeeBps = tenantFeeBpsCandidate;
+    } else if (!platformFeeConfigLoaded) {
+      console.warn('Tenant fee configuration unavailable; falling back to gross rent for approvals.');
+    }
+
     let allowance = 0n;
     try {
       const allowanceRaw = await pub.readContract({
@@ -2855,14 +2942,14 @@ async function payRent(record, options = {}) {
       allowance = 0n;
     }
 
-    const needsApproval = allowance < parsedAmount;
+    const needsApproval = allowance < totalTransfer;
     let approveData;
     const calls = [];
     if (needsApproval) {
       approveData = encodeFunctionData({
         abi: erc20Abi,
         functionName: 'approve',
-        args: [target.listingAddress, parsedAmount],
+        args: [target.listingAddress, totalTransfer],
       });
       calls.push({ to: USDC_ADDRESS, data: approveData });
     }
@@ -2873,7 +2960,7 @@ async function payRent(record, options = {}) {
     });
     calls.push({ to: target.listingAddress, data: payData });
 
-    els.status.textContent = `Submitting rent payment (${fmt.usdc(parsedAmount)} USDC)…`;
+    els.status.textContent = `Submitting rent payment (${breakdownLabel} USDC)…`;
 
     let walletSendUnsupported = false;
     let batchedSuccess = false;
@@ -2896,17 +2983,24 @@ async function payRent(record, options = {}) {
 
     if (!batchedSuccess && walletSendUnsupported) {
       if (needsApproval && approveData) {
-        els.status.textContent = `Approve USDC, then confirm rent payment (${fmt.usdc(parsedAmount)} USDC).`;
+        els.status.textContent = `Approve ${totalLabel} USDC, then confirm rent payment (${grossLabel} USDC gross).`;
         await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
       } else {
-        els.status.textContent = `Confirm rent payment (${fmt.usdc(parsedAmount)} USDC).`;
+        els.status.textContent = feeDataAvailable
+          ? `Confirm rent payment (${grossLabel} USDC gross + ${tenantFeeLabel} USDC fee).`
+          : `Confirm rent payment (${grossLabel} USDC).`;
       }
       await p.request({ method: 'eth_sendTransaction', params: [{ from, to: target.listingAddress, data: payData }] });
     }
 
-    els.status.textContent = 'Rent payment submitted.';
+    els.status.textContent = feeDataAvailable
+      ? `Rent payment submitted (${totalLabel} USDC total).`
+      : 'Rent payment submitted.';
+    const successMessage = feeDataAvailable
+      ? `Rent payment submitted: ${grossLabel} USDC gross + ${tenantFeeLabel} USDC fee = ${totalLabel} USDC total.`
+      : `Rent payment of ${grossLabel} USDC submitted.`;
     notify({
-      message: `Rent payment of ${fmt.usdc(parsedAmount)} USDC submitted.`,
+      message: successMessage,
       variant: 'success',
       role: 'tenant',
       timeout: 6000,
