@@ -15,6 +15,7 @@ import {
   LISTING_LOCATION_FILTER_RADIUS_KM,
 } from './listing-filters.js';
 import { createOpenMapButton } from './map-assist.js';
+import { initializeAddToCollectionPrompt } from './add-to-collection.js';
 import {
   RPC_URL,
   REGISTRY_ADDRESS,
@@ -138,6 +139,7 @@ const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
 let selectionBackEntry = null;
 backController.update();
+initializeAddToCollectionPrompt({ sdk });
 
 if (els.period && !els.period.value) {
   els.period.value = 'month';

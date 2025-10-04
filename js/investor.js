@@ -4,6 +4,7 @@ import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
 import { requestWalletSendCalls, isUserRejectedRequestError } from './wallet.js';
 import { sqmuTokenIdentity } from './tools.js';
+import { initializeAddToCollectionPrompt } from './add-to-collection.js';
 import {
   RPC_URL,
   PLATFORM_ADDRESS,
@@ -56,6 +57,7 @@ const investorEventRefreshState = { timer: null, messages: new Set(), running: f
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
 backController.update();
+initializeAddToCollectionPrompt({ sdk });
 
 function isHexAddress(value) {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value);

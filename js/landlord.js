@@ -14,6 +14,7 @@ import { BookingCard, TokenisationCard } from './ui/cards.js';
 import { createCollapsibleSection, mountCollapsibles } from './ui/accordion.js';
 import { el, fmt } from './ui/dom.js';
 import { createOpenMapButton } from './map-assist.js';
+import { initializeAddToCollectionPrompt } from './add-to-collection.js';
 import {
   PLATFORM_ADDRESS,
   PLATFORM_ABI,
@@ -224,6 +225,7 @@ function handleDeactivateListing(listing) {
 const backButton = document.querySelector('[data-back-button]');
 const backController = createBackController({ sdk, button: backButton });
 backController.update();
+initializeAddToCollectionPrompt({ sdk });
 
 const checkpointLabels = {
   basics: 'Basics',
