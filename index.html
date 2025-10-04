@@ -149,6 +149,7 @@
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { APP_VERSION } from './js/config.js';
     import createBackController from './js/back-navigation.js';
+    import { initializeAddToCollectionPrompt } from './js/add-to-collection.js';
 
     const applyVersionBadge = () => {
       const badge = document.querySelector('[data-version]');
@@ -158,6 +159,7 @@
     const backButton = document.querySelector('[data-back-button]');
     const backController = createBackController({ sdk, button: backButton });
     backController.update();
+    initializeAddToCollectionPrompt({ sdk });
 
     const boot = () => {
       applyVersionBadge();

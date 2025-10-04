@@ -185,6 +185,7 @@
           <li><a href="#investors">Investor guide</a></li>
           <li><a href="#agents">Agent guide</a></li>
           <li><a href="#models">Tokenisation models</a></li>
+          <li><a href="#faq-general">FAQ – General</a></li>
           <li><a href="#faq-tenant">FAQ – Tenant</a></li>
           <li><a href="#faq-landlord">FAQ – Landlord</a></li>
           <li><a href="#faq-investor">FAQ – Investor</a></li>
@@ -301,6 +302,17 @@
         </div>
       </section>
 
+      <section id="faq-general">
+        <div class="card">
+          <h2>FAQ – General</h2>
+          <div class="faq-group">
+            <details class="faq-item"><summary>How do I add r3nt to my Farcaster Mini App collection?</summary>
+              <p>Stay active in the app for about a minute and you&rsquo;ll see the native prompt powered by <code>sdk.actions.addMiniApp()</code>. Accepting it pins r3nt to your collection so it&rsquo;s easier to find and allows notifications. You can also open the Warpcast Mini Apps drawer, search for &ldquo;r3nt&rdquo; and tap <em>Add</em>.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
       <section id="faq-tenant">
         <div class="card">
           <h2>FAQ – Tenant</h2>
@@ -378,6 +390,7 @@
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
     import { APP_VERSION } from './js/config.js';
     import createBackController from './js/back-navigation.js';
+    import { initializeAddToCollectionPrompt } from './js/add-to-collection.js';
 
     const applyVersionBadge = () => {
       const badge = document.querySelector('[data-version]');
@@ -397,6 +410,8 @@
     } else {
       boot();
     }
+
+    initializeAddToCollectionPrompt({ sdk });
 
     (async () => {
       try { await sdk.actions.ready(); } catch {}
