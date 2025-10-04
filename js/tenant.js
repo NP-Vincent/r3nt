@@ -2144,6 +2144,7 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
       period: record.periodLabel,
       depositUSDC: record.deposit,
       rentUSDC: record.grossRent,
+      tenantFeeBps: record.tenantFeeBps,
       status: record.statusLabel,
       statusClass: record.statusClass,
       actions,
