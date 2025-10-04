@@ -2109,12 +2109,18 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
   });
   for (const record of sorted) {
     bookingRecords.set(record.key, record);
+    const hasInstallmentPlan = typeof record.installmentCap === 'bigint' && record.installmentCap > 0n;
+    const hasInstallmentDue = typeof record.installmentAmount === 'bigint' && record.installmentAmount > 0n;
+    const installmentPayAmount = hasInstallmentPlan
+      ? (hasInstallmentDue ? record.installmentAmount : 0n)
+      : record.rentDue;
+    const canSettleInstallment = record.canPayRent && installmentPayAmount > 0n;
     const baseActions = actionsFor({
       role: 'tenant',
       entity: 'booking',
       perms: {
-        onPay: () => payRent(record),
-        canPay: record.canPayRent,
+        onPay: canSettleInstallment ? () => payRent(record, { amount: installmentPayAmount }) : null,
+        canPay: canSettleInstallment,
       },
     });
     const actions = [
@@ -2154,15 +2160,16 @@ function renderBookings(records, emptyMessage = 'No bookings found for this wall
       card.classList.add(`booking-status-${record.statusClass}`);
     }
     card.append(el('div', { class: 'card-footnote' }, record.listingTitle));
+    const nextInstallmentDisplayAmount =
+      typeof record.installmentAmount === 'bigint' && record.installmentAmount > 0n
+        ? record.installmentAmount
+        : record.rentDue;
     if (record.rentDue > 0n) {
       card.append(el('div', { class: 'card-footnote' }, `Outstanding rent: ${fmt.usdc(record.rentDue)} USDC`));
       const hasInstallmentCap = typeof record.installmentCap === 'bigint' && record.installmentCap > 0n;
-      const nextInstallment = typeof record.installmentAmount === 'bigint'
-        ? record.installmentAmount
-        : 0n;
-      if (hasInstallmentCap && nextInstallment > 0n) {
+      if (hasInstallmentCap && nextInstallmentDisplayAmount > 0n) {
         card.append(
-          el('div', { class: 'card-footnote' }, `Next installment: ${fmt.usdc(nextInstallment)} USDC`),
+          el('div', { class: 'card-footnote' }, `Next installment: ${fmt.usdc(nextInstallmentDisplayAmount)} USDC`),
         );
       }
     } else {
@@ -2846,48 +2853,37 @@ async function payRent(record, options = {}) {
   }
 
   const installmentCap = toBigInt(target.installmentCap, 0n);
-  let intervalMax = typeof target.installmentAmount === 'bigint'
-    ? target.installmentAmount
-    : installmentCap > 0n
-      ? (target.rentDue > installmentCap ? installmentCap : target.rentDue)
-      : target.rentDue;
-  if (intervalMax <= 0n && target.rentDue > 0n) {
-    intervalMax = target.rentDue;
+  const hasInstallmentPlan = installmentCap > 0n;
+  let predeterminedAmount = toBigIntOrNull(options.amount);
+  if (predeterminedAmount === null) {
+    predeterminedAmount = typeof target.installmentAmount === 'bigint' && target.installmentAmount > 0n
+      ? target.installmentAmount
+      : hasInstallmentPlan
+        ? 0n
+        : target.rentDue;
   }
-  const defaultAmount = intervalMax > 0n
-    ? fmt.usdc(intervalMax)
-    : target.rentDue > 0n
-      ? fmt.usdc(target.rentDue)
-      : '';
-  const promptValue = options.amount ?? window.prompt('Enter rent amount in USDC', defaultAmount);
-  if (promptValue === null || promptValue === undefined) {
-    return;
-  }
-  const parsedAmount = parseUsdcInput(String(promptValue));
-  if (parsedAmount === null) {
-    notify({ message: 'Enter a valid USDC amount (up to 6 decimals).', variant: 'warning', role: 'tenant', timeout: 4500 });
-    return;
-  }
-  if (parsedAmount <= 0n) {
-    notify({ message: 'Rent payments must be greater than 0 USDC.', variant: 'warning', role: 'tenant', timeout: 4500 });
-    return;
-  }
-  if (target.rentDue > 0n && parsedAmount > target.rentDue) {
+  if (predeterminedAmount === null || predeterminedAmount <= 0n) {
     notify({
-      message: `You can pay at most ${fmt.usdc(target.rentDue)} USDC right now.`,
+      message: 'No rent installment is due right now.',
       variant: 'warning',
       role: 'tenant',
-      timeout: 5000,
+      timeout: 4500,
     });
     return;
   }
-  if (installmentCap > 0n && parsedAmount > installmentCap) {
-    const allowed = intervalMax > 0n ? intervalMax : installmentCap;
+  let paymentAmount = predeterminedAmount;
+  if (target.rentDue > 0n && paymentAmount > target.rentDue) {
+    paymentAmount = target.rentDue;
+  }
+  if (installmentCap > 0n && paymentAmount > installmentCap) {
+    paymentAmount = installmentCap;
+  }
+  if (paymentAmount <= 0n) {
     notify({
-      message: `Installments are capped at ${fmt.usdc(installmentCap)} USDC. Pay up to ${fmt.usdc(allowed)} USDC this time.`,
+      message: 'No rent installment is due right now.',
       variant: 'warning',
       role: 'tenant',
-      timeout: 5500,
+      timeout: 4500,
     });
     return;
   }
@@ -2915,9 +2911,9 @@ async function payRent(record, options = {}) {
         : platformTenantFeeBps,
     );
     const feeDataAvailable = tenantFeeBpsCandidate !== null;
-    const tenantFee = feeDataAvailable ? (parsedAmount * tenantFeeBpsCandidate) / BPS_SCALAR : 0n;
-    const totalTransfer = parsedAmount + tenantFee;
-    const grossLabel = fmt.usdc(parsedAmount);
+    const tenantFee = feeDataAvailable ? (paymentAmount * tenantFeeBpsCandidate) / BPS_SCALAR : 0n;
+    const totalTransfer = paymentAmount + tenantFee;
+    const grossLabel = fmt.usdc(paymentAmount);
     const tenantFeeLabel = fmt.usdc(tenantFee);
     const totalLabel = fmt.usdc(totalTransfer);
     const breakdownLabel = feeDataAvailable
@@ -2939,7 +2935,7 @@ async function payRent(record, options = {}) {
       });
       allowance = toBigInt(allowanceRaw, 0n);
     } catch (err) {
-      console.warn('Failed to read USDC allowance before rent payment', err);
+      console.warn('Failed to read USDC allowance before rent installment', err);
       allowance = 0n;
     }
 
@@ -2957,11 +2953,11 @@ async function payRent(record, options = {}) {
     const payData = encodeFunctionData({
       abi: LISTING_ABI,
       functionName: 'payRent',
-      args: [target.bookingId, parsedAmount],
+      args: [target.bookingId, paymentAmount],
     });
     calls.push({ to: target.listingAddress, data: payData });
 
-    els.status.textContent = `Submitting rent payment (${breakdownLabel} USDC)…`;
+    els.status.textContent = `Submitting rent installment (${breakdownLabel} USDC)…`;
 
     let walletSendUnsupported = false;
     let batchedSuccess = false;
@@ -2975,8 +2971,8 @@ async function payRent(record, options = {}) {
       walletSendUnsupported = unsupported;
     } catch (err) {
       if (isUserRejectedRequestError(err)) {
-        els.status.textContent = 'Rent payment cancelled by user.';
-        notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+        els.status.textContent = 'Rent installment cancelled by user.';
+        notify({ message: 'Rent installment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
         return;
       }
       throw err;
@@ -2984,22 +2980,22 @@ async function payRent(record, options = {}) {
 
     if (!batchedSuccess && walletSendUnsupported) {
       if (needsApproval && approveData) {
-        els.status.textContent = `Approve ${totalLabel} USDC, then confirm rent payment (${grossLabel} USDC gross).`;
+        els.status.textContent = `Approve ${totalLabel} USDC, then confirm rent installment (${grossLabel} USDC gross).`;
         await p.request({ method: 'eth_sendTransaction', params: [{ from, to: USDC_ADDRESS, data: approveData }] });
       } else {
         els.status.textContent = feeDataAvailable
-          ? `Confirm rent payment (${grossLabel} USDC gross + ${tenantFeeLabel} USDC fee).`
-          : `Confirm rent payment (${grossLabel} USDC).`;
+          ? `Confirm rent installment (${grossLabel} USDC gross + ${tenantFeeLabel} USDC fee).`
+          : `Confirm rent installment (${grossLabel} USDC).`;
       }
       await p.request({ method: 'eth_sendTransaction', params: [{ from, to: target.listingAddress, data: payData }] });
     }
 
     els.status.textContent = feeDataAvailable
-      ? `Rent payment submitted (${totalLabel} USDC total).`
-      : 'Rent payment submitted.';
+      ? `Rent installment submitted (${totalLabel} USDC total).`
+      : 'Rent installment submitted.';
     const successMessage = feeDataAvailable
-      ? `Rent payment submitted: ${grossLabel} USDC gross + ${tenantFeeLabel} USDC fee = ${totalLabel} USDC total.`
-      : `Rent payment of ${grossLabel} USDC submitted.`;
+      ? `Rent installment submitted: ${grossLabel} USDC gross + ${tenantFeeLabel} USDC fee = ${totalLabel} USDC total.`
+      : `Rent installment of ${grossLabel} USDC submitted.`;
     notify({
       message: successMessage,
       variant: 'success',
@@ -3010,17 +3006,17 @@ async function payRent(record, options = {}) {
     try {
       await loadTenantBookings(connectedAccount, { force: true, showBusyLabel: true });
     } catch (err) {
-      console.warn('Failed to refresh bookings after rent payment', err);
+      console.warn('Failed to refresh bookings after rent installment', err);
     }
   } catch (err) {
-    console.error('Rent payment failed', err);
+    console.error('Rent installment failed', err);
     if (isUserRejectedRequestError(err)) {
-      els.status.textContent = 'Rent payment cancelled by user.';
-      notify({ message: 'Rent payment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
+      els.status.textContent = 'Rent installment cancelled by user.';
+      notify({ message: 'Rent installment cancelled.', variant: 'warning', role: 'tenant', timeout: 5000 });
     } else {
-      const message = extractErrorMessage(err, 'Rent payment failed.');
-      els.status.textContent = `Rent payment failed: ${message}`;
-      notify({ message: `Rent payment failed: ${message}`, variant: 'error', role: 'tenant', timeout: 6500 });
+      const message = extractErrorMessage(err, 'Rent installment failed.');
+      els.status.textContent = `Rent installment failed: ${message}`;
+      notify({ message: `Rent installment failed: ${message}`, variant: 'error', role: 'tenant', timeout: 6500 });
     }
   }
 }
