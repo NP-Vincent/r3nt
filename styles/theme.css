@@ -1622,6 +1622,26 @@ dl.summary-breakdown dd {
   line-height: 1.45;
 }
 
+.note.miniapp-note .miniapp-note-link {
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.note.miniapp-note .miniapp-note-link::after {
+  content: '↗';
+  font-size: 0.85em;
+  transition: transform var(--transition-fast);
+}
+
+.note.miniapp-note .miniapp-note-link:hover::after {
+  transform: translateX(2px);
+}
+
 .section-divider {
   border: none;
   border-top: 1px solid var(--color-border);
