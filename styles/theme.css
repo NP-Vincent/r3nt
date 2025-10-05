@@ -1617,6 +1617,11 @@ dl.summary-breakdown dd {
   border: 1px solid var(--color-border);
 }
 
+.note.miniapp-note {
+  margin: 18px 0;
+  line-height: 1.45;
+}
+
 .section-divider {
   border: none;
   border-top: 1px solid var(--color-border);

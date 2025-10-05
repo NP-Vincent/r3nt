@@ -1,4 +1,5 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+import { showNonMiniAppPrompt } from './miniapp-environment.js';
 import { createPublicClient, http, encodeFunctionData, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { notify, mountNotificationCenter } from './notifications.js';
@@ -18,6 +19,9 @@ import {
 import createBackController from './back-navigation.js';
 import { BookingCard, TokenisationCard } from './ui/cards.js';
 import { actionsFor } from './ui/actions.js';
+
+const nonMiniAppNote = document.querySelector('[data-non-miniapp-note]');
+showNonMiniAppPrompt({ sdk, container: nonMiniAppNote });
 
 const ARBITRUM_HEX = '0xa4b1';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
