@@ -10,7 +10,7 @@
      * Set to `null` (or remove this property) to use the per-browser toggle
      * managed from the Platform admin view.
      */
-    devConsoleOverride: null,
+    devConsoleOverride: true,
     /**
      * When `devConsoleOverride` is `null`, this value controls the default state
      * if there is no preference stored in localStorage.
