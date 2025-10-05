@@ -46,6 +46,8 @@
       <span class="version-badge" data-version></span>
     </nav>
 
+    <div class="note miniapp-note" data-non-miniapp-note hidden></div>
+
     <div class="hero">
       <div>
         <h1>Simple. Stable. On-chain. Tokenised.</h1>
@@ -147,9 +149,13 @@
 
   <script type="module">
     import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+    import { showNonMiniAppPrompt } from './js/miniapp-environment.js';
     import { APP_VERSION } from './js/config.js';
     import createBackController from './js/back-navigation.js';
     import { initializeAddToCollectionPrompt } from './js/add-to-collection.js';
+
+    const nonMiniAppNote = document.querySelector('[data-non-miniapp-note]');
+    showNonMiniAppPrompt({ sdk, container: nonMiniAppNote });
 
     const applyVersionBadge = () => {
       const badge = document.querySelector('[data-version]');

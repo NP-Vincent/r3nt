@@ -1,4 +1,5 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+import { showNonMiniAppPrompt } from './miniapp-environment.js';
 import { createPublicClient, http, encodeFunctionData, parseUnits, getAddress, erc20Abi } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32FromCastHash } from './tools.js';
@@ -26,6 +27,9 @@ import {
   USDC_ADDRESS,
 } from './config.js';
 import createBackController from './back-navigation.js';
+
+const nonMiniAppNote = document.querySelector('[data-non-miniapp-note]');
+showNonMiniAppPrompt({ sdk, container: nonMiniAppNote });
 
 // -------------------- Config --------------------
 const ARBITRUM_HEX = '0xa4b1';

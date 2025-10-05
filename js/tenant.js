@@ -1,4 +1,5 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
+import { showNonMiniAppPrompt } from './miniapp-environment.js';
 import { encodeFunctionData, erc20Abi, createPublicClient, http } from 'https://esm.sh/viem@2.9.32';
 import { arbitrum } from 'https://esm.sh/viem/chains';
 import { bytes32ToCastHash, buildFarcasterCastUrl, geohashToLatLon } from './tools.js';
@@ -26,6 +27,9 @@ import {
   USDC_ADDRESS,
   APP_VERSION,
 } from './config.js';
+
+const nonMiniAppNote = document.querySelector('[data-non-miniapp-note]');
+showNonMiniAppPrompt({ sdk, container: nonMiniAppNote });
 
 (async () => { try { await sdk.actions.ready(); } catch {} setTimeout(()=>{ try { sdk.actions.ready(); } catch {} }, 800); })();
 
@@ -628,7 +632,7 @@ function calculateInstallmentCap(totalRent, startTs, endTs, periodDays) {
 }
 
 let inHost = false; try { inHost = await sdk.isInMiniApp(); } catch {}
-els.status.textContent = inHost ? 'Tap Connect to continue.' : 'Viewing only. Open from a Farcaster Mini App embed.';
+els.status.textContent = inHost ? 'Tap Connect to continue.' : 'Viewing only. Use the links above to open r3nt on Farcaster.';
 
 async function hostSupportsWallet(){ try { const caps = await sdk.getCapabilities?.(); return !caps || caps.includes('wallet.getEthereumProvider'); } catch { return true; } }
 
