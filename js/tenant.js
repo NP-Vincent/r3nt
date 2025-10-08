@@ -1005,9 +1005,204 @@ function decodeDataUri(uri){
   }
 }
 
-async function fetchListingMetadataDetails(uri, fallbackAddress){
+function normaliseHttpUrl(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (!/^https?:\/\//i.test(trimmed)) return '';
+  return trimmed;
+}
+
+function findImageUrlInObject(candidate, contextKey = '') {
+  if (!candidate || (typeof candidate !== 'object' && !Array.isArray(candidate))) {
+    return '';
+  }
+  const queue = [{ value: candidate, key: contextKey }];
+  const visited = new Set();
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const { value, key } = current;
+    if (value === null || value === undefined) {
+      continue;
+    }
+    const keyHint = typeof key === 'string' ? key.toLowerCase() : '';
+    if (typeof value === 'string') {
+      if (keyHint && /(image|thumbnail|preview|photo|og|card)/.test(keyHint)) {
+        const normalized = normaliseHttpUrl(value);
+        if (normalized) {
+          return normalized;
+        }
+      }
+      continue;
+    }
+    if (typeof value !== 'object') {
+      continue;
+    }
+    if (visited.has(value)) {
+      continue;
+    }
+    visited.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        queue.push({ value: entry, key });
+      }
+      continue;
+    }
+    const entries = Object.entries(value);
+    for (const [childKey, childValue] of entries) {
+      const childKeyLower = childKey ? childKey.toLowerCase() : '';
+      if (typeof childValue === 'string') {
+        if (/(image|thumbnail|preview|photo|og|card)/.test(childKeyLower)) {
+          const normalized = normaliseHttpUrl(childValue);
+          if (normalized) {
+            return normalized;
+          }
+        }
+      } else if (childValue && typeof childValue === 'object') {
+        if (typeof childValue.url === 'string' && /(image|thumbnail|preview|photo|og|card)/.test(childKeyLower)) {
+          const normalized = normaliseHttpUrl(childValue.url);
+          if (normalized) {
+            return normalized;
+          }
+        }
+        queue.push({ value: childValue, key: childKey });
+      } else if (Array.isArray(childValue)) {
+        queue.push({ value: childValue, key: childKey });
+      }
+    }
+  }
+  return '';
+}
+
+function extractEmbedPreviewImage(embed) {
+  if (!embed || typeof embed !== 'object') {
+    return '';
+  }
+  const directKeys = [
+    'previewImageUrl',
+    'preview_image_url',
+    'imageUrl',
+    'image_url',
+    'thumbnailUrl',
+    'thumbnail_url',
+    'ogImageUrl',
+    'og_image_url',
+  ];
+  for (const key of directKeys) {
+    if (key in embed) {
+      const value = embed[key];
+      const normalized = normaliseHttpUrl(value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+  }
+  if (Array.isArray(embed.images)) {
+    for (const entry of embed.images) {
+      if (!entry) continue;
+      if (typeof entry === 'string') {
+        const normalized = normaliseHttpUrl(entry);
+        if (normalized) return normalized;
+      } else if (typeof entry === 'object' && typeof entry.url === 'string') {
+        const normalized = normaliseHttpUrl(entry.url);
+        if (normalized) return normalized;
+      }
+    }
+  }
+  const nested =
+    findImageUrlInObject(embed.metadata, 'metadata') ||
+    findImageUrlInObject(embed.openGraphMetadata, 'openGraphMetadata') ||
+    findImageUrlInObject(embed.previewCard, 'previewCard') ||
+    findImageUrlInObject(embed, 'embed');
+  if (nested) {
+    return nested;
+  }
+  return '';
+}
+
+function normaliseFidValue(fid) {
+  if (typeof fid === 'bigint') {
+    return fid >= 0n ? fid.toString(10) : '';
+  }
+  if (typeof fid === 'number') {
+    if (!Number.isFinite(fid) || fid < 0) return '';
+    return Math.floor(fid).toString(10);
+  }
+  if (typeof fid === 'string') {
+    const trimmed = fid.trim();
+    if (/^\d+$/.test(trimmed)) {
+      return trimmed;
+    }
+  }
+  return '';
+}
+
+function isZeroHex(value) {
+  if (typeof value !== 'string') return false;
+  if (!/^0x[0-9a-fA-F]+$/.test(value)) return false;
+  return /^0x0+$/.test(value);
+}
+
+async function fetchFarcasterEmbedPreview({ fid, castHash32, embedUrl }) {
+  const fidParam = normaliseFidValue(fid);
+  const castHash = typeof castHash32 === 'string' ? castHash32 : '';
+  if (!fidParam || !/^0x[0-9a-fA-F]{64}$/.test(castHash) || isZeroHex(castHash)) {
+    return '';
+  }
+  let castHash20;
+  try {
+    castHash20 = bytes32ToCastHash(castHash);
+  } catch {
+    return '';
+  }
+  const url = new URL('https://client.warpcast.com/v2/cast');
+  url.searchParams.set('fid', fidParam);
+  url.searchParams.set('hash', castHash20);
+  try {
+    const response = await fetch(url.toString(), { method: 'GET' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    const cast = payload?.result?.cast;
+    if (!cast) {
+      return '';
+    }
+    const targetEmbedUrl = normaliseHttpUrl(embedUrl);
+    const embedCandidates = [];
+    if (Array.isArray(cast.embeds)) {
+      embedCandidates.push(...cast.embeds);
+    }
+    if (Array.isArray(cast.embedsDeprecated)) {
+      embedCandidates.push(...cast.embedsDeprecated);
+    }
+    if (embedCandidates.length === 0) {
+      return '';
+    }
+    let fallbackImage = '';
+    for (const embed of embedCandidates) {
+      if (!embed || typeof embed !== 'object') continue;
+      const embedUrlCandidate = normaliseHttpUrl(embed.url || embed.openGraphUrl || embed.webUrl);
+      const imageUrl = extractEmbedPreviewImage(embed);
+      if (imageUrl) {
+        if (targetEmbedUrl && embedUrlCandidate && embedUrlCandidate === targetEmbedUrl) {
+          return imageUrl;
+        }
+        if (!fallbackImage) {
+          fallbackImage = imageUrl;
+        }
+      }
+    }
+    return fallbackImage;
+  } catch (err) {
+    console.warn('Failed to resolve Farcaster embed preview', err);
+    return '';
+  }
+}
+
+async function fetchListingMetadataDetails(uri, fallbackAddress, farcasterContext = {}){
   const fallbackText = typeof fallbackAddress === 'string' ? fallbackAddress : '';
-  const result = { title: fallbackText, description: fallbackText };
+  const result = { title: fallbackText, description: fallbackText, embedUrl: '', previewImageUrl: '' };
   if (!uri || typeof uri !== 'string') {
     return result;
   }
@@ -1042,9 +1237,32 @@ async function fetchListingMetadataDetails(uri, fallbackAddress){
       if (typeof parsed.description === 'string' && parsed.description.trim()) {
         result.description = parsed.description.trim();
       }
+      if (typeof parsed.embedUrl === 'string' && parsed.embedUrl.trim()) {
+        result.embedUrl = normaliseHttpUrl(parsed.embedUrl) || parsed.embedUrl.trim();
+      }
+      if (typeof parsed.previewImageUrl === 'string' && parsed.previewImageUrl.trim()) {
+        const normalizedPreview = normaliseHttpUrl(parsed.previewImageUrl);
+        if (normalizedPreview) {
+          result.previewImageUrl = normalizedPreview;
+        }
+      }
     }
   } catch (err) {
     console.warn('Failed to parse listing metadata JSON', uri, err);
+  }
+  if (!result.previewImageUrl) {
+    try {
+      const previewFromCast = await fetchFarcasterEmbedPreview({
+        fid: farcasterContext?.fid,
+        castHash32: farcasterContext?.castHash,
+        embedUrl: result.embedUrl,
+      });
+      if (previewFromCast) {
+        result.previewImageUrl = previewFromCast;
+      }
+    } catch (err) {
+      console.warn('Unable to fetch preview image for listing', err);
+    }
   }
   return result;
 }
@@ -1099,7 +1317,10 @@ async function fetchListingInfo(listingAddr){
     const geohashHex = getString(8, '0x');
     const geohashPrecision = Number(getBig(9));
     const landlord = getString(10, '0x0000000000000000000000000000000000000000');
-    const metadataDetails = await fetchListingMetadataDetails(metadataURI, listingAddr);
+    const metadataDetails = await fetchListingMetadataDetails(metadataURI, listingAddr, {
+      fid,
+      castHash,
+    });
     const geohash = decodeBytes32ToString(
       geohashHex,
       Number.isFinite(geohashPrecision) ? geohashPrecision : undefined
@@ -1125,6 +1346,8 @@ async function fetchListingInfo(listingAddr){
       depositAmount,
       areaSqm,
       metadataURI,
+      embedUrl: metadataDetails.embedUrl,
+      previewImageUrl: metadataDetails.previewImageUrl,
       title: metadataDetails.title,
       description: metadataDetails.description,
       minBookingNotice,
@@ -1164,6 +1387,7 @@ function buildListingRecord(info) {
     locationPill: getListingLocationPill(info),
     deposit: info.depositAmount,
     active: true,
+    previewImageUrl: typeof info.previewImageUrl === 'string' ? info.previewImageUrl : '',
   };
 }
 
@@ -1410,6 +1634,7 @@ function renderListings(listings, options = {}) {
       depositUSDC: record.deposit ?? record.depositAmount,
       status: record.active ? 'Active' : 'Inactive',
       actions: listingActions,
+      imageUrl: typeof record.previewImageUrl === 'string' ? record.previewImageUrl : undefined,
     });
     card.dataset.address = record.address || '';
     card.dataset.displayTitle = record.displayTitle || '';
