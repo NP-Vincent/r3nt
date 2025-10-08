@@ -1143,7 +1143,59 @@ function isZeroHex(value) {
   return /^0x0+$/.test(value);
 }
 
-async function fetchFarcasterEmbedPreview({ fid, castHash32, embedUrl }) {
+function buildFarcasterOgImageCandidates(fidParam, castHash20) {
+  const candidates = [];
+  const append = (url) => {
+    if (typeof url === 'string' && url && !candidates.includes(url)) {
+      candidates.push(url);
+    }
+  };
+  if (fidParam) {
+    append(`https://client.warpcast.com/v2/cast-image?fid=${fidParam}&hash=${castHash20}`);
+    append(`https://client.farcaster.xyz/v2/cast-image?fid=${fidParam}&hash=${castHash20}`);
+  }
+  append(`https://warpcast.com/~/og/cast?hash=${castHash20}`);
+  append(`https://farcaster.xyz/~/og/cast?hash=${castHash20}`);
+  const withoutPrefix = castHash20.startsWith('0x') ? castHash20.slice(2) : castHash20;
+  if (withoutPrefix.length === 40) {
+    append(`https://r2.warpcast.com/og/cast/${withoutPrefix}`);
+    append(`https://r2.farcaster.xyz/og/cast/${withoutPrefix}`);
+  }
+  return candidates;
+}
+
+function loadImageCandidate(url, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (!url) {
+      resolve('');
+      return;
+    }
+    if (typeof Image === 'undefined') {
+      resolve(url);
+      return;
+    }
+    const img = new Image();
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      img.onload = null;
+      img.onerror = null;
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(''), timeoutMs);
+    img.onload = () => finish(url);
+    img.onerror = () => finish('');
+    try {
+      img.referrerPolicy = 'no-referrer';
+    } catch {}
+    img.decoding = 'async';
+    img.src = url;
+  });
+}
+
+async function fetchFarcasterEmbedPreview({ fid, castHash32 }) {
   const fidParam = normaliseFidValue(fid);
   const castHash = typeof castHash32 === 'string' ? castHash32 : '';
   if (!fidParam || !/^0x[0-9a-fA-F]{64}$/.test(castHash) || isZeroHex(castHash)) {
@@ -1155,49 +1207,16 @@ async function fetchFarcasterEmbedPreview({ fid, castHash32, embedUrl }) {
   } catch {
     return '';
   }
-  const url = new URL('https://client.warpcast.com/v2/cast');
-  url.searchParams.set('fid', fidParam);
-  url.searchParams.set('hash', castHash20);
-  try {
-    const response = await fetch(url.toString(), { method: 'GET' });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const payload = await response.json();
-    const cast = payload?.result?.cast;
-    if (!cast) {
-      return '';
-    }
-    const targetEmbedUrl = normaliseHttpUrl(embedUrl);
-    const embedCandidates = [];
-    if (Array.isArray(cast.embeds)) {
-      embedCandidates.push(...cast.embeds);
-    }
-    if (Array.isArray(cast.embedsDeprecated)) {
-      embedCandidates.push(...cast.embedsDeprecated);
-    }
-    if (embedCandidates.length === 0) {
-      return '';
-    }
-    let fallbackImage = '';
-    for (const embed of embedCandidates) {
-      if (!embed || typeof embed !== 'object') continue;
-      const embedUrlCandidate = normaliseHttpUrl(embed.url || embed.openGraphUrl || embed.webUrl);
-      const imageUrl = extractEmbedPreviewImage(embed);
-      if (imageUrl) {
-        if (targetEmbedUrl && embedUrlCandidate && embedUrlCandidate === targetEmbedUrl) {
-          return imageUrl;
-        }
-        if (!fallbackImage) {
-          fallbackImage = imageUrl;
-        }
+  const candidates = buildFarcasterOgImageCandidates(fidParam, castHash20);
+  for (const candidate of candidates) {
+    try {
+      const resolved = await loadImageCandidate(candidate);
+      if (resolved) {
+        return resolved;
       }
-    }
-    return fallbackImage;
-  } catch (err) {
-    console.warn('Failed to resolve Farcaster embed preview', err);
-    return '';
+    } catch {}
   }
+  return '';
 }
 
 async function fetchListingMetadataDetails(uri, fallbackAddress, farcasterContext = {}){
@@ -1255,7 +1274,6 @@ async function fetchListingMetadataDetails(uri, fallbackAddress, farcasterContex
       const previewFromCast = await fetchFarcasterEmbedPreview({
         fid: farcasterContext?.fid,
         castHash32: farcasterContext?.castHash,
-        embedUrl: result.embedUrl,
       });
       if (previewFromCast) {
         result.previewImageUrl = previewFromCast;
