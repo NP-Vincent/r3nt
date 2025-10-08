@@ -905,6 +905,18 @@ footer {
   align-items: center;
 }
 
+.field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-stack .location-detect {
+  width: 100%;
+  padding: 10px 12px;
+  text-align: center;
+}
+
 .divider {
   height: 1px;
   background: var(--color-border);
