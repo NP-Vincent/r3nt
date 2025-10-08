@@ -727,6 +727,21 @@ footer {
   text-decoration: underline;
 }
 
+.listing-link-subtle {
+  font-weight: 500;
+  font-size: 0.95em;
+}
+
+.listing-farcaster-link {
+  margin-top: 6px;
+}
+
+.listing-farcaster-link .listing-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .onboarding-guide,
 .planner-card,
 .bookings-card,

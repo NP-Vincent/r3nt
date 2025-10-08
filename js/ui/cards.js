@@ -23,6 +23,7 @@ export function ListingCard({
   status,
   actions = [],
   imageUrl,
+  detailLink,
 }) {
   const visibleActions = actions.filter((a) => a?.visible !== false);
   const actionButtons = visibleActions.map((a) => el('button', { class: 'inline-button', onClick: a.onClick }, a.label));
@@ -31,6 +32,23 @@ export function ListingCard({
   const headerChildren = [el('strong', {}, title || `Listing #${id}`)];
   if (summaryText) {
     headerChildren.push(el('div', { class: 'listing-summary' }, summaryText));
+  }
+
+  if (detailLink?.href) {
+    const detailLinkProps = {
+      href: detailLink.href,
+      target: '_blank',
+      rel: 'noopener',
+      class: detailLink.className || 'listing-link listing-link-subtle',
+    };
+    if (typeof detailLink.onClick === 'function') {
+      detailLinkProps.onClick = detailLink.onClick;
+    }
+    headerChildren.push(
+      el('div', { class: 'listing-farcaster-link' }, [
+        el('a', detailLinkProps, detailLink.label || 'View full details on Farcaster'),
+      ]),
+    );
   }
 
   const metaPills = [

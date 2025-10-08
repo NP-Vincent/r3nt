@@ -1642,6 +1642,7 @@ function renderListings(listings, options = {}) {
       },
     });
 
+    const farcasterUrl = buildFarcasterCastUrl(record.fid, record.castHash);
     const card = ListingCard({
       id: record.id,
       title: record.displayTitle || record.title || getListingTitle(record),
@@ -1653,6 +1654,16 @@ function renderListings(listings, options = {}) {
       status: record.active ? 'Active' : 'Inactive',
       actions: listingActions,
       imageUrl: typeof record.previewImageUrl === 'string' ? record.previewImageUrl : undefined,
+      detailLink: farcasterUrl
+        ? {
+            href: farcasterUrl,
+            label: 'View full details on Farcaster',
+            onClick: (ev) => {
+              ev.preventDefault();
+              openCast(record.fid, record.castHash, farcasterUrl);
+            },
+          }
+        : undefined,
     });
     card.dataset.address = record.address || '';
     card.dataset.displayTitle = record.displayTitle || '';
@@ -1725,20 +1736,6 @@ function renderListings(listings, options = {}) {
         }, 'Metadata'),
       );
     }
-
-    const farcasterUrl = buildFarcasterCastUrl(record.fid, record.castHash);
-    card.append(
-      el('a', {
-        href: farcasterUrl,
-        target: '_blank',
-        rel: 'noopener',
-        class: 'listing-link',
-        onClick: (ev) => {
-          ev.preventDefault();
-          openCast(record.fid, record.castHash, farcasterUrl);
-        },
-      }, 'View full details on Farcaster'),
-    );
 
     if (selectedListing && selectedListing.address && addressesEqual(selectedListing.address, record.address)) {
       card.classList.add('selected');
