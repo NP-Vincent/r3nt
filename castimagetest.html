@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>r3nt — Cast Image Test</title>
+
+    <!-- Farcaster Mini App metadata (kept consistent across routes) -->
+    <meta
+      name="fc:miniapp"
+      content='{
+        "version":"1",
+        "imageUrl":"https://r3nt.sqmu.net/assets/icon.png",
+        "button":{
+          "title":"Open r3nt",
+          "action":{
+            "type":"launch_miniapp",
+            "name":"r3nt",
+            "url":"https://r3nt.sqmu.net/index.html",
+            "splashImageUrl":"https://r3nt.sqmu.net/assets/splashscreen.png",
+            "splashBackgroundColor":"#FFFFFF"
+          }
+        }
+      }'
+    />
+
+    <link rel="preconnect" href="https://auth.farcaster.xyz" />
+    <link rel="stylesheet" href="./styles/theme.css" />
+  </head>
+  <body class="page-compact">
+    <header>
+      <a class="brand" href="./index.html">r3nt by SQMU</a>
+    </header>
+
+    <div class="muted beta-note">internal test tool.</div>
+
+    <nav>
+      <a href="./tenant.html">Tenant</a>
+      <a href="./landlord.html">Landlord</a>
+      <a href="./investor.html">Investor</a>
+      <a href="./agent.html">Agent</a>
+      <a href="./platform.html">Platform</a>
+      <a href="./faq.html">FAQ</a>
+    </nav>
+
+    <main class="stack stack-lg">
+      <section class="card">
+        <h1>Cast image retrieval test</h1>
+        <p class="muted">
+          Enter a Warpcast URL or 0x-prefixed cast hash and (optionally) the poster&rsquo;s FID to
+          resolve candidate preview images. The tool will try each known endpoint until one
+          successfully loads and report the outcome.
+        </p>
+        <form id="castImageForm" class="stack stack-sm">
+          <label>
+            Cast link or hash
+            <input id="castInput" autocomplete="off" placeholder="https://warpcast.com/…" required />
+          </label>
+          <label>
+            FID (optional)
+            <input id="fidInput" inputmode="numeric" autocomplete="off" placeholder="12345" />
+            <span class="field-hint">Include the poster&rsquo;s Farcaster ID to test authenticated endpoints.</span>
+          </label>
+          <button type="submit">Fetch image</button>
+        </form>
+        <div id="status" class="muted"></div>
+      </section>
+
+      <section class="card" id="resultsSection" hidden>
+        <h2>Candidate endpoints</h2>
+        <div id="selectedImage" class="stack stack-sm"></div>
+        <ol id="candidateList" class="stack stack-sm"></ol>
+      </section>
+    </main>
+
+    <footer>
+      r3nt by SQMU. USDC. Arbitrum.
+    </footer>
+
+    <script type="module">
+      import { extractCastHexFromInput, bytes32ToCastHash } from './js/tools.js';
+
+      const form = document.getElementById('castImageForm');
+      const castInput = document.getElementById('castInput');
+      const fidInput = document.getElementById('fidInput');
+      const statusEl = document.getElementById('status');
+      const resultsSection = document.getElementById('resultsSection');
+      const candidateList = document.getElementById('candidateList');
+      const selectedImage = document.getElementById('selectedImage');
+
+      const normaliseFidValue = (fid) => {
+        if (typeof fid === 'string') {
+          const trimmed = fid.trim();
+          if (/^\d+$/.test(trimmed)) {
+            return trimmed.replace(/^0+(?=\d)/, '');
+          }
+          return '';
+        }
+        if (typeof fid === 'number') {
+          if (!Number.isFinite(fid) || fid < 0) return '';
+          return Math.floor(fid).toString(10);
+        }
+        if (typeof fid === 'bigint') {
+          return fid >= 0n ? fid.toString(10) : '';
+        }
+        return '';
+      };
+
+      const buildFarcasterOgImageCandidates = (fidParam, castHash20) => {
+        const candidates = [];
+        const append = (url) => {
+          if (typeof url === 'string' && url && !candidates.includes(url)) {
+            candidates.push(url);
+          }
+        };
+        if (fidParam) {
+          append(`https://client.warpcast.com/v2/cast-image?fid=${fidParam}&hash=${castHash20}`);
+          append(`https://client.farcaster.xyz/v2/cast-image?fid=${fidParam}&hash=${castHash20}`);
+        }
+        append(`https://warpcast.com/~/og/cast?hash=${castHash20}`);
+        append(`https://farcaster.xyz/~/og/cast?hash=${castHash20}`);
+        const withoutPrefix = castHash20.startsWith('0x') ? castHash20.slice(2) : castHash20;
+        if (withoutPrefix.length === 40) {
+          append(`https://r2.warpcast.com/og/cast/${withoutPrefix}`);
+          append(`https://r2.farcaster.xyz/og/cast/${withoutPrefix}`);
+        }
+        return candidates;
+      };
+
+      const loadImageCandidate = (url, timeoutMs = 7000) =>
+        new Promise((resolve) => {
+          if (!url) {
+            resolve({ url, status: 'skipped' });
+            return;
+          }
+          const img = new Image();
+          let settled = false;
+          const finish = (status) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            img.onload = null;
+            img.onerror = null;
+            resolve({ url, status });
+          };
+          const timer = setTimeout(() => finish('timeout'), timeoutMs);
+          img.onload = () => finish('loaded');
+          img.onerror = () => finish('error');
+          try {
+            img.referrerPolicy = 'no-referrer';
+          } catch {}
+          img.decoding = 'async';
+          img.src = url;
+        });
+
+      const renderCandidateResult = ({ url, status }) => {
+        const li = document.createElement('li');
+        li.className = 'stack stack-xs';
+        const strong = document.createElement('strong');
+        strong.textContent = url;
+        li.appendChild(strong);
+        const statusLine = document.createElement('span');
+        statusLine.className = 'muted';
+        statusLine.textContent =
+          status === 'loaded'
+            ? 'Loaded successfully'
+            : status === 'timeout'
+            ? 'Timed out after waiting for response'
+            : status === 'error'
+            ? 'Failed to load (network or CORS error)'
+            : 'Skipped';
+        li.appendChild(statusLine);
+        candidateList.appendChild(li);
+      };
+
+      const showSelectedImage = (url) => {
+        selectedImage.innerHTML = '';
+        if (!url) {
+          const empty = document.createElement('p');
+          empty.className = 'muted';
+          empty.textContent = 'No image resolved. Review candidate responses above.';
+          selectedImage.appendChild(empty);
+          return;
+        }
+        const heading = document.createElement('h3');
+        heading.textContent = 'Resolved image';
+        selectedImage.appendChild(heading);
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = 'Resolved cast preview image';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.referrerPolicy = 'no-referrer';
+        img.style.maxWidth = '100%';
+        img.style.borderRadius = '8px';
+        selectedImage.appendChild(img);
+        const caption = document.createElement('p');
+        caption.className = 'muted';
+        caption.textContent = 'Image shown from the first successful endpoint.';
+        selectedImage.appendChild(caption);
+      };
+
+      const resetResults = () => {
+        candidateList.innerHTML = '';
+        selectedImage.innerHTML = '';
+        resultsSection.hidden = true;
+      };
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        resetResults();
+
+        const inputValue = castInput.value.trim();
+        const fidValue = normaliseFidValue(fidInput.value);
+        if (!inputValue) {
+          statusEl.textContent = 'Enter a Warpcast URL or cast hash to continue.';
+          return;
+        }
+
+        let castHash;
+        try {
+          castHash = extractCastHexFromInput(inputValue);
+        } catch (err) {
+          statusEl.textContent = err?.message || 'Unable to parse cast link. Check the format and try again.';
+          return;
+        }
+
+        let castHash20 = castHash;
+        if (/^0x[0-9a-fA-F]{64}$/.test(castHash)) {
+          try {
+            castHash20 = bytes32ToCastHash(castHash);
+          } catch (err) {
+            statusEl.textContent = 'Cast hash must represent a Farcaster 20-byte hash.';
+            return;
+          }
+        }
+
+        if (!/^0x[0-9a-fA-F]{40}$/.test(castHash20)) {
+          statusEl.textContent = 'Expected a 0x-prefixed 20-byte cast hash after normalisation.';
+          return;
+        }
+
+        const candidates = buildFarcasterOgImageCandidates(fidValue, castHash20);
+        if (candidates.length === 0) {
+          statusEl.textContent = 'No endpoints available for the supplied input.';
+          return;
+        }
+
+        statusEl.textContent = 'Testing image endpoints…';
+        resultsSection.hidden = false;
+
+        let successfulUrl = '';
+        for (const candidate of candidates) {
+          // eslint-disable-next-line no-await-in-loop
+          const result = await loadImageCandidate(candidate);
+          renderCandidateResult(result);
+          if (!successfulUrl && result.status === 'loaded') {
+            successfulUrl = result.url;
+          }
+        }
+
+        showSelectedImage(successfulUrl);
+        statusEl.textContent = successfulUrl
+          ? 'Image resolved successfully.'
+          : 'No image resolved. Review the endpoint statuses above.';
+      });
+    </script>
+  </body>
+</html>
