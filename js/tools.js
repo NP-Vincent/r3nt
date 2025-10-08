@@ -114,7 +114,22 @@ export function approxCellSizeMeters(precision) {
  * @param {string} hex
  */
 export function isHex20or32(hex) {
-  return /^0x[0-9a-fA-F]{40}$/.test(hex || '') || /^0x[0-9a-fA-F]{64}$/.test(hex || '');
+  return /^0[xX][0-9a-fA-F]{40}$/.test(hex || '') || /^0[xX][0-9a-fA-F]{64}$/.test(hex || '');
+}
+
+function normaliseCastHex(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) {
+    throw new Error('Cast hash must be provided.');
+  }
+
+  const match = trimmed.match(/^(?:0[xX])?([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/);
+  if (!match) {
+    throw new Error('Cast hash must be a 20-byte or 32-byte hex value.');
+  }
+
+  const value = match[1].toLowerCase();
+  return `0x${value}`;
 }
 
 /**
@@ -134,26 +149,37 @@ export function extractCastHexFromInput(input) {
       const url = new URL(s);
       const castHashParam = url.searchParams.get('castHash');
       if (castHashParam) {
-        const param = castHashParam.trim();
-        if (/^0x[0-9a-fA-F]+$/.test(param)) {
-          return param;
+        try {
+          return normaliseCastHex(castHashParam);
+        } catch (err) {
+          // continue searching other locations
         }
       }
-      const pathMatch = url.pathname.match(/\/0x[0-9a-fA-F]+/);
-      if (pathMatch) return pathMatch[0].slice(1);
+      const pathMatch = url.pathname.match(/\/((?:0[xX])?[0-9a-fA-F]{40,64})/);
+      if (pathMatch) {
+        try {
+          return normaliseCastHex(pathMatch[1]);
+        } catch (err) {
+          // fall through to broader scan below
+        }
+      }
     } catch (err) {
       // Fallback to raw regex match on the original string if URL parsing fails
     }
 
-    const m = s.match(/\/0x[0-9a-fA-F]+/);
-    if (m) return m[0].slice(1); // remove leading '/'
+    const urlScan = s.match(/((?:0[xX])?[0-9a-fA-F]{40,64})/);
+    if (urlScan) {
+      return normaliseCastHex(urlScan[1]);
+    }
     throw new Error('No cast hash found in URL.');
   }
 
   // (b) Raw hex
-  if (/^0x[0-9a-fA-F]+$/.test(s)) return s;
-
-  throw new Error('Enter a Warpcast URL or a 0x-prefixed cast hash.');
+  try {
+    return normaliseCastHex(s);
+  } catch (err) {
+    throw new Error('Enter a Warpcast URL or a 0x-prefixed cast hash.');
+  }
 }
 
 /**
@@ -163,7 +189,13 @@ export function extractCastHexFromInput(input) {
  * @returns {string} bytes32 hex (0x + 64 hex)
  */
 export function toBytes32FromCastHash(hex20or32) {
-  const h = String(hex20or32 || '').toLowerCase();
+  let h;
+  try {
+    h = normaliseCastHex(hex20or32);
+  } catch (err) {
+    throw new Error('Cast hash must be 0x + 40 or 64 hex characters.');
+  }
+
   if (!isHex20or32(h)) {
     throw new Error('Cast hash must be 0x + 40 or 64 hex characters.');
   }
@@ -195,7 +227,7 @@ export function bytes32ToCastHash(castHash32) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(h)) {
     throw new Error('Expected 32-byte hex for cast.');
   }
-  return '0x' + h.slice(-40);
+  return '0x' + h.slice(-40).toLowerCase();
 }
 
 /**
