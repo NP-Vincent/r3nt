@@ -71,28 +71,20 @@
       <div class="guided-section">
         <h3>1. Property basics</h3>
         <p class="section-subtext">We use these details to generate your Farcaster cast and metadata.</p>
-        <div class="field-grid columns-2">
+        <div class="field-grid">
           <label class="field-option">
             <span class="status-dot" aria-hidden="true"></span>
             <div class="field-content">
-              <span class="field-title">Latitude</span>
-              <span class="field-hint">Decimal degrees, e.g. 25.2048</span>
-              <input id="lat" placeholder="25.2048" inputmode="decimal">
-            </div>
-          </label>
-          <label class="field-option">
-            <span class="status-dot" aria-hidden="true"></span>
-            <div class="field-content">
-              <span class="field-title">Longitude</span>
-              <span class="field-hint">Decimal degrees, e.g. 55.2708</span>
+              <span class="field-title">Location (Latitude,Longitude)</span>
+              <span class="field-hint">Decimal degrees, e.g. 25.2048,55.2708</span>
               <div class="field-inline">
-                <input id="lon" placeholder="55.2708" inputmode="decimal">
+                <input id="location" placeholder="25.2048,55.2708" autocomplete="off" spellcheck="false">
                 <button type="button" id="useLocation" class="inline-button location-detect">Use my current location</button>
               </div>
             </div>
           </label>
         </div>
-        <div class="muted location-tip" id="locationTip"><small>Need coordinates? <a href="https://support.google.com/maps/answer/18539" target="_blank" rel="noopener">Right-click → “What’s here?” in Google Maps</a>.</small></div>
+        <div class="muted location-tip" id="locationTip"><small>Format: latitude,longitude. Need coordinates? <a href="https://support.google.com/maps/answer/18539" target="_blank" rel="noopener">Right-click → “What’s here?” in Google Maps</a>.</small></div>
         <div class="field-grid">
           <label class="field-option">
             <span class="status-dot" aria-hidden="true"></span>

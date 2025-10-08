@@ -6,6 +6,7 @@ import { assertLatLon, geohashToLatLon, latLonToGeohash, isHex20or32, toBytes32F
 import {
   applyListingFilters,
   DEFAULT_LISTING_SORT_MODE,
+  LISTING_LOCATION_FILTER_PATTERN,
   LISTING_LOCATION_FILTER_PRECISION,
   parseLatLonStrict as parseLatLon,
 } from './listing-filters.js';
@@ -38,6 +39,7 @@ const USDC_SCALAR = 1_000_000n;
 const GEOHASH_PRECISION = 7;
 const MANUAL_COORDS_HINT = 'Right-click → “What’s here?” in Google Maps to copy coordinates.';
 const LOCATION_FILTER_PRECISION = LISTING_LOCATION_FILTER_PRECISION;
+const LOCATION_INPUT_PATTERN = LISTING_LOCATION_FILTER_PATTERN;
 const DEFAULT_SORT_MODE = DEFAULT_LISTING_SORT_MODE;
 const BOOKING_STATUS_LABELS = ['None', 'Active', 'Completed', 'Cancelled', 'Defaulted'];
 const BOOKING_STATUS_CLASS_MAP = {
@@ -142,8 +144,7 @@ const els = {
   connect: document.getElementById('connect'),
   create: document.getElementById('create'),
   status: document.getElementById('status'),
-  lat: document.getElementById('lat'),
-  lon: document.getElementById('lon'),
+  location: document.getElementById('location'),
   useLocation: document.getElementById('useLocation'),
   title: document.getElementById('title'),
   shortDesc: document.getElementById('shortDesc'),
@@ -258,8 +259,7 @@ const landlordEventRefreshState = { timer: null, messages: new Set(), running: f
 const onboardingFields = [
   'title',
   'shortDesc',
-  'lat',
-  'lon',
+  'location',
   'areaSqm',
   'deposit',
   'rateDaily',
@@ -552,6 +552,13 @@ function parseOptionalDec6(s) {
   if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error('Use up to 6 decimals.');
   return parseUnits(v, USDC_DECIMALS);
 }
+function parseLocationInput(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) throw new Error('Location is required.');
+  const match = raw.match(LOCATION_INPUT_PATTERN);
+  if (!match) throw new Error('Enter location as "Latitude,Longitude".');
+  return parseLatLon(match[1], match[2]);
+}
 function parseAreaSqm(input) {
   const v = String(input ?? '').trim();
   if (v === '') throw new Error('Square metre area is required.');
@@ -696,8 +703,9 @@ function initGeolocationButton() {
         const latNum = Number(latitude);
         const lonNum = Number(longitude);
         assertLatLon(latNum, lonNum);
-        els.lat.value = latNum.toFixed(6);
-        els.lon.value = lonNum.toFixed(6);
+        if (els.location) {
+          els.location.value = `${latNum.toFixed(6)},${lonNum.toFixed(6)}`;
+        }
         updateOnboardingProgress();
         info('Location detected from your browser.');
         notify({
@@ -737,7 +745,7 @@ function evaluateOnboardingSteps() {
   }
 
   try {
-    parseLatLon(els.lat.value, els.lon.value);
+    parseLocationInput(els.location?.value);
     parseAreaSqm(els.areaSqm.value);
     results.location = true;
   } catch {
@@ -3052,7 +3060,7 @@ els.create.onclick = () =>
       if (deposit <= 0n) throw new Error('Deposit must be greater than zero.');
       if (rateDaily <= 0n) throw new Error('Daily rate must be greater than zero.');
 
-      const { lat, lon } = parseLatLon(els.lat.value, els.lon.value);
+      const { lat, lon } = parseLocationInput(els.location?.value);
       const geohashStr = latLonToGeohash(lat, lon, GEOHASH_PRECISION);
       const geolen = geohashStr.length;
       const areaSqm = parseAreaSqm(els.areaSqm.value);
