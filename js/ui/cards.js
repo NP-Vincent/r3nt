@@ -22,6 +22,7 @@ export function ListingCard({
   depositUSDC,
   status,
   actions = [],
+  imageUrl,
 }) {
   const visibleActions = actions.filter((a) => a?.visible !== false);
   const actionButtons = visibleActions.map((a) => el('button', { class: 'inline-button', onClick: a.onClick }, a.label));
@@ -43,7 +44,25 @@ export function ListingCard({
     headerChildren.push(el('div', { class: 'card-meta' }, metaPills));
   }
 
-  const children = [el('div', { class: 'card-header' }, headerChildren)];
+  const children = [];
+
+  const normalizedImageUrl = typeof imageUrl === 'string' ? imageUrl.trim() : '';
+  if (normalizedImageUrl) {
+    const altText = title ? `${title} preview image` : 'Listing preview image';
+    children.push(
+      el('div', { class: 'listing-card-preview-wrapper' }, [
+        el('img', {
+          class: 'listing-card-preview',
+          src: normalizedImageUrl,
+          alt: altText,
+          loading: 'lazy',
+          decoding: 'async',
+        }),
+      ]),
+    );
+  }
+
+  children.push(el('div', { class: 'card-header' }, headerChildren));
 
   if (actionButtons.length > 0) {
     children.push(el('div', { class: 'card-actions' }, actionButtons));
