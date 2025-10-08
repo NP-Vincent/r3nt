@@ -1,7 +1,7 @@
 import { sdk } from 'https://esm.sh/@farcaster/miniapp-sdk';
 import { el } from './ui/dom.js';
 
-const GEO_URI_SCHEME = 'geo:';
+const GOOGLE_MAPS_SEARCH_URL = 'https://www.google.com/maps/search/?api=1';
 
 const defaultOptions = {
   className: 'geo-map-link',
@@ -30,7 +30,8 @@ export function createOpenMapButton(options = {}) {
     return null;
   }
 
-  const href = `${GEO_URI_SCHEME}${coords}`;
+  const query = encodeURIComponent(coords);
+  const href = `${GOOGLE_MAPS_SEARCH_URL}&query=${query}`;
 
   const mapLink = el(
     'a',
